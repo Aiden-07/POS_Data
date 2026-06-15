@@ -1,0 +1,2731 @@
+const IngestionView = {
+  data: [],
+  filteredData: [],
+  activeDataMode: 'files',
+  
+  // 获取当前语言
+  getCurrentLang() {
+    return Store?.getState?.()?.lang || 'cn';
+  },
+  
+  // 处理双语文本 - 中文模式只显示中文部分
+  getLocalizedText(text) {
+    if (!text) return '-';
+    const lang = this.getCurrentLang();
+    if (lang === 'cn') {
+      // 中文模式：只显示 / 前面的中文部分
+      return text.split(' / ')[0] || text;
+    }
+    // 韩文模式：显示完整文本
+    return text;
+  },
+  
+  // 筛选状态
+  filters: {
+    fileName: '',
+    teams: []
+  },
+  
+  // 收件箱状态筛选
+  inboxStatusFilter: [],
+  
+  // 分页状态
+  pagination: {
+    page: 1,
+    pageSize: 20,
+    total: 0
+  },
+  
+  // 统计指标
+  stats: {
+    total: 450,
+    pending: 14,
+    daily: 328,
+    rate: 95.7
+  },
+  
+  async loadData() {
+    try {
+      const res = await fetch('data/files_mock.json?v=20260610-attachment-audit-columns');
+      this.data = await res.json();
+      // 添加处理人字段，并保留内部驳回备注
+      this.data = this.data.map(row => ({
+        ...row,
+        handler: row.status.includes('异常') ? row.team : 'POS担当',
+        remark: row.remark || ''
+      }));
+      this.loadFiltersFromCache();
+      this.applyFilters();
+      this.renderInbox();
+    } catch (e) {
+      console.error('Failed to load mock data', e);
+      this.showEmptyState();
+    }
+  },
+  
+  // 本地缓存
+  saveFiltersToCache() {
+    localStorage.setItem('ingestion_filters', JSON.stringify(this.filters));
+    localStorage.setItem('ingestion_pagination', JSON.stringify({ page: this.pagination.page }));
+  },
+  
+  loadFiltersFromCache() {
+    const savedFilters = localStorage.getItem('ingestion_filters');
+    const savedPagination = localStorage.getItem('ingestion_pagination');
+    
+    if (savedFilters) {
+      const parsed = JSON.parse(savedFilters);
+      this.filters = { ...this.filters, ...parsed };
+    }
+    
+    if (savedPagination) {
+      const parsed = JSON.parse(savedPagination);
+      this.pagination.page = parsed.page || 1;
+    }
+  },
+  
+  // 筛选逻辑
+  applyFilters() {
+    let result = [...this.data];
+
+    if (this.activeDataMode === 'archive') {
+      result = result.filter(row => row.status.includes('已归档'));
+    } else {
+      result = result.filter(row => !row.status.includes('已归档'));
+    }
+    
+    // 文件名称筛选
+    if (this.filters.fileName) {
+      const keyword = this.filters.fileName.toLowerCase();
+      result = result.filter(row => 
+        row.fileName.toLowerCase().includes(keyword)
+      );
+    }
+    
+    // Team筛选：row.team 是中韩双语格式（如 "华北 Team / 화북 Team"），
+    // checkbox value 是纯中文（如 "华北 Team"），用 includes 做包含匹配
+    if (this.filters.teams.length > 0) {
+      result = result.filter(row =>
+        this.filters.teams.some(team => row.team.includes(team))
+      );
+    }
+    
+    this.filteredData = result;
+    this.pagination.total = result.length;
+    this.pagination.page = 1;
+    this.saveFiltersToCache();
+    if (this.activeDataMode === 'stash') {
+      this.renderStashTable();
+      return;
+    }
+    this.renderTable();
+    this.updateBatchButtons();
+  },
+  
+  // 防抖
+  debounceTimer: null,
+  debounce(fn, delay = 300) {
+    clearTimeout(this.debounceTimer);
+    this.debounceTimer = setTimeout(fn, delay);
+  },
+  
+  // 重置筛选
+  resetFilters() {
+    this.filters = {
+      fileName: '',
+      teams: []
+    };
+    this.pagination.page = 1;
+    this.saveFiltersToCache();
+    this.applyFilters();
+  },
+  
+  renderAction() {
+    return `
+      <div class="flex items-center text-sm text-[#1d2129] font-bold mr-6">
+        <span class="w-1 h-4 bg-brand rounded-full mr-2"></span>
+        <span data-i18n="nav_ingestion">文件收取</span>
+      </div>
+    `;
+  },
+  
+  render() {
+    this.loadData();
+    const cn = this.getCurrentLang() === 'cn';
+    return `
+      <!-- 数据看板 -->
+      <div class="grid grid-cols-1 xl:grid-cols-[1.6fr_0.7fr] gap-3 mb-3 animate-[fadeIn_0.4s_ease-out]">
+        <section class="bg-white/90 backdrop-blur-md rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.06)] border border-white px-4 py-3">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center min-w-0">
+              <h3 class="text-sm font-bold text-[#1d2129] whitespace-nowrap">${cn ? '各区域文件收取情况' : '각 지역 파일 수집 현황'}</h3>
+            </div>
+            <div class="w-8 h-8 rounded-lg bg-blue-50 text-brand flex items-center justify-center">
+              <i class="fa-solid fa-chart-column"></i>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <div class="rounded-lg border border-gray-100 bg-[#f7f9fc] px-3 py-2">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-semibold text-[#1d2129]">${cn ? '华北区域' : '화북 지역'}</span>
+                <span class="text-[11px] font-bold text-brand">85%</span>
+              </div>
+              <div class="flex items-baseline gap-1.5 whitespace-nowrap">
+                <span class="text-xs text-[#86909c]">${cn ? '已收' : '수신'}</span>
+                <span class="text-sm font-black text-brand">42</span>
+                <span class="text-xs text-[#86909c]">/ ${cn ? '异常' : '이상'}</span>
+                <span class="text-sm font-black text-red-500">3</span>
+                <span class="text-xs text-[#86909c]">/ ${cn ? '应收50' : '예정 50'}</span>
+              </div>
+              <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
+                <div class="h-full bg-brand" style="width: 84%"></div>
+                <div class="h-full bg-red-500" style="width: 6%"></div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-gray-100 bg-[#f7f9fc] px-3 py-2">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-semibold text-[#1d2129]">${cn ? '东北区域' : '동북 지역'}</span>
+                <span class="text-[11px] font-bold text-brand">80%</span>
+              </div>
+              <div class="flex items-baseline gap-1.5 whitespace-nowrap">
+                <span class="text-xs text-[#86909c]">${cn ? '已收' : '수신'}</span>
+                <span class="text-sm font-black text-brand">32</span>
+                <span class="text-xs text-[#86909c]">/ ${cn ? '异常' : '이상'}</span>
+                <span class="text-sm font-black text-red-500">2</span>
+                <span class="text-xs text-[#86909c]">/ ${cn ? '应收40' : '예정 40'}</span>
+              </div>
+              <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
+                <div class="h-full bg-brand" style="width: 80%"></div>
+                <div class="h-full bg-red-500" style="width: 5%"></div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-gray-100 bg-[#f7f9fc] px-3 py-2">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-semibold text-[#1d2129]">${cn ? '华东区域' : '화동 지역'}</span>
+                <span class="text-[11px] font-bold text-brand">88%</span>
+              </div>
+              <div class="flex items-baseline gap-1.5 whitespace-nowrap">
+                <span class="text-xs text-[#86909c]">${cn ? '已收' : '수신'}</span>
+                <span class="text-sm font-black text-brand">53</span>
+                <span class="text-xs text-[#86909c]">/ ${cn ? '异常' : '이상'}</span>
+                <span class="text-sm font-black text-red-500">2</span>
+                <span class="text-xs text-[#86909c]">/ ${cn ? '应收60' : '예정 60'}</span>
+              </div>
+              <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
+                <div class="h-full bg-brand" style="width: 88%"></div>
+                <div class="h-full bg-red-500" style="width: 3%"></div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-gray-100 bg-[#f7f9fc] px-3 py-2">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-semibold text-[#1d2129]">${cn ? '华中区域' : '화중 지역'}</span>
+                <span class="text-[11px] font-bold text-brand">90%</span>
+              </div>
+              <div class="flex items-baseline gap-1.5 whitespace-nowrap">
+                <span class="text-xs text-[#86909c]">${cn ? '已收' : '수신'}</span>
+                <span class="text-sm font-black text-brand">27</span>
+                <span class="text-xs text-[#86909c]">/ ${cn ? '异常' : '이상'}</span>
+                <span class="text-sm font-black text-red-500">1</span>
+                <span class="text-xs text-[#86909c]">/ ${cn ? '应收30' : '예정 30'}</span>
+              </div>
+              <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
+                <div class="h-full bg-brand" style="width: 90%"></div>
+                <div class="h-full bg-red-500" style="width: 3%"></div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-gray-100 bg-[#f7f9fc] px-3 py-2">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-semibold text-[#1d2129]">${cn ? '华南区域' : '화남 지역'}</span>
+                <span class="text-[11px] font-bold text-brand">84%</span>
+              </div>
+              <div class="flex items-baseline gap-1.5 whitespace-nowrap">
+                <span class="text-xs text-[#86909c]">${cn ? '已收' : '수신'}</span>
+                <span class="text-sm font-black text-brand">21</span>
+                <span class="text-xs text-[#86909c]">/ ${cn ? '异常' : '이상'}</span>
+                <span class="text-sm font-black text-red-500">1</span>
+                <span class="text-xs text-[#86909c]">/ ${cn ? '应收25' : '예정 25'}</span>
+              </div>
+              <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
+                <div class="h-full bg-brand" style="width: 84%"></div>
+                <div class="h-full bg-red-500" style="width: 4%"></div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-gray-100 bg-[#f7f9fc] px-3 py-2">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-semibold text-[#1d2129]">${cn ? '西北区域' : '서북 지역'}</span>
+                <span class="text-[11px] font-bold text-brand">75%</span>
+              </div>
+              <div class="flex items-baseline gap-1.5 whitespace-nowrap">
+                <span class="text-xs text-[#86909c]">${cn ? '已收' : '수신'}</span>
+                <span class="text-sm font-black text-brand">15</span>
+                <span class="text-xs text-[#86909c]">/ ${cn ? '异常' : '이상'}</span>
+                <span class="text-sm font-black text-red-500">1</span>
+                <span class="text-xs text-[#86909c]">/ ${cn ? '应收20' : '예정 20'}</span>
+              </div>
+              <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
+                <div class="h-full bg-brand" style="width: 75%"></div>
+                <div class="h-full bg-red-500" style="width: 5%"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="bg-white/90 backdrop-blur-md rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.06)] border border-white px-4 py-3 flex flex-col justify-between">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-bold text-[#1d2129]">${cn ? '文件收取率' : '파일 수집률'}</h3>
+              <p class="text-[11px] text-[#86909c] mt-0.5">${cn ? '已收文件 / 应收文件' : '수신 파일 / 예정 파일'}</p>
+            </div>
+            <div class="w-8 h-8 rounded-lg bg-green-50 text-green-600 flex items-center justify-center">
+              <i class="fa-solid fa-file-circle-check"></i>
+            </div>
+          </div>
+          <div class="mt-2 flex flex-1 items-center justify-between gap-4">
+            <div class="min-w-0">
+              <div class="text-[34px] leading-none font-black text-brand">95.7%</div>
+              <div class="mt-5 inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs text-[#4e5969]">
+                <span class="font-bold text-[#1d2129]">430</span>
+                <span class="text-[#86909c]">/ 450 ${cn ? '文件' : '파일'}</span>
+              </div>
+            </div>
+            <div class="relative w-[72px] h-[72px] rounded-full flex items-center justify-center shrink-0" style="background: conic-gradient(#165dff 344deg, #e8f0ff 0deg);">
+              <div class="w-12 h-12 rounded-full bg-white shadow-inner flex items-center justify-center text-sm font-bold text-brand">95.7%</div>
+            </div>
+          </div>
+          <div class="mt-2 h-2 rounded-full bg-blue-100 overflow-hidden">
+            <div class="h-full rounded-full bg-brand" style="width: 95.7%"></div>
+          </div>
+        </section>
+      </div>
+      <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.06)] border border-white flex flex-col h-[calc(100vh-280px)] overflow-hidden animate-[fadeIn_0.4s_ease-out]">
+        <!-- 标签切换 -->
+        <div class="px-7 py-4 border-b border-gray-100 flex gap-2 bg-white shrink-0">
+          <button type="button" id="tab-original" class="px-4 py-2 text-sm font-medium text-brand bg-blue-50 rounded-lg transition-all border border-blue-200">
+            ${this.getCurrentLang() === 'cn' ? '收件箱' : '받은 편지함'}
+          </button>
+          <button type="button" id="tab-files" class="px-4 py-2 text-sm text-[#86909c] hover:text-[#1d2129] hover:bg-gray-50 rounded-lg transition-all border border-transparent">
+            ${this.getCurrentLang() === 'cn' ? '原始门店数据列表' : '원본 매장 데이터 목록'}
+          </button>
+          <button type="button" id="tab-archive" class="px-4 py-2 text-sm text-[#86909c] hover:text-[#1d2129] hover:bg-gray-50 rounded-lg transition-all border border-transparent">
+            ${this.getCurrentLang() === 'cn' ? '归档（非POS表）' : '보관(비POS표)'}
+          </button>
+          <button type="button" id="tab-stash" class="px-4 py-2 text-sm text-[#86909c] hover:text-[#1d2129] hover:bg-gray-50 rounded-lg transition-all border border-transparent">
+            ${this.getCurrentLang() === 'cn' ? '暂存数据' : '임시 저장 데이터'}
+          </button>
+        </div>
+        
+        <!-- 筛选区 -->
+        <div class="px-7 py-4 border-b border-gray-100 bg-white shrink-0">
+          <div class="flex items-center gap-4 flex-wrap">
+            <!-- 文件名称搜索 -->
+            <div class="relative">
+              <input type="text" id="filter-filename" placeholder="${this.getCurrentLang() === 'cn' ? '请输入文件名称模糊搜索' : '파일명 검색'}" 
+                class="pl-10 pr-4 py-2 w-56 border border-gray-200 rounded-lg text-sm text-[#4e5969] focus:outline-none focus:border-brand transition-all"
+                value="${this.filters.fileName}">
+              <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#86909c]"></i>
+            </div>
+            
+            <!-- 收件箱状态多选 -->
+            <div class="relative hidden" id="inbox-status-wrapper">
+              <button type="button" id="inbox-status-btn" 
+                class="px-4 py-2 w-36 border border-gray-200 rounded-lg text-sm text-[#4e5969] bg-white text-left flex items-center justify-between gap-2 focus:outline-none focus:border-brand transition-all">
+                <span id="inbox-status-label">${this.getCurrentLang() === 'cn' ? '全部状态' : '전체 상태'}</span>
+                <i class="fa-solid fa-chevron-down text-xs"></i>
+              </button>
+              <div id="inbox-status-dropdown" class="hidden absolute top-full left-0 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-2">
+                <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                  <input type="checkbox" id="inbox-status-select-all" class="rounded border-gray-300 text-brand">
+                  <span class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? '全选' : '전체 선택'}</span>
+                </label>
+                <div class="border-t border-gray-100 my-1"></div>
+                ${[['正常', '정상'], ['全部异常', '전체 이상'], ['部分异常', '부분 이상']].map(([val, label]) => `
+                  <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                    <input type="checkbox" value="${val}" class="inbox-status-checkbox rounded border-gray-300 text-brand" ${this.inboxStatusFilter.includes(val) ? 'checked' : ''}>
+                    <span class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? val : label}</span>
+                  </label>
+                `).join('')}
+              </div>
+            </div>
+            
+            <!-- 营业Team多选 -->
+            <div class="relative hidden" id="team-select-wrapper">
+              <button type="button" id="team-select-btn" 
+                class="px-4 py-2 w-40 border border-gray-200 rounded-lg text-sm text-[#4e5969] bg-white text-left flex items-center justify-between gap-2 focus:outline-none focus:border-brand transition-all">
+                <span id="team-select-label">全部 Team</span>
+                <i class="fa-solid fa-chevron-down text-xs"></i>
+              </button>
+              <div id="team-dropdown" class="hidden absolute top-full left-0 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-2">
+                <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                  <input type="checkbox" id="team-select-all" class="rounded border-gray-300 text-brand">
+                  <span class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? '全选' : '전체 선택'}</span>
+                </label>
+                <div class="border-t border-gray-100 my-1"></div>
+                ${['华北 Team', '东北 Team', '华东 Team', '华中 Team', '华南 Team', '西南 Team', '西北 Team'].map(team => `
+                  <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                    <input type="checkbox" value="${team}" class="team-checkbox rounded border-gray-300 text-brand" ${this.filters.teams.includes(team) ? 'checked' : ''}>
+                    <span class="text-sm text-[#4e5969]">${this.getLocalizedText(team)}</span>
+                  </label>
+                `).join('')}
+              </div>
+            </div>
+            
+            <!-- 重置按钮 -->
+            <button type="button" id="btn-reset-filter" 
+              class="px-4 py-2 text-sm text-[#86909c] hover:text-[#1d2129] hover:bg-gray-50 rounded-lg transition-all">
+              <i class="fa-solid fa-rotate-left mr-1"></i>${this.getCurrentLang() === 'cn' ? '重置筛选' : '筛选 초기화'}
+            </button>
+            
+            <!-- 批量操作区 -->
+            <div class="ml-auto flex items-center gap-2">
+              <input type="file" id="upload-file-input" class="hidden" accept=".xlsx,.xls,.csv,.zip">
+              <button type="button" id="btn-upload-file"
+                class="px-4 py-2 bg-brand hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:shadow-brand/30 hover:-translate-y-0.5">
+                <i class="fa-solid fa-upload mr-1"></i>${this.getCurrentLang() === 'cn' ? '上传文件' : '파일 업로드'}
+              </button>
+              <button type="button" id="btn-batch-archive" disabled
+                class="hidden px-4 py-2 border border-gray-200 text-[#86909c] rounded-lg bg-gray-50 text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                data-action="archive" title="${this.getCurrentLang() === 'cn' ? '请先勾选至少一条数据' : '최소 1개 데이터를 선택하세요'}">
+                <i class="fa-solid fa-folder-minus mr-1"></i>${this.getCurrentLang() === 'cn' ? '归档(非POS表)' : '보관'}
+              </button>
+              <button type="button" id="btn-batch-approve" disabled
+                class="hidden px-4 py-2 bg-[#86909c] text-white rounded-lg text-sm font-medium transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                data-action="approve" title="${this.getCurrentLang() === 'cn' ? '请先勾选至少一条数据' : '최소 1개 데이터를 선택하세요'}">
+                <i class="fa-solid fa-check mr-1"></i>${this.getCurrentLang() === 'cn' ? '通过' : '승인'}
+              </button>
+              <button type="button" id="btn-batch-reject" disabled
+                class="hidden px-4 py-2 border border-gray-200 bg-gray-100 text-[#86909c] rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                data-action="reject" title="${this.getCurrentLang() === 'cn' ? '请先勾选至少一条数据' : '최소 1개 데이터를 선택하세요'}">
+                <i class="fa-solid fa-xmark mr-1"></i>${this.getCurrentLang() === 'cn' ? '驳回' : '거부'}
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 收件箱视图 -->
+        <div class="overflow-auto flex-1 relative px-2" id="original-attachment">
+          <div id="inbox-loading" class="flex items-center justify-center py-16">
+            <div class="flex flex-col items-center gap-3">
+              <div class="w-10 h-10 border-4 border-blue-200 border-t-brand rounded-full animate-spin"></div>
+              <span class="text-sm text-[#86909c]">${this.getCurrentLang() === 'cn' ? '加载中...' : '로딩 중...'}</span>
+            </div>
+          </div>
+          <div id="inbox-table-container" class="hidden"></div>
+          <div id="inbox-empty" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-white z-10">
+            <div class="w-24 h-24 mb-4 text-[#d1d5db]">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M12 11v4m0 0l-2-2m2 2l2-2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <p class="text-[#86909c] text-base">${this.getCurrentLang() === 'cn' ? '暂无收件箱数据' : '받은 편지함 데이터가 없습니다'}</p>
+          </div>
+        </div>
+        
+        <!-- 表格区 -->
+        <div class="overflow-auto flex-1 relative px-2 hidden" id="table-container">
+          <div id="loading-state" class="hidden absolute inset-0 bg-white/80 flex items-center justify-center z-20">
+            <div class="flex flex-col items-center gap-3">
+              <div class="w-10 h-10 border-4 border-blue-200 border-t-brand rounded-full animate-spin"></div>
+              <span class="text-sm text-[#86909c]">${this.getCurrentLang() === 'cn' ? '加载中...' : '로딩 중...'}</span>
+            </div>
+          </div>
+          
+          <table class="w-full text-left text-sm text-[#4e5969]" id="ingestion-table">
+            <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
+              <tr>
+                <th class="px-5 py-4 w-12 rounded-tl-lg">
+                  <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-brand focus:ring-brand">
+                </th>
+                <th class="px-3 py-4 max-w-44">${this.getCurrentLang() === 'cn' ? '文件名称' : '파일명'}</th>
+                <th class="px-4 py-4 min-w-44">${this.getCurrentLang() === 'cn' ? '来源邮件' : '출처 이메일'}</th>
+                <th class="px-4 py-4 min-w-36">${this.getCurrentLang() === 'cn' ? '来源附件' : '출처 첨부'}</th>
+                <th class="px-5 py-4">${this.getCurrentLang() === 'cn' ? '营业Team' : '영업 Team'}</th>
+                <th class="px-5 py-4">
+                  <div class="flex items-center gap-1">
+                    ${this.getCurrentLang() === 'cn' ? '处理人' : '처리자'}
+                    <i class="fa-solid fa-circle-info text-xs text-[#86909c] cursor-help" title="${this.getCurrentLang() === 'cn' ? '处理人信息' : '처리자 정보'}"></i>
+                  </div>
+                </th>
+                <th class="px-5 py-4 w-24 rounded-tr-lg">
+                  <div class="flex items-center gap-1">
+                    ${this.getCurrentLang() === 'cn' ? '操作' : '조작'}
+                    <i class="fa-solid fa-circle-info text-xs text-[#86909c] cursor-help" title="${this.getCurrentLang() === 'cn' ? '操作按钮' : '조작 버튼'}"></i>
+                  </div>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="ingestion-tbody" class="divide-y divide-gray-100">
+              <tr><td colspan="7" class="text-center py-12 text-[#86909c]">Loading...</td></tr>
+            </tbody>
+          </table>
+          
+          <!-- 空状态 -->
+          <div id="empty-state" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-white z-10">
+            <div class="w-24 h-24 mb-4 text-[#d1d5db]">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M12 11v4m0 0l-2-2m2 2l2-2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <p class="text-[#86909c] text-base mb-4">${this.getCurrentLang() === 'cn' ? '暂无符合条件的文件数据' : '조건에 맞는 데이터가 없습니다'}</p>
+            <button type="button" id="btn-empty-reset" class="px-4 py-2 text-sm text-brand border border-brand rounded-lg hover:bg-blue-50 transition-all">
+              ${this.getCurrentLang() === 'cn' ? '重置筛选' : '筛选 초기화'}
+            </button>
+          </div>
+        </div>
+
+        <div class="overflow-auto flex-1 relative px-2 hidden" id="ingestion-stash-container"></div>
+        
+        <!-- 分页 -->
+        <div id="pagination-area" class="px-7 py-4 border-t border-gray-100 bg-white shrink-0 flex items-center justify-between">
+          <div class="text-sm text-[#86909c]">
+            ${this.getCurrentLang() === 'cn' ? '共' : '총'} <span id="total-count">0</span> ${this.getCurrentLang() === 'cn' ? '条数据' : '개 데이터'}
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" id="btn-prev-page" class="px-3 py-1.5 text-xs rounded bg-gray-100 text-[#4e5969] hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all" disabled>
+              <i class="fa-solid fa-chevron-left mr-1"></i>${this.getCurrentLang() === 'cn' ? '上一页' : '이전'}
+            </button>
+            <div id="page-numbers" class="flex items-center gap-1"></div>
+            <button type="button" id="btn-next-page" class="px-3 py-1.5 text-xs rounded bg-gray-100 text-[#4e5969] hover:bg-gray-200 transition-all">
+              ${this.getCurrentLang() === 'cn' ? '下一页' : '다음'}<i class="fa-solid fa-chevron-right ml-1"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+  
+  showLoading() {
+    document.getElementById('loading-state')?.classList.remove('hidden');
+  },
+  
+  hideLoading() {
+    document.getElementById('loading-state')?.classList.add('hidden');
+  },
+  
+  showEmptyState() {
+    document.getElementById('empty-state')?.classList.remove('hidden');
+    document.getElementById('ingestion-tbody')?.classList.add('hidden');
+  },
+  
+  hideEmptyState() {
+    document.getElementById('empty-state')?.classList.add('hidden');
+    document.getElementById('ingestion-tbody')?.classList.remove('hidden');
+  },
+  
+  // 生成收件箱数据（含每个邮件的附件明细）
+  // 缓存：编辑后的附件名会存储在 inboxDataCache 中
+  inboxDataCache: null,
+  
+  getInboxData() {
+    if (this.inboxDataCache && this.inboxDataCache.length > 0) {
+      return this.inboxDataCache;
+    }
+    
+    // 驳回原因池
+    const rejectionReasons = [
+      '压缩包损坏',
+      '压缩包无法打开',
+      '文件无法打开',
+      '文件格式错误',
+      '数据不完整',
+      '文件字段缺失',
+      '日期格式错误',
+      '销售额为空'
+    ];
+
+    // 驳回原因 → AI建议 对应关系
+    const rejectionToSuggestion = {
+      '压缩包损坏': '压缩包损坏，请核对源文件后重新上传，确保压缩包完整性',
+      '压缩包无法打开': '压缩包无法打开，请检查压缩包是否加密或分卷后重新上传',
+      '文件无法打开': '文件无法打开，请检查文件是否损坏，使用标准Excel格式重新上传',
+      '文件格式错误': '文件格式不正确，请使用标准POS数据模板重新上传',
+      '数据不完整': '数据不完整，请补充缺失的销售记录行后重新上传',
+      '文件字段缺失': '文件字段缺失，请按照POS数据模板补充必要字段（条码、商品名称、数量、单价）后重新上传',
+      '日期格式错误': '日期格式错误，请使用YYYY-MM-DD标准格式填写销售日期后重新上传',
+      '销售额为空': '销售额数据为空，请核实销售金额并填写后重新上传',
+      '文件损坏、打不开': '文件损坏且无法打开，请重新导出可打开的原始文件后上传',
+      '文件加密，打不开': '文件加密且无法打开，请提供未加密的原始文件后重新上传',
+      '门店名称或者门店编码缺失': '门店名称或门店编号缺失，请修改文件标题确保包含正确的门店信息后重新上传',
+    };
+    
+    // 定义异常邮件索引及异常类型（只有3-4条异常数据）
+    // type: 'all'=全部异常, 'partial'=部分异常
+    const abnormalMap = {
+      4: { type: 'all' },
+      5: { type: 'all', reason: '门店名称或者门店编码缺失' },
+      11: { type: 'partial' },
+      18: { type: 'partial' }
+    };
+    
+    const inboxItems = this.data.map((row, idx) => {
+      const storeNameCN = row.storeName ? row.storeName.split(' / ')[0] : row.fileName;
+      const isZip = /\.zip$/i.test(row.fileName);
+      
+      // 材料提供人
+      const providers = [
+        'zhangsan@orion.cn',
+        'lisi@orion.cn',
+        'wangwu@orion.cn',
+        'zhaoliu@orion.cn',
+        'chenqi@orion.cn',
+        'liuba@orion.cn',
+        'zhoujiu@orion.cn',
+        'wushi@orion.cn',
+        'zhengshiyi@orion.cn',
+        'qianshier@orion.cn'
+      ];
+      const provider = providers[idx % providers.length];
+      
+      // 材料提供时间（从uploadTime提取日期部分）
+      const uploadTime = row.uploadTime || '';
+      const dateMatch = uploadTime.match(/(\d{4})-(\d{2})-(\d{2})/);
+      const provideTime = dateMatch
+        ? `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`
+        : `2026-0${1 + (idx % 6)}-${String(1 + (idx % 28)).padStart(2, '0')}`;
+      
+      // 生成模拟附件列表（2-4个附件）
+      const attachmentCount = 2 + (idx % 3);
+      const attachments = [];
+      const sourceMethods = ['邮件上传', '系统上传', '邮件上传'];
+      const abnormalCfg = abnormalMap[idx];
+      
+      for (let i = 0; i < attachmentCount; i++) {
+        let status = '正常';
+        let rejectReason = '-';
+        
+        if (abnormalCfg) {
+          if (abnormalCfg.type === 'all') {
+            // 全部异常：所有附件都驳回，使用统一驳回原因
+            status = '驳回';
+            rejectReason = idx === 4
+              ? '文件损坏、打不开'
+              : abnormalCfg.reason || rejectionReasons[(idx + i) % rejectionReasons.length];
+          } else if (abnormalCfg.type === 'partial') {
+            // 部分异常：一半正常一半驳回
+            status = (i % 2 === 1) ? '驳回' : '正常';
+            rejectReason = status === '驳回'
+              ? (idx === 11 ? '文件加密，打不开' : rejectionReasons[(idx + i) % rejectionReasons.length])
+              : '-';
+          }
+        }
+        
+        attachments.push({
+          name: isZip && i === 0
+            ? `${storeNameCN}-数据压缩包.zip`
+            : `${storeNameCN}${i > 0 ? '-' + (i + 1) : ''}-销售明细.xlsx`,
+          status,
+          rejectReason,
+          sourceMethod: sourceMethods[(idx + i) % sourceMethods.length]
+        });
+      }
+      
+      // 判断邮件状态
+      const allNormal = attachments.every(a => a.status === '正常');
+      const allRejected = attachments.every(a => a.status !== '正常');
+      const hasAbnormal = attachments.some(a => a.status !== '正常');
+      
+      let statusText = '正常';
+      let isNormal = true;
+      
+      if (allRejected) {
+        statusText = '全部异常';
+        isNormal = false;
+      } else if (hasAbnormal && !allNormal) {
+        statusText = '部分异常';
+        isNormal = false;
+      }
+      
+      // AI建议：根据附件驳回原因生成对应的建议
+      let suggestion = '-';
+      if (!isNormal) {
+        const rejectedReasons = attachments
+          .filter(a => a.status !== '正常')
+          .map(a => a.rejectReason)
+          .filter(r => r && r !== '-');
+        const uniqueReasons = [...new Set(rejectedReasons)];
+        suggestion = uniqueReasons
+          .map(r => rejectionToSuggestion[r] || r)
+          .join('；');
+      }
+      
+      const emailSubject = isZip
+        ? `【POS数据】${storeNameCN} 数据压缩包`
+        : `【POS数据】${storeNameCN} 12月门店数据`;
+      
+      const emailBody = isZip
+        ? `请查收${storeNameCN}POS数据压缩包，解压后进行标准化处理。`
+        : `请查收${storeNameCN}12月POS数据附件，烦请完成收取与质检。`;
+      
+      return {
+        id: row.id,
+        index: idx + 1,
+        emailSubject,
+        emailBody,
+        attachmentCount,
+        isNormal,
+        statusText,
+        suggestion,
+        provider,
+        provideTime,
+        attachments
+      };
+    });
+    
+    this.inboxDataCache = inboxItems;
+    return inboxItems;
+  },
+  
+  renderInbox() {
+    const loading = document.getElementById('inbox-loading');
+    const tableContainer = document.getElementById('inbox-table-container');
+    const empty = document.getElementById('inbox-empty');
+    
+    if (!tableContainer) return;
+    
+    const inboxData = this.getInboxData();
+    
+    // 收件箱状态筛选
+    let filteredInboxData = inboxData;
+    if (this.inboxStatusFilter.length > 0) {
+      filteredInboxData = inboxData.filter(item => this.inboxStatusFilter.includes(item.statusText));
+    }
+    
+    if (filteredInboxData.length === 0) {
+      if (loading) loading.classList.add('hidden');
+      if (tableContainer) tableContainer.classList.add('hidden');
+      if (empty) empty.classList.remove('hidden');
+      return;
+    }
+    
+    if (loading) loading.classList.add('hidden');
+    if (empty) empty.classList.add('hidden');
+    tableContainer.classList.remove('hidden');
+    
+    const cn = this.getCurrentLang() === 'cn';
+    
+    tableContainer.innerHTML = `
+      <table class="w-full min-w-[1200px] text-left text-sm text-[#4e5969]" id="inbox-table">
+        <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
+          <tr>
+            <th class="px-3 py-3 w-12"></th>
+            <th class="px-3 py-3 w-12">序号</th>
+            <th class="px-4 py-3 min-w-[280px]">${cn ? '邮件标题' : '이메일 제목'}</th>
+            <th class="px-4 py-3 min-w-[200px]">${cn ? '正文内容' : '본문 내용'}</th>
+            <th class="px-4 py-3 w-24 text-center">${cn ? '邮件附件数' : '첨부 수'}</th>
+            <th class="px-4 py-3 w-32 text-center whitespace-nowrap">${cn ? '状态' : '상태'}</th>
+            <th class="px-4 py-3 w-44">${cn ? '材料提供人' : '제공자'}</th>
+            <th class="px-4 py-3 w-32">${cn ? '材料提供时间' : '제공 시간'}</th>
+            <th class="px-4 py-3 min-w-[180px]">${cn ? 'AI建议' : 'AI 제안'}</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100" id="inbox-tbody">
+          ${filteredInboxData.map(item => this.renderInboxRow(item)).join('')}
+        </tbody>
+      </table>
+    `;
+    
+    this.bindInboxEvents();
+  },
+  
+  renderInboxRow(item) {
+    return `
+      <tr class="inbox-master-row hover:bg-slate-50 transition-colors cursor-pointer" data-id="${item.id}">
+        <td class="px-3 py-3 text-center">
+          <button type="button" class="inbox-expand-btn w-6 h-6 rounded flex items-center justify-center text-[#86909c] hover:text-brand hover:bg-blue-50 transition-all" data-id="${item.id}">
+            <i class="fa-solid fa-chevron-right text-xs transition-transform duration-200"></i>
+          </button>
+        </td>
+        <td class="px-3 py-3 font-medium text-[#1d2129]">${item.index}</td>
+        <td class="px-4 py-3">
+          <div class="max-w-[360px] truncate font-medium text-[#1d2129]" title="${this.escapeHtml(item.emailSubject)}">${this.escapeHtml(item.emailSubject)}</div>
+        </td>
+        <td class="px-4 py-3">
+          <div class="hover-tip max-w-[280px] truncate text-[#4e5969]" data-tip="${this.escapeHtml(item.emailBody)}">${this.escapeHtml(item.emailBody)}</div>
+        </td>
+        <td class="px-4 py-3 text-center">
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-[#4e5969]">${item.attachmentCount}</span>
+        </td>
+        <td class="px-4 py-3 text-center">
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold border ${item.statusText === '正常' ? 'bg-green-50 text-green-700 border-green-100' : item.statusText === '全部异常' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-amber-50 text-amber-600 border-amber-100'}">
+            ${item.statusText}
+          </span>
+        </td>
+        <td class="px-4 py-3">
+          <span class="block max-w-[168px] truncate text-sm text-[#1d2129]" title="${this.escapeHtml(item.provider)}">${this.escapeHtml(item.provider)}</span>
+        </td>
+        <td class="px-4 py-3">
+          <span class="text-sm text-[#4e5969]">${item.provideTime}</span>
+        </td>
+        <td class="px-4 py-3">
+          <div class="hover-tip max-w-xs truncate ${item.isNormal ? 'text-[#86909c]' : item.statusText === '全部异常' ? 'text-red-600' : 'text-amber-600'}" data-tip="${this.escapeHtml(item.suggestion)}">${this.escapeHtml(item.suggestion)}</div>
+        </td>
+      </tr>
+    `;
+  },
+  
+  renderInboxDetailRow(item) {
+    const cn = this.getCurrentLang() === 'cn';
+    return `
+      <tr class="inbox-detail-row hidden" data-parent-id="${item.id}">
+        <td colspan="9" class="p-0 bg-[#f7faff]">
+          <div class="px-8 py-4 border-t border-blue-100">
+            <table class="w-full text-left text-xs text-[#4e5969] border border-gray-100 rounded-lg overflow-hidden">
+              <thead class="bg-[#eef2fb] text-[#1d2129] font-semibold">
+                <tr>
+                  <th class="px-4 py-2.5 w-[140px]">${cn ? '附件名称' : '첨부 파일명'}</th>
+                  <th class="px-4 py-2.5 w-20 text-center">${cn ? '附件状态' : '첨부 상태'}</th>
+                  <th class="px-4 py-2.5 w-[140px]">${cn ? '驳回说明' : '거부 사유'}</th>
+                  <th class="px-4 py-2.5 w-24">${cn ? '来源方式' : '출처 방식'}</th>
+                  <th class="px-4 py-2.5 w-20 text-center">${cn ? '操作' : '조작'}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100 bg-white">
+                ${item.attachments.map((att, i) => this.renderAttachmentRow(item.id, att, i)).join('')}
+              </tbody>
+            </table>
+          </div>
+        </td>
+      </tr>
+    `;
+  },
+  
+  renderAttachmentRow(emailId, att, index) {
+    const isRejected = att.status === '驳回';
+    const isArchived = att.status === '已归档';
+    return `
+      <tr class="hover:bg-slate-50 transition-colors" data-email-id="${emailId}" data-att-idx="${index}">
+        <td class="px-4 py-2.5 max-w-0">
+          <span class="inbox-att-name-text cursor-pointer text-brand hover:text-blue-700 hover:underline transition-colors truncate block" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '点击预览' : '클릭하여 미리보기'}">${this.escapeHtml(att.name)}</span>
+        </td>
+        <td class="px-4 py-2.5 text-center">
+          <span class="px-2 py-0.5 rounded-full text-xs font-semibold border ${isRejected ? 'bg-red-50 text-red-600 border-red-100' : isArchived ? 'bg-slate-50 text-slate-500 border-slate-100' : 'bg-green-50 text-green-700 border-green-100'}">
+            ${att.status}
+          </span>
+        </td>
+        <td class="px-4 py-2.5 ${isRejected ? 'text-red-600' : 'text-[#86909c]'}">${this.escapeHtml(att.rejectReason)}</td>
+        <td class="px-4 py-2.5 text-[#4e5969]">${att.sourceMethod}</td>
+        <td class="px-4 py-2.5 text-center">
+          <div class="flex items-center justify-center gap-1.5">
+            <button type="button" class="inbox-att-preview-btn px-2 py-1 text-xs rounded text-slate-500 hover:bg-slate-100 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '预览附件' : '첨부 미리보기'}">
+              <i class="fa-regular fa-eye"></i>
+            </button>
+            <button type="button" class="inbox-att-archive-btn px-2 py-1 text-xs rounded text-[#86909c] hover:bg-gray-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '归档' : '보관'}">
+              <i class="fa-solid fa-folder-minus"></i>
+            </button>
+            <button type="button" class="inbox-att-reject-btn px-2 py-1 text-xs rounded text-red-500 hover:bg-red-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="驳回">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  },
+  
+  bindInboxEvents() {
+    const self = this;
+    const tbody = document.getElementById('inbox-tbody');
+    if (!tbody) return;
+    
+    // 展开/收起按钮
+    tbody.querySelectorAll('.inbox-expand-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-id');
+        const icon = btn.querySelector('i');
+        const detailRow = tbody.querySelector(`.inbox-detail-row[data-parent-id="${id}"]`);
+        
+        if (detailRow) {
+          // 已存在，切换显示/隐藏
+          const isHidden = detailRow.classList.contains('hidden');
+          detailRow.classList.toggle('hidden');
+          if (isHidden) {
+            icon.style.transform = 'rotate(90deg)';
+          } else {
+            icon.style.transform = 'rotate(0deg)';
+          }
+        } else {
+          // 不存在，创建detail行
+          icon.style.transform = 'rotate(90deg)';
+          const item = self.getInboxData().find(d => d.id === id);
+          if (!item) return;
+          
+          const detailHTML = self.renderInboxDetailRow(item);
+          const temp = document.createElement('tbody');
+          temp.innerHTML = detailHTML;
+          const newDetailRow = temp.firstElementChild;
+          
+          const masterRow = btn.closest('tr');
+          masterRow.after(newDetailRow);
+          newDetailRow.classList.remove('hidden');
+          
+          // 为新创建的detail绑定编辑和驳回事件
+          self.bindAttachmentEvents(newDetailRow);
+        }
+      });
+    });
+    
+    // 行点击也可展开
+    tbody.querySelectorAll('.inbox-master-row').forEach(row => {
+      row.addEventListener('click', (e) => {
+        // 不拦截已有的事件
+        if (e.target.closest('.inbox-expand-btn')) return;
+        const btn = row.querySelector('.inbox-expand-btn');
+        if (btn) btn.click();
+      });
+    });
+    
+    // 绑定现有detail中的附件事件
+    tbody.querySelectorAll('.inbox-detail-row').forEach(row => {
+      self.bindAttachmentEvents(row);
+    });
+
+    // 初始化悬浮提示（延迟0.5s，不受overflow裁剪）
+    self.initHoverTips(tbody);
+  },
+
+  // 悬浮提示：mouseover 延迟 0.5s 后在 body 末尾插入气泡，避开 overflow 裁剪
+  initHoverTips(tbody) {
+    const self = this;
+    let tipTimer = null;
+    let tipEl = null;
+
+    const showTip = (hoverEl) => {
+      const tipText = hoverEl.getAttribute('data-tip');
+      if (!tipText || tipText === '-') return;
+
+      tipTimer = setTimeout(() => {
+        if (tipEl) { tipEl.remove(); tipEl = null; }
+
+        tipEl = document.createElement('div');
+        tipEl.className = 'hover-tip-popup';
+        tipEl.textContent = tipText;
+        document.body.appendChild(tipEl);
+
+        const rect = hoverEl.getBoundingClientRect();
+        const tipWidth = tipEl.offsetWidth;
+        const tipHeight = tipEl.offsetHeight;
+
+        // 水平：居中，但贴近视口边缘时回退
+        let left = rect.left + rect.width / 2;
+        const viewW = window.innerWidth;
+        if (left - tipWidth / 2 < 10) left = tipWidth / 2 + 10;
+        else if (left + tipWidth / 2 > viewW - 10) left = viewW - tipWidth / 2 - 10;
+
+        // 垂直：默认在元素上方，空间不足时改到下方
+        let top = rect.top - 8;
+        if (top - tipHeight < 10) {
+          top = rect.bottom + 8;
+          tipEl.style.transform = 'translate(-50%, 0)';
+        }
+
+        tipEl.style.left = left + 'px';
+        tipEl.style.top = top + 'px';
+      }, 500);
+    };
+
+    const hideTip = () => {
+      clearTimeout(tipTimer);
+      if (tipEl) {
+        tipEl.remove();
+        tipEl = null;
+      }
+    };
+
+    tbody.addEventListener('mouseover', (e) => {
+      const hoverEl = e.target.closest('.hover-tip');
+      if (!hoverEl) return;
+      showTip(hoverEl);
+    });
+
+    tbody.addEventListener('mouseout', (e) => {
+      const hoverEl = e.target.closest('.hover-tip');
+      if (!hoverEl) return;
+      // 如果 mouseout 的目标还在同一个 hover-tip 内（比如移到子元素），不隐藏
+      if (e.relatedTarget && hoverEl.contains(e.relatedTarget)) return;
+      hideTip();
+    });
+
+    // 滚动时立即隐藏，防止气泡错位
+    const scrollContainer = tbody.closest('.overflow-auto');
+    if (scrollContainer) {
+      scrollContainer.addEventListener('scroll', hideTip, { passive: true });
+    }
+  },
+
+  bindAttachmentEvents(detailRow) {
+    const self = this;
+    const previewAttachment = (emailId, attIdx) => {
+      const inboxItem = self.getInboxData().find(d => d.id === emailId);
+      const attachment = inboxItem?.attachments?.[attIdx];
+      if (!inboxItem || !attachment) return;
+      if (attachment.status === '驳回') {
+        Dialog.toast('文件异常、无法预览', 'warning');
+        return;
+      }
+      self.showInboxAttachmentPreview(inboxItem, attachment);
+    };
+    
+    // 预览按钮（小眼睛）
+    detailRow.querySelectorAll('.inbox-att-preview-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const emailId = btn.getAttribute('data-email-id');
+        const attIdx = parseInt(btn.getAttribute('data-att-idx') || '0');
+        previewAttachment(emailId, attIdx);
+      });
+    });
+
+    // 归档按钮
+    detailRow.querySelectorAll('.inbox-att-archive-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const emailId = btn.getAttribute('data-email-id');
+        const attIdx = parseInt(btn.getAttribute('data-att-idx') || '0');
+        self.archiveInboxAttachment(emailId, attIdx);
+      });
+    });
+    
+    // 驳回按钮
+    detailRow.querySelectorAll('.inbox-att-reject-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const emailId = btn.getAttribute('data-email-id');
+        const attIdx = btn.getAttribute('data-att-idx');
+        
+        const cn = self.getCurrentLang() === 'cn';
+        Dialog.show({
+          title: cn ? '驳回附件' : '첨부 파일 거부',
+          content: cn ? '确认驳回该附件？' : '이 첨부 파일을 거부하시겠습니까?',
+          onConfirm: () => {
+            const inboxItem = self.getInboxData().find(d => d.id === emailId);
+            if (inboxItem && inboxItem.attachments[attIdx]) {
+              inboxItem.attachments[attIdx].status = '驳回';
+              inboxItem.attachments[attIdx].rejectReason = cn ? '人工驳回' : '수동 거부';
+            }
+            self.renderInbox();
+            Dialog.toast(cn ? '已驳回附件' : '첨부 파일을 거부했습니다');
+          }
+        });
+      });
+    });
+    
+    // 附件名称点击预览
+    detailRow.querySelectorAll('.inbox-att-name-text').forEach(nameEl => {
+      nameEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const emailId = nameEl.getAttribute('data-email-id');
+        const attIdx = parseInt(nameEl.getAttribute('data-att-idx') || '0');
+        previewAttachment(emailId, attIdx);
+      });
+    });
+  },
+
+  archiveInboxAttachment(emailId, attIdx) {
+    const inboxItem = this.getInboxData().find(d => d.id === emailId);
+    const attachment = inboxItem?.attachments?.[attIdx];
+    const rowData = this.data.find(r => r.id === emailId);
+    if (!inboxItem || !attachment || !rowData) return;
+
+    attachment.status = '已归档';
+    attachment.rejectReason = '-';
+    rowData.status = '已归档';
+    rowData.handler = rowData.team;
+
+    this.updateStats();
+    this.updateArchivedAttachmentRow(emailId, attIdx);
+    Dialog.toast(this.getCurrentLang() === 'cn' ? '已归档到归档（非POS表）' : '보관(비POS표)으로 이동했습니다');
+  },
+
+  updateArchivedAttachmentRow(emailId, attIdx) {
+    const rows = Array.from(document.querySelectorAll('.inbox-detail-row tr[data-email-id]'));
+    const row = rows.find(el =>
+      el.getAttribute('data-email-id') === emailId
+      && String(el.getAttribute('data-att-idx')) === String(attIdx)
+    );
+    if (!row) return;
+
+    const statusCell = row.querySelector('td:nth-child(2)');
+    const reasonCell = row.querySelector('td:nth-child(3)');
+    if (statusCell) {
+      statusCell.innerHTML = `
+          <span class="px-2 py-0.5 rounded-full text-xs font-semibold border bg-slate-50 text-slate-500 border-slate-100">
+            已归档
+          </span>
+        `;
+    }
+    if (reasonCell) {
+      reasonCell.className = 'px-4 py-2.5 text-[#86909c]';
+      reasonCell.textContent = '-';
+    }
+  },
+
+  moveArchivedToInbox(id) {
+    const rowData = this.data.find(r => r.id === id);
+    const inboxItem = this.getInboxData().find(d => d.id === id);
+    if (!rowData) return;
+
+    rowData.status = '正常';
+    rowData.handler = 'POS担当';
+    if (inboxItem) {
+      inboxItem.attachments.forEach((attachment) => {
+        if (attachment.status === '已归档') {
+          attachment.status = '正常';
+          attachment.rejectReason = '-';
+        }
+      });
+      const hasAbnormal = inboxItem.attachments.some(att => att.status !== '正常');
+      const allAbnormal = inboxItem.attachments.length > 0 && inboxItem.attachments.every(att => att.status !== '正常');
+      inboxItem.statusText = allAbnormal ? '全部异常' : hasAbnormal ? '部分异常' : '正常';
+      inboxItem.isNormal = !hasAbnormal;
+      inboxItem.suggestion = hasAbnormal ? inboxItem.suggestion : '-';
+    }
+
+    this.updateStats();
+    this.applyFilters();
+    Dialog.toast(this.getCurrentLang() === 'cn' ? '已移动到收件箱' : '받은 편지함으로 이동했습니다');
+  },
+
+  getIngestionPreviewRows(row) {
+    const productNames = [
+      '好丽友大粒大力跳跳糖葡萄',
+      '好丽友果滋果心黄金奇异果味软糖70g',
+      '好丽友果滋果心-百香果味软糖70g',
+      '好丽友高纤坚果棒酸奶味30g',
+      '好丽友Q蒂榛子蛋糕6枚（28g*6）',
+      '好丽友果滋果心黄桃味软糖70g',
+      '好丽友高蛋白坚果棒太妃味30g',
+      '好丽友Q蒂摩卡蛋糕2枚（28g*12）'
+    ];
+    return Array.from({ length: 24 }, (_, index) => {
+      const quantity = [3, 6, 4, 8, 5, 9, 7, 12][index % 8];
+      const price = [1.8, 4.5, 3.9, 5.2, 6.8, 7.5, 6.2, 8.9][index % 8];
+      return {
+        month: '2026年05月',
+        acc: index === 0 ? '其他' : String(row.region || '华北区域').replace('区域', ''),
+        dealer: row.dealer || '-',
+        storeCode: row.storeCode || '-',
+        storeName: row.storeName || '-',
+        productCode: `69209${String(7871409 + index * 137).padStart(8, '0')}`,
+        productName: productNames[index % productNames.length],
+        barcode: `69209${String(7871409 + index * 137).padStart(8, '0')}`,
+        quantity,
+        amount: (quantity * price).toFixed(1),
+        cost: (quantity * (price * 0.72)).toFixed(1),
+        retailPrice: price.toFixed(1),
+        remark: ''
+      };
+    });
+  },
+  
+  // 收件箱附件预览弹窗（屏幕居中）
+  showInboxAttachmentPreview(inboxItem, att) {
+    const self = this;
+    const cn = this.getCurrentLang() === 'cn';
+    
+    // 移除已有弹窗
+    const existing = document.querySelector('.inbox-preview-overlay');
+    if (existing) existing.remove();
+    
+    const qaRows = (typeof QAView !== 'undefined' && Array.isArray(QAView.standardData))
+      ? QAView.standardData
+      : [];
+    const sourceRow = qaRows.find((row) => inboxItem.emailSubject.includes(row.storeName)) || qaRows[0] || {
+      storeName: '保定市聚昊商贸有限公司',
+      storeCode: 'S0091005',
+      confidence: '100%',
+      dealer: '河北聚昊商贸',
+      salesTeam: '华北 Team',
+      region: '华北区域',
+      salesOffice: '石家庄营业所'
+    };
+    const initialRows = (typeof QAView !== 'undefined' && typeof QAView.getStandardPreviewRows === 'function')
+      ? QAView.getStandardPreviewRows(sourceRow)
+      : this.getIngestionPreviewRows(sourceRow);
+
+    const previewColumns = [
+      { key: 'month', label: cn ? '年月' : '년월', className: 'min-w-24' },
+      { key: 'acc', label: 'ACC', className: 'min-w-20' },
+      { key: 'dealer', label: cn ? '经销商名称' : '대리점명', className: 'min-w-36' },
+      { key: 'storeCode', label: cn ? '门店编码' : '매장 코드', className: 'min-w-28' },
+      { key: 'storeName', label: cn ? '门店名称' : '매장명', className: 'min-w-44 text-left' },
+      { key: 'productCode', label: cn ? '产品编码' : '제품 코드', className: 'min-w-32' },
+      { key: 'productName', label: cn ? '产品名称' : '제품명', className: 'min-w-52 text-left' },
+      { key: 'barcode', label: '69码', className: 'min-w-32' },
+      { key: 'quantity', label: cn ? '销售数量' : '판매 수량', className: 'min-w-24 text-right' },
+      { key: 'amount', label: cn ? '销售金额' : '판매 금액', className: 'min-w-24 text-right' },
+      { key: 'cost', label: cn ? '销售成本' : '판매 원가', className: 'min-w-24 text-right' },
+      { key: 'retailPrice', label: cn ? '零售价' : '소매가', className: 'min-w-20 text-right' },
+      { key: 'remark', label: cn ? '备注' : '비고', className: 'min-w-28' }
+    ];
+    
+    const renderPreviewRows = (rows) => rows.map((row, i) => `
+      <tr class="hover:bg-blue-50/30 transition-colors">
+        ${previewColumns.map((column) => `
+          <td class="border-b border-r border-gray-200 p-2 ${column.className}" data-field="${column.key}" data-row="${i}">
+            ${this.escapeHtml(row[column.key] || '-')}
+          </td>
+        `).join('')}
+      </tr>
+    `).join('');
+    
+    const sortIcon = '<i class="fa-solid fa-sort opacity-30"></i>';
+    
+    const overlay = document.createElement('div');
+    overlay.className = 'inbox-preview-overlay';
+    overlay.innerHTML = `
+      <div class="inbox-preview-backdrop"></div>
+      <div class="inbox-preview-modal" style="width: min(1500px, calc(100vw - 48px)); height: min(680px, calc(100vh - 64px)); min-width: 820px; min-height: 420px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px);">
+        <div class="inbox-preview-header">
+          <div class="flex items-center gap-3">
+            <i class="fa-solid fa-file-lines text-brand text-lg"></i>
+            <div>
+              <h3 class="text-sm font-semibold text-slate-800">
+                <span class="preview-title-text">${this.escapeHtml(att.name)}</span>
+              </h3>
+              <p class="text-xs text-[#86909c]">${cn ? '来自' : '출처'}: ${this.escapeHtml(inboxItem.emailSubject)}</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" class="inbox-preview-zoom-btn" title="${cn ? '全屏查看' : '전체 화면'}">
+              <i class="fa-solid fa-expand"></i>
+            </button>
+            <button type="button" class="inbox-preview-close">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+        <div class="inbox-preview-body">
+          <div class="flex flex-col h-full bg-white shadow-sm overflow-hidden">
+            <div class="flex-1 overflow-auto p-0">
+              <table class="w-full min-w-[1380px] text-xs text-center border-collapse preview-data-table">
+                <thead class="bg-gray-100 text-slate-600 sticky top-0 border-b border-gray-200 shadow-sm">
+                  <tr>
+                    ${previewColumns.map((column) => `
+                      <th class="border-r border-gray-200 p-2 ${column.className} preview-sort-th cursor-pointer hover:bg-gray-200 select-none transition-colors" data-sort="${column.key}">
+                        ${column.label} <span class="sort-icon ml-1 opacity-40">${sortIcon}</span>
+                      </th>
+                    `).join('')}
+                  </tr>
+                </thead>
+                <tbody class="text-slate-700 font-mono" id="preview-data-tbody">
+                  ${renderPreviewRows(initialRows)}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    // ---- 列排序（三态：无排序→正序→倒序→无排序）----
+    const tbody = overlay.querySelector('#preview-data-tbody');
+    const originalRows = [...initialRows];
+    let currentRows = [...initialRows];
+    let sortField = null;
+    let sortState = 0; // 0=none, 1=asc, 2=desc
+    
+    const updateSortIcons = () => {
+      // 恢复所有默认图标
+      overlay.querySelectorAll('.preview-sort-th .sort-icon').forEach(icon => {
+        icon.innerHTML = '<i class="fa-solid fa-sort opacity-30"></i>';
+      });
+      // 高亮当前排序列
+      if (sortField && sortState > 0) {
+        const activeTh = overlay.querySelector(`.preview-sort-th[data-sort="${sortField}"] .sort-icon`);
+        if (activeTh) {
+          if (sortState === 1) {
+            activeTh.innerHTML = '<i class="fa-solid fa-sort-up text-brand"></i>';
+          } else {
+            activeTh.innerHTML = '<i class="fa-solid fa-sort-down text-brand"></i>';
+          }
+        }
+      }
+    };
+    
+    const sortRows = () => {
+      if (!sortField || sortState === 0) {
+        // 恢复原始顺序
+        currentRows = [...originalRows];
+        tbody.innerHTML = renderPreviewRows(currentRows);
+        return;
+      }
+      currentRows = [...originalRows];
+      currentRows.sort((a, b) => {
+        let va = a[sortField], vb = b[sortField];
+        if (typeof va === 'string') {
+          return sortState === 1 ? va.localeCompare(vb) : vb.localeCompare(va);
+        }
+        return sortState === 1 ? va - vb : vb - va;
+      });
+      tbody.innerHTML = renderPreviewRows(currentRows);
+    };
+    
+    overlay.querySelectorAll('.preview-sort-th').forEach(th => {
+      th.addEventListener('click', () => {
+        const field = th.getAttribute('data-sort');
+        if (sortField === field) {
+          // 同一列：0→1→2→0 循环
+          sortState = (sortState + 1) % 3;
+        } else {
+          sortField = field;
+          sortState = 1; // 首次点击升序
+          currentRows = [...initialRows]; // 重置顺序
+        }
+        updateSortIcons();
+        sortRows();
+      });
+    });
+    
+    // ---- 全屏按钮 ----
+    const zoomBtn = overlay.querySelector('.inbox-preview-zoom-btn');
+    const zoomIcon = zoomBtn.querySelector('i');
+    const modal = overlay.querySelector('.inbox-preview-modal');
+    let isZoomed = false;
+    let savedStyle = {};
+    
+    zoomBtn.addEventListener('click', () => {
+      isZoomed = !isZoomed;
+      if (isZoomed) {
+        savedStyle = {
+          width: modal.style.width || 'min(1500px, calc(100vw - 48px))',
+          height: modal.style.height || 'min(680px, calc(100vh - 64px))',
+          maxWidth: modal.style.maxWidth || 'calc(100vw - 32px)',
+          maxHeight: modal.style.maxHeight || 'calc(100vh - 32px)',
+          minWidth: modal.style.minWidth || '',
+          minHeight: modal.style.minHeight || '',
+          borderRadius: modal.style.borderRadius || '16px',
+        };
+        modal.style.width = '100vw';
+        modal.style.maxWidth = '100vw';
+        modal.style.minWidth = '100vw';
+        modal.style.maxHeight = '100vh';
+        modal.style.minHeight = '100vh';
+        modal.style.borderRadius = '0';
+        zoomIcon.className = 'fa-solid fa-compress';
+        zoomBtn.title = cn ? '退出全屏' : '전체 화면 종료';
+        zoomBtn.classList.add('bg-blue-50');
+      } else {
+        modal.style.width = savedStyle.width;
+        modal.style.height = savedStyle.height;
+        modal.style.maxWidth = savedStyle.maxWidth;
+        modal.style.minWidth = savedStyle.minWidth;
+        modal.style.maxHeight = savedStyle.maxHeight;
+        modal.style.minHeight = savedStyle.minHeight;
+        modal.style.borderRadius = savedStyle.borderRadius;
+        zoomIcon.className = 'fa-solid fa-expand';
+        zoomBtn.title = cn ? '全屏查看' : '전체 화면';
+        zoomBtn.classList.remove('bg-blue-50');
+      }
+    });
+    
+    // ---- 关闭事件 ----
+    const closeBtn = overlay.querySelector('.inbox-preview-close');
+    const backdrop = overlay.querySelector('.inbox-preview-backdrop');
+    
+    const closeModal = () => {
+      overlay.classList.add('inbox-preview-closing');
+      setTimeout(() => overlay.remove(), 200);
+    };
+    
+    closeBtn.addEventListener('click', closeModal);
+    backdrop.addEventListener('click', closeModal);
+    
+    const escHandler = (e) => {
+      if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', escHandler); }
+    };
+    document.addEventListener('keydown', escHandler);
+  },
+  
+  // 原始门店数据列表附件预览 - 居中弹窗
+  showStoreDataPreviewModal(rowData) {
+    const self = this;
+    const cn = this.getCurrentLang() === 'cn';
+    
+    // 移除已有弹窗
+    const existing = document.querySelector('.inbox-preview-overlay');
+    if (existing) existing.remove();
+    
+    const dataRows = [
+      { code: '6901234567890', name: '可口可乐 500ml', qty: 12, price: 3.50, total: 42.00 },
+      { code: '6909876543210', name: '乐事薯片 330ml', qty: 5, price: 4.00, total: 20.00 },
+      { code: '6905555555555', name: '未知商品', qty: 1, price: 15.00, total: 15.00, unknown: true },
+      { code: '6901111222333', name: '康师傅红烧牛肉面', qty: 24, price: 4.50, total: 108.00 },
+      { code: '6902222333444', name: '农夫山泉 550ml', qty: 36, price: 2.00, total: 72.00 },
+    ];
+    
+    const renderTableRows = (rows) => rows.map((row, i) => `
+      <tr class="${row.unknown ? 'bg-blue-50' : ''}">
+        <td class="border-b border-r border-gray-200 p-2 text-center bg-gray-50 text-slate-400">${i + 1}</td>
+        <td class="border-b border-r border-gray-200 p-2">${row.code}</td>
+        <td class="border-b border-r border-gray-200 p-2 ${row.unknown ? 'text-brand' : ''}">${row.name}</td>
+        <td class="border-b border-r border-gray-200 p-2 text-right">${row.qty}</td>
+        <td class="border-b border-r border-gray-200 p-2 text-right">${row.price.toFixed(2)}</td>
+        <td class="border-b border-r border-gray-200 p-2 text-right">${row.total.toFixed(2)}</td>
+      </tr>
+    `).join('');
+    
+    const overlay = document.createElement('div');
+    overlay.className = 'inbox-preview-overlay';
+    overlay.innerHTML = `
+      <div class="inbox-preview-backdrop"></div>
+      <div class="inbox-preview-modal" style="width: min(1500px, calc(100vw - 48px)); height: min(680px, calc(100vh - 64px)); min-width: 820px; min-height: 420px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px);">
+        <div class="inbox-preview-header">
+          <div class="flex items-center gap-3">
+            <i class="fa-solid fa-file-excel text-green-600 text-lg"></i>
+            <div>
+              <h3 class="text-sm font-semibold text-slate-800">
+                <span class="store-preview-title-text">${this.escapeHtml(rowData.fileName)}</span>
+                <input type="text" class="store-preview-title-input hidden w-72 px-2 py-1 border border-gray-200 rounded text-sm font-semibold text-slate-800 focus:outline-none focus:border-brand" value="${this.escapeHtml(rowData.fileName)}">
+              </h3>
+              <p class="text-xs text-[#86909c]">${cn ? '营业Team' : '영업 Team'}: ${this.getLocalizedText(rowData.team)}</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" class="store-preview-edit-btn" title="${cn ? '编辑' : '편집'}">
+              <i class="fa-solid fa-pen-to-square"></i>
+            </button>
+            <button type="button" class="inbox-preview-zoom-btn" title="${cn ? '全屏查看' : '전체 화면'}">
+              <i class="fa-solid fa-expand"></i>
+            </button>
+            <button type="button" class="inbox-preview-close">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+        <div class="inbox-preview-body">
+          <div class="flex flex-col h-full bg-white shadow-sm overflow-hidden">
+            <div class="flex-1 overflow-auto p-0">
+              <table class="w-full text-xs text-left border-collapse preview-data-table">
+                <thead class="bg-gray-100 text-slate-600 sticky top-0 border-b border-gray-200 shadow-sm">
+                  <tr>
+                    <th class="border-r border-gray-200 p-2 w-10 text-center bg-gray-200">#</th>
+                    <th class="border-r border-gray-200 p-2 w-36">${cn ? '条码' : '바코드'}</th>
+                    <th class="border-r border-gray-200 p-2">${cn ? '商品名称' : '상품명'}</th>
+                    <th class="border-r border-gray-200 p-2 w-20 text-right">${cn ? '数量' : '수량'}</th>
+                    <th class="border-r border-gray-200 p-2 w-24 text-right">${cn ? '单价' : '단가'}</th>
+                    <th class="border-r border-gray-200 p-2 w-24 text-right">${cn ? '总计' : '합계'}</th>
+                  </tr>
+                </thead>
+                <tbody class="text-slate-700 font-mono">
+                  ${renderTableRows(dataRows)}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    // ---- 编辑按钮（仅文件名）----
+    const editBtn = overlay.querySelector('.store-preview-edit-btn');
+    const editIcon = editBtn.querySelector('i');
+    const titleText = overlay.querySelector('.store-preview-title-text');
+    const titleInput = overlay.querySelector('.store-preview-title-input');
+    let isEditing = false;
+    
+    editBtn.addEventListener('click', () => {
+      isEditing = !isEditing;
+      if (isEditing) {
+        editIcon.className = 'fa-solid fa-check';
+        editBtn.title = cn ? '保存' : '저장';
+        editBtn.classList.add('bg-blue-50');
+        titleText.classList.add('hidden');
+        titleInput.classList.remove('hidden');
+        titleInput.focus();
+      } else {
+        editIcon.className = 'fa-solid fa-pen-to-square';
+        editBtn.title = cn ? '编辑' : '편집';
+        editBtn.classList.remove('bg-blue-50');
+        const newTitle = titleInput.value.trim();
+        if (newTitle) {
+          titleText.textContent = newTitle;
+          // 同步更新数据
+          self.data = self.data.map(r => {
+            if (r.id === rowData.id) { r.fileName = newTitle; }
+            return r;
+          });
+        }
+        titleText.classList.remove('hidden');
+        titleInput.classList.add('hidden');
+        Dialog.toast(cn ? '已保存' : '저장되었습니다');
+      }
+    });
+    
+    // 标题输入回车保存
+    titleInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') editBtn.click();
+    });
+    
+    // ---- 全屏按钮 ----
+    const zoomBtn = overlay.querySelector('.inbox-preview-zoom-btn');
+    const zoomIcon = zoomBtn.querySelector('i');
+    const modal = overlay.querySelector('.inbox-preview-modal');
+    let isZoomed = false;
+    let savedStyle = {};
+    
+    zoomBtn.addEventListener('click', () => {
+      isZoomed = !isZoomed;
+      if (isZoomed) {
+        savedStyle = {
+          width: modal.style.width || 'min(1500px, calc(100vw - 48px))',
+          height: modal.style.height || 'min(680px, calc(100vh - 64px))',
+          maxWidth: modal.style.maxWidth || 'calc(100vw - 32px)',
+          maxHeight: modal.style.maxHeight || 'calc(100vh - 32px)',
+          minWidth: modal.style.minWidth || '',
+          minHeight: modal.style.minHeight || '',
+          borderRadius: modal.style.borderRadius || '16px',
+        };
+        modal.style.width = '100vw';
+        modal.style.maxWidth = '100vw';
+        modal.style.minWidth = '100vw';
+        modal.style.maxHeight = '100vh';
+        modal.style.minHeight = '100vh';
+        modal.style.borderRadius = '0';
+        zoomIcon.className = 'fa-solid fa-compress';
+        zoomBtn.title = cn ? '退出全屏' : '전체 화면 종료';
+        zoomBtn.classList.add('bg-blue-50');
+      } else {
+        modal.style.width = savedStyle.width;
+        modal.style.height = savedStyle.height;
+        modal.style.maxWidth = savedStyle.maxWidth;
+        modal.style.minWidth = savedStyle.minWidth;
+        modal.style.maxHeight = savedStyle.maxHeight;
+        modal.style.minHeight = savedStyle.minHeight;
+        modal.style.borderRadius = savedStyle.borderRadius;
+        zoomIcon.className = 'fa-solid fa-expand';
+        zoomBtn.title = cn ? '全屏查看' : '전체 화면';
+        zoomBtn.classList.remove('bg-blue-50');
+      }
+    });
+    
+    // ---- 关闭事件 ----
+    const closeBtn = overlay.querySelector('.inbox-preview-close');
+    const backdrop = overlay.querySelector('.inbox-preview-backdrop');
+    
+    const closeModal = () => {
+      overlay.classList.add('inbox-preview-closing');
+      setTimeout(() => overlay.remove(), 200);
+    };
+    
+    closeBtn.addEventListener('click', closeModal);
+    backdrop.addEventListener('click', closeModal);
+    
+    const escHandler = (e) => {
+      if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', escHandler); }
+    };
+    document.addEventListener('keydown', escHandler);
+  },
+
+  formatVersion(version) {
+    if (!version) return '-';
+    const match = version.match(/v?(\d+)\.(\d+)/i);
+    if (match) {
+      const [, major, minor] = match;
+      return `V0.0.${major.padStart(2, '0')}.${minor.padStart(2, '0')}`;
+    }
+    return version;
+  },
+  
+  renderTable() {
+    const tbody = document.getElementById('ingestion-tbody');
+    if (!tbody) return;
+    
+    this.hideLoading();
+    
+    // 计算分页
+    const start = (this.pagination.page - 1) * this.pagination.pageSize;
+    const end = start + this.pagination.pageSize;
+    const pageData = this.filteredData.slice(start, end);
+    
+    // 更新总数
+    document.getElementById('total-count').textContent = this.pagination.total;
+    
+    if (pageData.length === 0) {
+      tbody.innerHTML = '';
+      this.showEmptyState();
+      this.renderPagination();
+      return;
+    }
+    
+    this.hideEmptyState();
+    
+    tbody.innerHTML = pageData.map(row => {
+      const confidenceValue = Number.parseFloat(row.confidence || '0');
+      const isConfidenceNormal = confidenceValue > 95;
+      const isPending = row.status.includes('待处理');
+      const isArchived = row.status.includes('已归档');
+      const isApproved = row.status.includes('已通过');
+      const isRejected = row.status.includes('已驳回');
+      
+      let statusClass, statusText;
+      if (isArchived) {
+        statusClass = 'bg-gray-100 text-gray-600 border-gray-200';
+        statusText = '已归档';
+      } else if (isApproved) {
+        statusClass = 'bg-green-50 text-green-700 border-green-100';
+        statusText = '已通过';
+      } else if (isRejected) {
+        statusClass = 'bg-red-50 text-red-600 border-red-100';
+        statusText = '已驳回';
+      } else if (isConfidenceNormal) {
+        statusClass = 'bg-green-50 text-green-700 border-green-100';
+        statusText = '正常';
+      } else {
+        statusClass = 'bg-blue-50 text-brand border-blue-100';
+        statusText = '异常';
+      }
+
+      if (isPending && !row.confidence) {
+        statusClass = 'bg-amber-50 text-amber-700 border-amber-100';
+        statusText = '待处理';
+      }
+
+      const confidenceClass = confidenceValue > 95 ? 'text-green-700 bg-green-50 border-green-100' : 'text-brand bg-blue-50 border-blue-100';
+      const suggestionText = row.suggestion || (confidenceValue > 95 ? '-' : '请复核原始文件字段完整性与门店匹配关系。');
+      
+      // 从收件箱数据中获取来源邮件和来源附件信息
+      const inboxData = this.getInboxData();
+      const inboxItem = inboxData.find(item => item.id === row.id);
+      const sourceEmail = inboxItem ? inboxItem.emailSubject : (row.fileName + ' 邮件');
+      const sourceAttachments = inboxItem ? inboxItem.attachments : [];
+      
+      // 来源附件：每个文件只对应收件箱中的一个附件（一对一映射）
+      const sourceAttIdx = sourceAttachments.length > 0 ? (parseInt(row.id.replace('F', '')) - 1) % sourceAttachments.length : 0;
+      const mappedAtt = sourceAttachments.length > 0 ? sourceAttachments[sourceAttIdx] : null;
+      
+      const sourceAttHtml = mappedAtt
+        ? `<span class="inbox-source-att-link inline-block px-1.5 py-0.5 rounded text-xs cursor-pointer text-brand bg-blue-50 hover:bg-blue-100 transition-all" 
+                data-email-id="${row.id}" data-att-idx="${sourceAttIdx}" title="${this.escapeHtml(mappedAtt.name)}">
+            ${this.escapeHtml(mappedAtt.name.length > 14 ? mappedAtt.name.substring(0, 14) + '...' : mappedAtt.name)}
+          </span>`
+        : '<span class="text-[#86909c] text-xs">-</span>';
+      
+      return `
+        <tr class="hover:bg-slate-50 transition-colors" data-id="${row.id}">
+          <td class="px-4 py-3">
+            <input type="checkbox" class="row-cb rounded border-gray-300 text-brand focus:ring-brand" value="${row.id}">
+          </td>
+          <td class="px-3 py-3">
+            <div class="font-medium text-slate-800 flex items-center gap-2" title="${row.fileName}">
+              <i class="fa-solid fa-file-excel text-green-600 flex-shrink-0"></i>
+              <span class="row-filename-text truncate max-w-[180px]">${row.fileName}</span>
+              <input type="text" class="row-filename-input hidden w-full max-w-[180px] px-1 py-0.5 border border-gray-200 rounded text-sm font-medium text-slate-800 focus:outline-none focus:border-brand" value="${this.escapeHtml(row.fileName)}">
+            </div>
+          </td>
+          <td class="px-4 py-3">
+            <span class="inbox-source-email-link text-brand hover:text-blue-700 hover:underline cursor-pointer text-xs font-medium" 
+                  data-email-id="${row.id}" title="${this.escapeHtml(sourceEmail)}">
+              ${this.escapeHtml(sourceEmail.length > 20 ? sourceEmail.substring(0, 20) + '...' : sourceEmail)}
+            </span>
+          </td>
+          <td class="px-4 py-3">
+            ${sourceAttHtml}
+          </td>
+          <td class="px-5 py-3">
+            <span class="row-team-text">${this.getLocalizedText(row.team)}</span>
+            <select class="row-team-select hidden px-2 py-0.5 border border-gray-200 rounded text-sm focus:outline-none focus:border-brand">
+              ${['华北 Team', '东北 Team', '华东 Team', '华中 Team', '华南 Team', '西南 Team', '西北 Team'].map(t => `<option value="${t}" ${row.team.includes(t) ? 'selected' : ''}>${this.getLocalizedText(t)}</option>`).join('')}
+            </select>
+          </td>
+          <td class="px-5 py-3">
+            <span class="${row.handler ? '' : 'text-[#d1d5db]'}" title="${this.getLocalizedText(row.handler) || '-'}">
+              ${this.getLocalizedText(row.handler) || '-'}
+            </span>
+          </td>
+          <td class="px-5 py-3">
+            <div class="flex items-center gap-1">
+              ${this.activeDataMode === 'archive' ? `
+              <button class="px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 action-btn" data-action="move-inbox" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '移动到收件箱' : '받은 편지함으로 이동'}">
+                <i class="fa-solid fa-inbox"></i>
+              </button>
+              <button class="px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 action-btn row-edit-btn" data-action="edit" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '编辑' : '편집'}">
+                <i class="fa-solid fa-pen-to-square row-edit-icon"></i>
+              </button>
+              <button class="px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 action-btn" data-action="preview" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '预览' : '미리보기'}">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+              ` : `
+              <button class="px-2 py-1 text-xs rounded text-green-600 hover:bg-green-50 action-btn" data-action="approve" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '通过' : '승인'}">
+                <i class="fa-solid fa-check"></i>
+              </button>
+              <button class="px-2 py-1 text-xs rounded text-red-500 hover:bg-red-50 action-btn" data-action="reject" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '驳回' : '거부'}">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+              <button class="px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 action-btn row-edit-btn" data-action="edit" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '编辑' : '편집'}">
+                <i class="fa-solid fa-pen-to-square row-edit-icon"></i>
+              </button>
+              <button class="px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 action-btn" data-action="preview" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '预览' : '미리보기'}">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+              `}
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+    
+    this.renderPagination();
+    this.bindTableEvents();
+    this.bindSourceLinks();
+  },
+
+  getStashSourceRows() {
+    const rows = (typeof QAView !== 'undefined' && Array.isArray(QAView.standardData))
+      ? QAView.standardData
+      : [];
+    return rows.map((row, index) => ({ row, index })).slice(0, 5);
+  },
+
+  getFilteredStashRows() {
+    const keyword = this.filters.fileName.trim().toLowerCase();
+    return this.getStashSourceRows().filter(({ row }) => {
+      if (this.filters.teams.length > 0 && !this.filters.teams.includes(row.salesTeam)) {
+        return false;
+      }
+      if (keyword) {
+        const searchable = [
+          row.storeName,
+          row.storeCode,
+          row.aiNote,
+          row.salesTeam,
+          row.region,
+          row.salesOffice,
+          row.dealer
+        ].join(' ').toLowerCase();
+        return searchable.includes(keyword);
+      }
+      return true;
+    });
+  },
+
+  renderStashTable() {
+    const container = document.getElementById('ingestion-stash-container');
+    if (!container) return;
+
+    const rows = this.getFilteredStashRows();
+    const fixedAiNote = '门店编码缺失： 标准门店编码字段为空，且无法通过门店名称反向匹配 ERP 系统数据，导致数据无法关联。';
+    const tableRows = rows.map(({ row, index }) => `
+      <tr class="hover:bg-slate-50 transition-colors">
+        <td class="px-4 py-3"><input type="checkbox" class="row-cb-ingestion-stash rounded border-gray-300 text-brand focus:ring-brand"></td>
+        <td class="px-4 py-3">
+          <button type="button" class="ingestion-stash-preview-trigger font-medium text-slate-800 flex items-center gap-2 hover:text-brand transition-colors" data-index="${index}" title="预览 ${row.storeName}">
+            <i class="fa-solid fa-store text-brand"></i>
+            <span class="truncate max-w-[176px]">${row.storeName}</span>
+          </button>
+        </td>
+        <td class="px-4 py-3 font-mono text-[#1d2129]">-</td>
+        <td class="px-4 py-3 min-w-64"><div class="max-w-sm truncate" title="${fixedAiNote}">${fixedAiNote}</div></td>
+        <td class="px-4 py-3 max-w-[160px] text-[#86909c]">-</td>
+        <td class="px-4 py-3 max-w-[120px] text-[#86909c]">-</td>
+        <td class="px-4 py-3 max-w-[160px] text-[#86909c]">-</td>
+        <td class="px-4 py-3 max-w-[180px] text-[#86909c]">-</td>
+        <td class="px-4 py-3">
+          <button type="button" class="ingestion-stash-preview-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-index="${index}" title="预览"><i class="fa-regular fa-eye"></i></button>
+        </td>
+      </tr>
+    `).join('');
+
+    container.innerHTML = `
+      <div class="animate-[fadeIn_0.22s_ease-out]">
+        <table class="w-full table-fixed min-w-[1260px] text-left text-sm text-[#4e5969]">
+          <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
+            <tr>
+              <th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="ingestion-stash-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>
+              <th class="px-4 py-3 w-48">门店名称</th>
+              <th class="px-4 py-3 w-28">门店编码</th>
+              <th class="px-4 py-3 w-64">AI判断</th>
+              <th class="px-4 py-3 w-36">所属营业Team</th>
+              <th class="px-4 py-3 w-28">所属区域</th>
+              <th class="px-4 py-3 w-36">所属营业所</th>
+              <th class="px-4 py-3 w-36">所属经销商</th>
+              <th class="px-4 py-3 w-20 rounded-tr-lg">操作</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            ${rows.length === 0 ? `
+              <tr>
+                <td colspan="9" class="px-4 py-16 text-center text-[#86909c]">
+                  <i class="fa-regular fa-folder-open text-3xl mb-3 block text-gray-300"></i>
+                  暂无暂存数据
+                </td>
+              </tr>
+            ` : tableRows}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    this.bindStashEvents();
+  },
+
+  updateStashBatchButton() {
+    const rowCheckboxes = Array.from(document.querySelectorAll('.row-cb-ingestion-stash'));
+    const selected = rowCheckboxes.filter((checkbox) => checkbox.checked).length;
+    const approveBtn = document.getElementById('btn-batch-approve');
+    const selectAll = document.getElementById('ingestion-stash-select-all');
+
+    if (approveBtn) {
+      approveBtn.disabled = selected === 0;
+      approveBtn.className = selected > 0
+        ? 'px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:bg-blue-700 hover:shadow-brand/30 hover:-translate-y-0.5'
+        : 'px-4 py-2 bg-[#86909c] text-white rounded-lg text-sm font-medium transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed';
+    }
+
+    if (selectAll) {
+      selectAll.checked = selected > 0 && selected === rowCheckboxes.length;
+      selectAll.indeterminate = selected > 0 && selected < rowCheckboxes.length;
+    }
+  },
+
+  bindStashEvents() {
+    const selectAll = document.getElementById('ingestion-stash-select-all');
+    const rowCheckboxes = Array.from(document.querySelectorAll('.row-cb-ingestion-stash'));
+
+    selectAll?.addEventListener('change', (event) => {
+      rowCheckboxes.forEach((checkbox) => {
+        checkbox.checked = event.target.checked;
+      });
+      this.updateStashBatchButton();
+    });
+
+    rowCheckboxes.forEach((checkbox) => {
+      checkbox.addEventListener('change', () => this.updateStashBatchButton());
+    });
+
+    document.querySelectorAll('.ingestion-stash-preview-trigger').forEach((trigger) => {
+      trigger.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const index = Number(trigger.dataset.index);
+        if (typeof QAView !== 'undefined' && typeof QAView.openStandardPreview === 'function') {
+          QAView.openStandardPreview(index);
+        }
+      });
+    });
+
+    this.updateStashBatchButton();
+  },
+  
+  // 跳转到收件箱并高亮指定邮件/附件
+  navigateToInbox(emailId, attIdx = null) {
+    const self = this;
+    
+    // 切换到收件箱Tab
+    const tabOriginal = document.getElementById('tab-original');
+    if (tabOriginal) tabOriginal.click();
+    
+    // 等待DOM重建完成后操作
+    setTimeout(() => {
+      const masterRow = document.querySelector(`#inbox-tbody .inbox-master-row[data-id="${emailId}"]`);
+      if (!masterRow) return;
+      
+      // 先清除旧高亮
+      self._clearInboxHighlights();
+      
+      // 如果需要定位到具体附件，先展开detail
+      if (attIdx !== null) {
+        const expandBtn = masterRow.querySelector('.inbox-expand-btn');
+        const detailRow = document.querySelector(`#inbox-tbody .inbox-detail-row[data-parent-id="${emailId}"]`);
+        
+        if (!detailRow || detailRow.classList.contains('hidden')) {
+          if (expandBtn) expandBtn.click();
+        }
+        
+        // 等待detail展开
+        setTimeout(() => {
+          self._doHighlight(masterRow, emailId, attIdx);
+        }, 200);
+      } else {
+        self._doHighlight(masterRow, emailId, null);
+      }
+    }, 250);
+  },
+  
+  _doHighlight(masterRow, emailId, attIdx) {
+    const self = this;
+    
+    // 滚动到目标行（instant，不用smooth保证即时定位）
+    masterRow.scrollIntoView({ behavior: 'instant', block: 'center' });
+    
+    // 用内联样式设置高亮背景色（优先级最高，不会被hover覆盖）
+    masterRow.style.transition = 'background-color 0.4s ease-out';
+    masterRow.style.backgroundColor = '#bfd6f6';
+    
+    // 1.8秒后逐渐恢复（原0.8秒+额外1秒）
+    setTimeout(() => {
+      masterRow.style.backgroundColor = '';
+      // transition结束后清除
+      setTimeout(() => {
+        masterRow.style.transition = '';
+      }, 500);
+    }, 1800);
+    
+    // 高亮附件行
+    if (attIdx !== null) {
+      const detailRow = document.querySelector(`#inbox-tbody .inbox-detail-row[data-parent-id="${emailId}"]`);
+      if (detailRow) {
+        const attRow = detailRow.querySelector(`tr[data-email-id="${emailId}"][data-att-idx="${attIdx}"]`);
+        if (attRow) {
+          attRow.scrollIntoView({ behavior: 'instant', block: 'center' });
+          attRow.style.transition = 'background-color 0.4s ease-out';
+          attRow.style.backgroundColor = '#fce4a8';
+          
+          setTimeout(() => {
+            attRow.style.backgroundColor = '';
+            setTimeout(() => {
+              attRow.style.transition = '';
+            }, 500);
+          }, 1800);
+        }
+      }
+    }
+  },
+  
+  _clearInboxHighlights() {
+    document.querySelectorAll('#inbox-tbody tr').forEach(el => {
+      el.style.backgroundColor = '';
+      el.style.transition = '';
+    });
+  },
+  
+  bindSourceLinks() {
+    const self = this;
+    const tbody = document.getElementById('ingestion-tbody');
+    if (!tbody) return;
+    
+    // 来源邮件链接点击
+    tbody.querySelectorAll('.inbox-source-email-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const emailId = link.getAttribute('data-email-id');
+        self.navigateToInbox(emailId);
+      });
+    });
+    
+    // 来源附件链接点击
+    tbody.querySelectorAll('.inbox-source-att-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const emailId = link.getAttribute('data-email-id');
+        const attIdx = parseInt(link.getAttribute('data-att-idx') || '0');
+        self.navigateToInbox(emailId, attIdx);
+      });
+    });
+  },
+  
+  renderPagination() {
+    const container = document.getElementById('page-numbers');
+    if (!container) return;
+    
+    const totalPages = Math.ceil(this.pagination.total / this.pagination.pageSize) || 1;
+    let html = '';
+    
+    for (let i = 1; i <= totalPages; i++) {
+      const isActive = i === this.pagination.page;
+      html += `
+        <button type="button" class="page-btn w-7 h-7 rounded text-xs font-medium transition-all ${isActive ? 'bg-brand text-white' : 'text-[#4e5969] hover:bg-gray-100'}">
+          ${i}
+        </button>
+      `;
+    }
+    
+    container.innerHTML = html;
+    
+    // 更新上一页/下一页状态
+    document.getElementById('btn-prev-page').disabled = this.pagination.page <= 1;
+    document.getElementById('btn-next-page').disabled = this.pagination.page >= totalPages;
+  },
+  
+  updateBatchButtons() {
+    const selected = document.querySelectorAll('.row-cb:checked').length;
+    const buttons = {
+      'btn-batch-archive': { active: 'border-gray-200 text-[#4e5969] bg-white', inactive: 'border-gray-200 text-[#86909c] bg-gray-50' },
+      'btn-batch-approve': { active: 'bg-brand text-white shadow-brand/20', inactive: 'bg-[#86909c] text-white' },
+      'btn-batch-reject': { active: 'border-blue-100 bg-blue-50 text-[#165dff]', inactive: 'border-gray-200 bg-gray-100 text-[#86909c]' }
+    };
+    
+    Object.keys(buttons).forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) {
+        const isDisabled = selected === 0;
+        btn.disabled = isDisabled;
+        
+        if (isDisabled) {
+          btn.className = `px-4 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${buttons[id].inactive}`;
+        } else {
+          btn.className = `px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-sm hover:-translate-y-0.5 ${buttons[id].active}`;
+        }
+
+        if (['btn-batch-archive', 'btn-batch-approve', 'btn-batch-reject'].includes(id) && document.getElementById('tab-original')?.classList.contains('font-medium')) {
+          btn.classList.add('hidden');
+        }
+        if (id === 'btn-batch-archive' && (this.activeDataMode === 'files' || this.activeDataMode === 'archive')) {
+          btn.classList.add('hidden');
+        }
+        if (id === 'btn-batch-approve' && this.activeDataMode === 'archive') {
+          btn.classList.add('hidden');
+        }
+      }
+    });
+  },
+  
+  bindTableEvents() {
+    // 全选
+    const selectAll = document.getElementById('selectAll');
+    if (selectAll) {
+      selectAll.addEventListener('change', (e) => {
+        document.querySelectorAll('.row-cb').forEach(cb => cb.checked = e.target.checked);
+        this.updateBatchButtons();
+      });
+    }
+    
+    // 行选择
+    document.querySelectorAll('.row-cb').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const allCbs = document.querySelectorAll('.row-cb');
+        const checkedCbs = document.querySelectorAll('.row-cb:checked');
+        selectAll.checked = allCbs.length === checkedCbs.length;
+        selectAll.indeterminate = checkedCbs.length > 0 && checkedCbs.length < allCbs.length;
+        this.updateBatchButtons();
+      });
+    });
+    
+    // 操作按钮事件
+    document.querySelectorAll('.action-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const action = e.currentTarget.getAttribute('data-action');
+        const id = e.currentTarget.getAttribute('data-id');
+        const rowData = this.data.find(r => r.id === id);
+        
+        if (action === 'move-inbox') {
+          this.moveArchivedToInbox(id);
+        } else if (action === 'preview') {
+          // 居中弹窗预览
+          this.showStoreDataPreviewModal(rowData);
+        } else if (action === 'edit') {
+          // 行内编辑：切换编辑态/只读态
+          const btn = e.currentTarget;
+          const row = btn.closest('tr');
+          if (!row) return;
+          
+          const icon = btn.querySelector('.row-edit-icon');
+          const isEditing = icon.classList.contains('fa-check');
+          
+          const filenameText = row.querySelector('.row-filename-text');
+          const filenameInput = row.querySelector('.row-filename-input');
+          const teamText = row.querySelector('.row-team-text');
+          const teamSelect = row.querySelector('.row-team-select');
+          
+          if (!isEditing) {
+            // 进入编辑态
+            icon.className = 'fa-solid fa-check row-edit-icon';
+            btn.title = this.getCurrentLang() === 'cn' ? '保存' : '저장';
+            btn.classList.add('bg-amber-100');
+            
+            filenameText.classList.add('hidden');
+            filenameInput.classList.remove('hidden');
+            filenameInput.focus();
+            filenameInput.select();
+            
+            teamText.classList.add('hidden');
+            teamSelect.classList.remove('hidden');
+          } else {
+            // 保存并回到只读态
+            icon.className = 'fa-solid fa-pen-to-square row-edit-icon';
+            btn.title = this.getCurrentLang() === 'cn' ? '编辑' : '편집';
+            btn.classList.remove('bg-amber-100');
+            
+            const newFileName = filenameInput.value.trim();
+            const newTeam = teamSelect.value;
+            
+            if (newFileName) {
+              filenameText.textContent = newFileName;
+              filenameText.title = newFileName;
+            }
+            filenameText.classList.remove('hidden');
+            filenameInput.classList.add('hidden');
+            
+            if (newTeam) {
+              teamText.textContent = this.getLocalizedText(newTeam);
+            }
+            teamText.classList.remove('hidden');
+            teamSelect.classList.add('hidden');
+            
+            // 更新数据
+            this.data = this.data.map(r => {
+              if (r.id === id) {
+                if (newFileName) r.fileName = newFileName;
+                if (newTeam) r.team = newTeam;
+              }
+              return r;
+            });
+            
+            Dialog.toast(this.getCurrentLang() === 'cn' ? '已保存' : '저장되었습니다');
+          }
+        } else if (action === 'reject') {
+          // 驳回操作 - 带备注输入
+          const rejectTitle = this.getCurrentLang() === 'cn' ? '驳回文件' : '파일 거부';
+          const remarkLabel = this.getCurrentLang() === 'cn' ? '文件异常现象' : '파일 이상 현상';
+          const confirmBtnText = this.getCurrentLang() === 'cn' ? '确认驳回' : '거부 확인';
+          const cancelBtnText = this.getCurrentLang() === 'cn' ? '取消' : '취소';
+          const successText = this.getCurrentLang() === 'cn' ? '已成功驳回文件' : '파일을 성공적으로 거부했습니다';
+          
+          // 创建带备注输入的对话框
+          Dialog.show({
+            title: rejectTitle,
+            content: `
+              <div class="flex flex-col gap-3">
+                <p class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? '请填写文件异常现象' : '파일 이상 현상을 입력해 주세요'}</p>
+                <textarea id="reject-remark-input" class="w-full p-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-brand resize-none" rows="4" placeholder="${remarkLabel}">${rowData.remark || ''}</textarea>
+              </div>
+            `,
+            showCancel: true,
+            confirmText: confirmBtnText,
+            cancelText: cancelBtnText,
+            onConfirm: () => {
+              const remarkInput = document.getElementById('reject-remark-input');
+              const remark = remarkInput ? remarkInput.value : '';
+              
+              this.data = this.data.map(row => {
+                if (row.id === id) {
+                  row.status = '已驳回';
+                  row.handler = row.team;
+                  row.remark = remark;
+                }
+                return row;
+              });
+              this.updateStats();
+              this.applyFilters();
+              Dialog.toast(successText);
+            }
+          });
+        } else {
+          // 通过、归档操作
+          const actionNames = this.getCurrentLang() === 'cn' 
+            ? { approve: '通过', archive: '归档' }
+            : { approve: '승인', archive: '보관' };
+          const statusMap = { approve: '已通过', archive: '已归档' };
+          const toastMsgs = this.getCurrentLang() === 'cn'
+            ? { approve: '通过成功', archive: '归档成功' }
+            : { approve: '승인 성공', archive: '보관 성공' };
+          const confirmText = this.getCurrentLang() === 'cn' ? '确认' : '확인';
+          const confirmContentText = this.getCurrentLang() === 'cn' ? '确认对文件「' : '파일「';
+          const actionText = this.getCurrentLang() === 'cn' ? '」执行' : '」에 대해';
+          const operationText = this.getCurrentLang() === 'cn' ? '操作？' : '조작하시겠습니까?';
+          
+          Dialog.show({
+            title: `${confirmText}【${actionNames[action]}】`,
+            content: `${confirmContentText}${rowData.fileName}${actionText}${actionNames[action]}${operationText}`,
+            onConfirm: () => {
+              this.data = this.data.map(row => {
+                if (row.id === id) {
+                  row.status = statusMap[action];
+                  row.handler = row.team;
+                }
+                return row;
+              });
+              this.updateStats();
+              // 延迟执行，等 Dialog.closeDialog 先清理掉弹窗 DOM
+              setTimeout(() => {
+                this.applyFilters();
+                Dialog.toast(toastMsgs[action]);
+              }, 100);
+            }
+          });
+        }
+      });
+    });
+      },
+  
+  bindFilterEvents() {
+    // 文件名称搜索
+    const filenameInput = document.getElementById('filter-filename');
+    if (filenameInput) {
+      filenameInput.addEventListener('input', (e) => {
+        this.debounce(() => {
+          this.filters.fileName = e.target.value;
+          this.applyFilters();
+        }, 300);
+      });
+    }
+    
+    // Team多选下拉
+    const teamBtn = document.getElementById('team-select-btn');
+    const teamDropdown = document.getElementById('team-dropdown');
+    const teamCheckboxes = document.querySelectorAll('.team-checkbox');
+    const teamSelectAll = document.getElementById('team-select-all');
+    const teamLabel = document.getElementById('team-select-label');
+    
+    if (teamBtn && teamDropdown) {
+      teamBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.dropdown-open').forEach(el => {
+          if (el !== teamDropdown) el.classList.add('hidden');
+        });
+        teamDropdown.classList.toggle('hidden');
+        teamDropdown.classList.toggle('dropdown-open');
+      });
+      
+      teamSelectAll?.addEventListener('change', (e) => {
+        teamCheckboxes.forEach(cb => cb.checked = e.target.checked);
+        this.updateTeamLabel();
+      });
+      
+      teamCheckboxes.forEach(cb => {
+        cb.addEventListener('change', () => {
+          this.updateTeamLabel();
+        });
+      });
+      
+      teamDropdown.addEventListener('click', (e) => e.stopPropagation());
+    }
+    
+    // 收件箱状态多选下拉
+    const inboxStatusBtn = document.getElementById('inbox-status-btn');
+    const inboxStatusDropdown = document.getElementById('inbox-status-dropdown');
+    const inboxStatusCheckboxes = document.querySelectorAll('.inbox-status-checkbox');
+    const inboxStatusSelectAll = document.getElementById('inbox-status-select-all');
+    
+    if (inboxStatusBtn && inboxStatusDropdown) {
+      inboxStatusBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.dropdown-open').forEach(el => {
+          if (el !== inboxStatusDropdown) el.classList.add('hidden');
+        });
+        inboxStatusDropdown.classList.toggle('hidden');
+        inboxStatusDropdown.classList.toggle('dropdown-open');
+      });
+      
+      const updateInboxStatusLabel = () => {
+        const checked = Array.from(document.querySelectorAll('.inbox-status-checkbox:checked')).map(cb => cb.value);
+        this.inboxStatusFilter = checked;
+        
+        const label = document.getElementById('inbox-status-label');
+        if (label) {
+          if (checked.length === 0) {
+            label.textContent = this.getCurrentLang() === 'cn' ? '全部状态' : '전체 상태';
+          } else if (checked.length === 1) {
+            label.textContent = checked[0];
+          } else {
+            label.textContent = this.getCurrentLang() === 'cn' ? `已选 ${checked.length} 个` : `${checked.length}개 선택`;
+          }
+        }
+        
+        this.renderInbox();
+      };
+      
+      inboxStatusSelectAll?.addEventListener('change', (e) => {
+        inboxStatusCheckboxes.forEach(cb => cb.checked = e.target.checked);
+        updateInboxStatusLabel();
+      });
+      
+      inboxStatusCheckboxes.forEach(cb => {
+        cb.addEventListener('change', updateInboxStatusLabel);
+      });
+      
+      inboxStatusDropdown.addEventListener('click', (e) => e.stopPropagation());
+    }
+    
+    // 重置筛选
+    const resetBtn = document.getElementById('btn-reset-filter');
+    const emptyResetBtn = document.getElementById('btn-empty-reset');
+    
+    [resetBtn, emptyResetBtn].forEach(btn => {
+      if (btn) {
+        btn.addEventListener('click', () => {
+          this.resetFilters();
+          // 更新UI
+          if (filenameInput) filenameInput.value = '';
+          this.clearAllCheckboxes();
+        });
+      }
+    });
+
+    const uploadBtn = document.getElementById('btn-upload-file');
+    const uploadInput = document.getElementById('upload-file-input');
+
+    uploadBtn?.addEventListener('click', () => {
+      uploadInput?.click();
+    });
+
+    uploadInput?.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      Dialog.toast(
+        this.getCurrentLang() === 'cn'
+          ? `已选择文件：${file.name}`
+          : `파일 선택됨: ${file.name}`
+      );
+      e.target.value = '';
+    });
+    
+    // 点击其他地方关闭下拉
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.dropdown-open').forEach(el => el.classList.add('hidden'));
+    });
+  },
+
+  escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  },
+
+  buildExcelPreviewFiles(fileName) {
+    const normalizedName = fileName.replace(/\.zip$/i, '');
+    if (/\.zip$/i.test(fileName)) {
+      return [
+        `${normalizedName}-销售明细.xlsx`,
+        `${normalizedName}-门店汇总.xlsx`,
+        `${normalizedName}-异常清单.xlsx`
+      ];
+    }
+
+    if (/\.(xlsx|xls)$/i.test(fileName)) {
+      return [fileName];
+    }
+
+    return [`${normalizedName}.xlsx`];
+  },
+
+  renderExcelPreviewTable(fileName, index = 0) {
+    const productNames = [
+      '好丽友果滋果心黄金奇异果味软糖70g',
+      '好丽友果滋果心-百香果味软糖70g',
+      '好丽友高纤坚果棒酸奶味30g',
+      '好丽友高蛋白坚果棒太妃味30g',
+      '好丽友蛋黄派2枚（23g*12）',
+      '好丽友Q立方葡萄/西柚/菠萝木糖醇90g',
+      '好丽友Q立方草莓/香瓜/青梅木糖醇90g',
+      '好丽友Q蒂榛子蛋糕6枚（28g*6）',
+      '好丽友Q蒂榛子蛋糕2枚（28g*12）',
+      '好丽友Q蒂巧克力莓果味6枚蛋糕',
+      '好丽友Q蒂摩卡蛋糕6枚（28g*6）',
+      '好丽友Q蒂摩卡蛋糕2枚（28g*12）',
+      '好丽友Q蒂红丝绒派6枚（28g*6）'
+    ];
+    const getProductName = (offset) => productNames[(index * 5 + offset) % productNames.length];
+    const rows = [
+      ['2026-01-01', '6901028075763', getProductName(0), 42 + index * 3, '¥3.50', `¥${(147 + index * 10.5).toFixed(2)}`],
+      ['2026-01-01', '6902083881085', getProductName(1), 68 + index * 2, '¥2.00', `¥${(136 + index * 4).toFixed(2)}`],
+      ['2026-01-02', '6921168509256', getProductName(2), 26 + index, '¥6.90', `¥${(179.4 + index * 6.9).toFixed(2)}`],
+      ['2026-01-02', '6934024510888', getProductName(3), 54 + index * 4, '¥3.20', `¥${(172.8 + index * 12.8).toFixed(2)}`],
+      ['2026-01-03', '6954767413372', getProductName(4), 37 + index * 2, '¥4.00', `¥${(148 + index * 8).toFixed(2)}`]
+    ];
+
+    return `
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <div class="text-sm font-bold text-[#1d2129]">${this.escapeHtml(fileName)}</div>
+          <div class="text-xs text-[#86909c] mt-1">工作表：POS_DATA_${index + 1}，共 5 条预览记录</div>
+        </div>
+        <button type="button" class="px-3 py-1.5 rounded-lg bg-blue-50 text-brand text-xs font-semibold">
+          <i class="fa-solid fa-table mr-1"></i>在线预览
+        </button>
+      </div>
+      <div class="overflow-auto border border-gray-100 rounded-xl">
+        <table class="w-full min-w-[720px] text-left text-xs">
+          <thead class="bg-[#f7f8fa] text-[#1d2129] font-semibold">
+            <tr>
+              <th class="px-3 py-3">销售日期</th>
+              <th class="px-3 py-3">商品条码</th>
+              <th class="px-3 py-3">商品名称</th>
+              <th class="px-3 py-3">销量</th>
+              <th class="px-3 py-3">单价</th>
+              <th class="px-3 py-3">销售额</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100 text-[#4e5969]">
+            ${rows.map(row => `
+              <tr class="hover:bg-blue-50/40">
+                ${row.map(cell => `<td class="px-3 py-3 whitespace-nowrap">${this.escapeHtml(cell)}</td>`).join('')}
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  },
+
+  showOriginalExcelPreview(rowEl) {
+    const fileName = rowEl?.querySelector('td:nth-child(2) span')?.textContent?.trim() || '门店POS数据.xlsx';
+    const files = this.buildExcelPreviewFiles(fileName);
+    const overlay = document.getElementById('overlay-container');
+
+    overlay.innerHTML = `
+      <div class="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-6 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[82vh] overflow-hidden flex flex-col">
+          <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white">
+            <div>
+              <h3 class="font-bold text-[#1d2129]">附件预览</h3>
+              <p class="text-xs text-[#86909c] mt-1">${this.escapeHtml(fileName)}</p>
+            </div>
+            <button type="button" id="original-preview-close" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <div class="grid grid-cols-[260px_1fr] min-h-0 flex-1">
+            <aside class="border-r border-gray-100 bg-[#f7f8fa] p-4 overflow-auto">
+              <div class="text-xs font-semibold text-[#86909c] mb-3">Excel 列表</div>
+              <div class="flex flex-col gap-2" id="original-preview-file-list">
+                ${files.map((file, index) => `
+                  <button type="button" data-index="${index}" class="preview-file-item text-left px-3 py-3 rounded-xl border transition-all ${index === 0 ? 'bg-white border-blue-200 text-brand shadow-sm' : 'bg-transparent border-transparent text-[#4e5969] hover:bg-white'}">
+                    <div class="flex items-center gap-2">
+                      <i class="fa-solid fa-file-excel text-green-600"></i>
+                      <span class="text-xs font-semibold truncate">${this.escapeHtml(file)}</span>
+                    </div>
+                    <div class="text-[11px] text-[#86909c] mt-1">${index === 0 ? '默认预览' : '可切换预览'}</div>
+                  </button>
+                `).join('')}
+              </div>
+            </aside>
+            <main class="p-5 overflow-auto">
+              <div id="original-preview-content">
+                ${this.renderExcelPreviewTable(files[0], 0)}
+              </div>
+            </main>
+          </div>
+        </div>
+      </div>
+    `;
+
+    overlay.querySelector('#original-preview-close')?.addEventListener('click', () => {
+      overlay.innerHTML = '';
+    });
+
+    overlay.querySelectorAll('.preview-file-item').forEach((button) => {
+      button.addEventListener('click', () => {
+        const index = Number(button.getAttribute('data-index') || 0);
+        overlay.querySelectorAll('.preview-file-item').forEach((item) => {
+          item.className = 'preview-file-item text-left px-3 py-3 rounded-xl border transition-all bg-transparent border-transparent text-[#4e5969] hover:bg-white';
+        });
+        button.className = 'preview-file-item text-left px-3 py-3 rounded-xl border transition-all bg-white border-blue-200 text-brand shadow-sm';
+        const content = overlay.querySelector('#original-preview-content');
+        if (content) {
+          content.innerHTML = this.renderExcelPreviewTable(files[index], index);
+        }
+      });
+    });
+  },
+
+  bindOriginalPreviewEvents() {
+    document.querySelectorAll('.original-preview-btn').forEach((button) => {
+      button.addEventListener('click', (e) => {
+        const rowEl = e.currentTarget.closest('tr');
+        this.showOriginalExcelPreview(rowEl);
+      });
+    });
+  },
+
+  hydrateOriginalAttachmentAuditColumns() {
+    const table = document.querySelector('#original-attachment table');
+    if (!table || table.dataset.auditColumnsReady === 'true') return;
+
+    const headerRow = table.querySelector('thead tr');
+    const filenameHeader = headerRow?.children?.[1];
+    if (!headerRow || !filenameHeader) return;
+
+    const statusHeader = document.createElement('th');
+    statusHeader.className = 'px-4 py-3 w-24';
+    statusHeader.textContent = '状态';
+
+    const rejectReasonHeader = document.createElement('th');
+    rejectReasonHeader.className = 'px-4 py-3 min-w-36';
+    rejectReasonHeader.textContent = '驳回说明';
+
+    filenameHeader.after(statusHeader, rejectReasonHeader);
+
+    table.querySelectorAll('tbody tr').forEach((row, index) => {
+      const fileName = row.querySelector('td:nth-child(2) span')?.textContent?.trim() || '';
+      const isZipReject = /\.zip$/i.test(fileName);
+      const isOpenReject = [10, 17].includes(index);
+      const isRejected = isZipReject || isOpenReject;
+      const reason = isZipReject ? '压缩包不能解压' : (isOpenReject ? '文件无法打开' : '-');
+
+      const statusCell = document.createElement('td');
+      statusCell.className = 'px-4 py-3';
+      statusCell.innerHTML = `
+        <span class="px-2.5 py-1 rounded-full text-xs font-semibold border ${isRejected ? 'bg-red-50 text-red-600 border-red-100' : 'bg-green-50 text-green-700 border-green-100'}">
+          ${isRejected ? '驳回' : '正常'}
+        </span>
+      `;
+
+      const reasonCell = document.createElement('td');
+      reasonCell.className = `px-4 py-3 ${isRejected ? 'text-red-600' : 'text-[#86909c]'}`;
+      reasonCell.textContent = reason;
+
+      row.children[1]?.after(statusCell, reasonCell);
+    });
+
+    table.dataset.auditColumnsReady = 'true';
+  },
+  
+  updateTeamLabel() {
+    const checked = Array.from(document.querySelectorAll('.team-checkbox:checked')).map(cb => cb.value);
+    this.filters.teams = checked;
+    
+    const label = document.getElementById('team-select-label');
+    if (label) {
+      if (checked.length === 0) {
+        label.textContent = this.getCurrentLang() === 'cn' ? '全部 Team' : '전체 Team';
+      } else if (checked.length === 1) {
+        label.textContent = this.getLocalizedText(checked[0]);
+      } else {
+        label.textContent = this.getCurrentLang() === 'cn' ? `已选 ${checked.length} 个` : `${checked.length}개 선택`;
+      }
+    }
+    
+    this.applyFilters();
+  },
+  
+  clearAllCheckboxes() {
+    document.querySelectorAll('.team-checkbox').forEach(cb => cb.checked = false);
+    document.getElementById('team-select-all').checked = false;
+    this.updateTeamLabel();
+  },
+  
+  bindBatchEvents() {
+    const handleBatchAction = (action) => {
+      if (this.activeDataMode === 'stash') {
+        if (action !== 'approve') return;
+        const selected = document.querySelectorAll('.row-cb-ingestion-stash:checked').length;
+        if (selected === 0) return;
+        Dialog.toast(`已通过 ${selected} 条暂存数据`, 'success');
+        document.querySelectorAll('.row-cb-ingestion-stash').forEach((checkbox) => {
+          checkbox.checked = false;
+        });
+        this.updateStashBatchButton();
+        return;
+      }
+
+      const selected = Array.from(document.querySelectorAll('.row-cb:checked')).map(cb => cb.value);
+      if (selected.length === 0) return;
+
+      if (this.activeDataMode === 'files' && action === 'archive') {
+        return;
+      }
+
+      if (this.activeDataMode === 'archive' && action === 'reject') {
+        const cn = this.getCurrentLang() === 'cn';
+        Dialog.show({
+          title: cn ? '确认批量【移动到收件箱】' : '일괄 확인【받은 편지함으로 이동】',
+          content: cn
+            ? `当前将对【${selected.length}】条归档数据执行移动到收件箱操作，确认后状态将恢复为正常，是否继续？`
+            : `현재 ${selected.length}개 보관 데이터를 받은 편지함으로 이동하고 상태를 정상으로 복원합니다. 계속하시겠습니까?`,
+          onConfirm: () => {
+            selected.forEach((id) => {
+              const rowData = this.data.find(row => row.id === id);
+              const inboxItem = this.getInboxData().find(item => item.id === id);
+              if (rowData) {
+                rowData.status = '正常';
+                rowData.handler = 'POS担当';
+              }
+              if (inboxItem) {
+                inboxItem.attachments.forEach((attachment) => {
+                  if (attachment.status === '已归档') {
+                    attachment.status = '正常';
+                    attachment.rejectReason = '-';
+                  }
+                });
+                const hasAbnormal = inboxItem.attachments.some(att => att.status !== '正常');
+                const allAbnormal = inboxItem.attachments.length > 0 && inboxItem.attachments.every(att => att.status !== '正常');
+                inboxItem.statusText = allAbnormal ? '全部异常' : hasAbnormal ? '部分异常' : '正常';
+                inboxItem.isNormal = !hasAbnormal;
+                inboxItem.suggestion = hasAbnormal ? inboxItem.suggestion : '-';
+              }
+            });
+            this.updateStats();
+            this.applyFilters();
+            document.getElementById('selectAll').checked = false;
+            this.updateBatchButtons();
+            Dialog.toast(cn ? `已移动 ${selected.length} 条数据到收件箱` : `${selected.length}개 데이터를 받은 편지함으로 이동했습니다`);
+          }
+        });
+        return;
+      }
+      
+      const actionNames = this.getCurrentLang() === 'cn' 
+        ? { archive: '归档', approve: '通过', reject: '驳回' }
+        : { archive: '보관', approve: '승인', reject: '거부' };
+      const statusMap = { archive: '已归档', approve: '已通过', reject: '已驳回' };
+      const batchTitle = this.getCurrentLang() === 'cn' ? '确认批量' : '일괄 확인';
+      const batchContent = this.getCurrentLang() === 'cn' ? '当前将对' : '현재';
+      const batchMiddle = this.getCurrentLang() === 'cn' ? '】条数据执行' : '】개 데이터에 대해';
+      const batchEnd = this.getCurrentLang() === 'cn' ? '操作，确认后不可撤销，是否继续？' : '조작을 실행하시겠습니까? 되돌릴 수 없습니다.';
+      const successText = this.getCurrentLang() === 'cn' ? '已成功对' : '성공적으로';
+      const successMiddle = this.getCurrentLang() === 'cn' ? '条数据执行' : '개 데이터에 대해';
+      const successAction = this.getCurrentLang() === 'cn' ? '操作' : '조작';
+      
+      Dialog.show({
+        title: `${batchTitle}【${actionNames[action]}】`,
+        content: `${batchContent}【${selected.length}${batchMiddle}${actionNames[action]}${batchEnd}`,
+        onConfirm: async () => {
+          // 显示loading
+          this.showLoading();
+          
+          // 模拟接口调用
+          await new Promise(resolve => setTimeout(resolve, 800));
+          
+          // 更新数据状态
+          this.data = this.data.map(row => {
+            if (selected.includes(row.id)) {
+              row.status = statusMap[action];
+              row.handler = row.team;
+            }
+            return row;
+          });
+          
+          // 更新统计
+          this.updateStats();
+          
+          // 重新筛选和渲染
+          this.hideLoading();
+          this.applyFilters();
+          
+          // 清空选择
+          document.getElementById('selectAll').checked = false;
+          this.updateBatchButtons();
+          
+          Dialog.toast(`${successText}${selected.length}${successMiddle}${actionNames[action]}${successAction}`);
+        }
+      });
+    };
+    
+    document.getElementById('btn-batch-archive')?.addEventListener('click', () => handleBatchAction('archive'));
+    document.getElementById('btn-batch-approve')?.addEventListener('click', () => handleBatchAction('approve'));
+    document.getElementById('btn-batch-reject')?.addEventListener('click', () => handleBatchAction('reject'));
+  },
+  
+  bindPaginationEvents() {
+    document.getElementById('btn-prev-page')?.addEventListener('click', () => {
+      if (this.pagination.page > 1) {
+        this.pagination.page--;
+        this.saveFiltersToCache();
+        this.renderTable();
+      }
+    });
+    
+    document.getElementById('btn-next-page')?.addEventListener('click', () => {
+      const totalPages = Math.ceil(this.pagination.total / this.pagination.pageSize);
+      if (this.pagination.page < totalPages) {
+        this.pagination.page++;
+        this.saveFiltersToCache();
+        this.renderTable();
+      }
+    });
+    
+    document.getElementById('page-numbers')?.addEventListener('click', (e) => {
+      if (e.target.classList.contains('page-btn')) {
+        const page = parseInt(e.target.textContent);
+        if (page !== this.pagination.page) {
+          this.pagination.page = page;
+          this.saveFiltersToCache();
+          this.renderTable();
+        }
+      }
+    });
+  },
+  
+  updateStats() {
+    const total = this.data.length;
+    const pending = this.data.filter(r => r.status.includes('待处理')).length;
+    const completed = this.data.filter(r => r.status.includes('已通过') || r.status.includes('已同步')).length;
+    const rate = total > 0 ? ((completed / total) * 100).toFixed(1) : 0;
+    
+    const elTotal = document.getElementById('stat-total');
+    const elPending = document.getElementById('stat-pending');
+    const elRate = document.getElementById('stat-rate');
+    if (elTotal) elTotal.textContent = total;
+    if (elPending) elPending.textContent = pending;
+    if (elRate) elRate.textContent = rate + '%';
+    
+    this.stats = { total, pending, daily: this.stats.daily, rate: parseFloat(rate) };
+  },
+  
+  bindTabEvents() {
+    const tabOriginal = document.getElementById('tab-original');
+    const tabFiles = document.getElementById('tab-files');
+    const tabArchive = document.getElementById('tab-archive');
+    const tabStash = document.getElementById('tab-stash');
+    const activeClass = 'px-4 py-2 text-sm font-medium text-brand bg-blue-50 rounded-lg transition-all border border-blue-200';
+    const inactiveClass = 'px-4 py-2 text-sm text-[#86909c] hover:text-[#1d2129] hover:bg-gray-50 rounded-lg transition-all border border-transparent';
+    
+    const setActiveTab = (activeTab) => {
+      if (tabOriginal) tabOriginal.className = activeTab === 'original' ? activeClass : inactiveClass;
+      if (tabFiles) tabFiles.className = activeTab === 'files' ? activeClass : inactiveClass;
+      if (tabArchive) tabArchive.className = activeTab === 'archive' ? activeClass : inactiveClass;
+      if (tabStash) tabStash.className = activeTab === 'stash' ? activeClass : inactiveClass;
+      
+      const showOriginal = activeTab === 'original';
+      const showStash = activeTab === 'stash';
+      const showTable = !showOriginal && !showStash;
+      document.getElementById('original-attachment')?.classList.toggle('hidden', !showOriginal);
+      document.getElementById('table-container')?.classList.toggle('hidden', !showTable);
+      document.getElementById('ingestion-stash-container')?.classList.toggle('hidden', !showStash);
+      document.getElementById('pagination-area')?.classList.toggle('hidden', showOriginal || showStash);
+      document.getElementById('btn-upload-file')?.classList.toggle('hidden', !showOriginal);
+      document.getElementById('btn-batch-archive')?.classList.toggle('hidden', showOriginal || showStash || activeTab === 'archive' || activeTab === 'files');
+      document.getElementById('btn-batch-approve')?.classList.toggle('hidden', showOriginal || activeTab === 'archive');
+      document.getElementById('btn-batch-reject')?.classList.toggle('hidden', showOriginal || showStash);
+      document.getElementById('team-select-wrapper')?.classList.toggle('hidden', showOriginal || showStash);
+      document.getElementById('inbox-status-wrapper')?.classList.toggle('hidden', !showOriginal);
+      const approveBtn = document.getElementById('btn-batch-approve');
+      if (approveBtn) {
+        approveBtn.innerHTML = showStash
+          ? '<i class="fa-solid fa-wand-magic-sparkles mr-1"></i>AI校验'
+          : `<i class="fa-solid fa-check mr-1"></i>${this.getCurrentLang() === 'cn' ? '通过' : '승인'}`;
+      }
+      const rejectBtn = document.getElementById('btn-batch-reject');
+      if (rejectBtn) {
+        rejectBtn.innerHTML = activeTab === 'archive'
+          ? `<i class="fa-solid fa-inbox mr-1"></i>${this.getCurrentLang() === 'cn' ? '移动到收件箱' : '받은 편지함으로 이동'}`
+          : `<i class="fa-solid fa-xmark mr-1"></i>${this.getCurrentLang() === 'cn' ? '驳回' : '거부'}`;
+      }
+      
+      if (showOriginal) {
+        this.activeDataMode = 'files';
+        this.renderInbox();
+      } else if (showStash) {
+        this.activeDataMode = 'stash';
+        this.renderStashTable();
+      } else {
+        this.activeDataMode = activeTab;
+        this.applyFilters();
+      }
+    };
+    
+    tabOriginal?.addEventListener('click', () => {
+      setActiveTab('original');
+    });
+    
+    tabFiles?.addEventListener('click', () => {
+      setActiveTab('files');
+    });
+
+    tabArchive?.addEventListener('click', () => {
+      setActiveTab('archive');
+    });
+
+    tabStash?.addEventListener('click', () => {
+      setActiveTab('stash');
+    });
+    
+    // 初始加载时设置默认tab状态（收件箱），确保 inbox-status-wrapper 等元素正确显示
+    setActiveTab('original');
+  },
+  
+  bindEvents() {
+    this.bindFilterEvents();
+    this.renderInbox();
+    this.bindBatchEvents();
+    this.bindPaginationEvents();
+    this.bindTabEvents();
+  }
+};

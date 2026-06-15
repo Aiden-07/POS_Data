@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title data-i18n="system_title">POS数据管理平台</title>
+  <!-- Tailwind CSS v3 via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome via CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Custom Style -->
+  <link rel="stylesheet" href="style.css?v=20260612-remove-sidebar-sync-card">
+  <!-- Tailwind Config -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#1d2129',
+            secondary: '#4e5969',
+            brand: '#165dff',
+            'brand-light': '#f5f7fa'
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="text-slate-900 font-sans min-h-screen flex flex-col overflow-hidden">
+  
+  <!-- Main Layout Wrapper (Hidden on Login) -->
+  <div id="app-layout" class="hidden flex-1 h-screen app-shell">
+    <aside id="sidebar" class="app-sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-mark">
+          <i class="fa-solid fa-database"></i>
+        </div>
+        <div class="brand-copy">
+          <span class="brand-title">POS DATA</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav" id="main-nav">
+        <a href="#dashboard" class="nav-item">
+          <i class="fa-solid fa-chart-line"></i>
+          <span data-i18n="nav_dashboard">首页概览</span>
+        </a>
+        <a href="#ingestion" class="nav-item">
+          <i class="fa-solid fa-file-import"></i>
+          <span data-i18n="nav_ingestion">文件收取</span>
+        </a>
+        <a href="#qa" class="nav-item">
+          <i class="fa-solid fa-shield-halved"></i>
+          <span data-i18n="nav_qa">质量检查</span>
+        </a>
+        <a href="#ledger" class="nav-item">
+          <i class="fa-solid fa-table-list"></i>
+          <span data-i18n="nav_ledger">台账与汇总</span>
+        </a>
+      </nav>
+
+    </aside>
+
+    <div class="app-main">
+      <!-- Top Action Bar -->
+      <header class="app-header">
+        <div class="flex items-center gap-4 min-w-0">
+          <button id="sidebar-toggle" class="icon-button lg:hidden" aria-label="切换导航">
+            <i class="fa-solid fa-bars"></i>
+          </button>
+          <div class="min-w-0">
+            <h1 class="page-title" data-i18n="system_title">POS数据管理平台</h1>
+            <p class="page-subtitle">数据收取、质检、台账与接口输出统一工作台</p>
+          </div>
+        </div>
+        
+        <div class="header-tools">
+          <!-- View Specific Actions will be injected here -->
+          <div id="view-actions" class="view-actions"></div>
+          <div id="global-period-slot"></div>
+          
+          <div class="notification-wrap">
+            <button id="notification-btn" class="icon-button notification-button" aria-label="站内通知">
+              <i class="fa-regular fa-bell"></i>
+              <span class="notification-badge">3</span>
+            </button>
+            <div id="notification-panel" class="notification-panel hidden">
+              <div class="notification-head">
+                <div>
+                  <strong>站内通知</strong>
+                  <span>3 条未读消息</span>
+                </div>
+                <button class="notification-clear" type="button">全部已读</button>
+              </div>
+              <div class="notification-list">
+                <button class="notification-item unread" type="button">
+                  <i class="fa-solid fa-file-circle-exclamation"></i>
+                  <span>
+                    <strong>POS_Store_B_0522.csv 出现异常</strong>
+                    <small>质量检查发现条码冲突，请优先处理</small>
+                  </span>
+                </button>
+                <button class="notification-item unread" type="button">
+                  <i class="fa-solid fa-cloud-arrow-up"></i>
+                  <span>
+                    <strong>Team C 今日提报进度偏低</strong>
+                    <small>当前完成率 30%，低于计划阈值</small>
+                  </span>
+                </button>
+                <button class="notification-item unread" type="button">
+                  <i class="fa-solid fa-circle-check"></i>
+                  <span>
+                    <strong>月度汇总已生成</strong>
+                    <small>2026-05 标准化台账可预览下载</small>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Language Toggle -->
+          <button id="lang-toggle" class="soft-button">
+            <i class="fa-solid fa-globe"></i>
+            <span id="current-lang-text">CN</span>
+          </button>
+          <button id="logout-btn" class="icon-button" aria-label="退出登录">
+            <i class="fa-solid fa-sign-out-alt"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Content Area -->
+      <main id="main-content" class="app-content">
+        <!-- Views will be mounted here -->
+      </main>
+
+    </div>
+
+    <!-- Floating Data Consultation Assistant -->
+    <div id="ai-assistant-root">
+      <button id="ai-assistant-fab" class="ai-fab" type="button" aria-label="数据咨询助手">
+        <i class="fa-solid fa-comments"></i>
+      </button>
+
+      <section id="ai-assistant-window" class="ai-window hidden" aria-label="数据咨询会话">
+        <header id="ai-window-header" class="ai-window-header">
+          <div class="ai-window-title">
+            <i class="fa-solid fa-sparkles"></i>
+            <div>
+              <strong>数据咨询助手</strong>
+            </div>
+          </div>
+          <div class="ai-window-actions">
+            <button id="ai-new-chat" type="button" class="ai-tool-button" title="新建对话">
+              <i class="fa-solid fa-plus"></i>
+            </button>
+            <button id="ai-fullscreen" type="button" class="ai-tool-button" title="全屏">
+              <i class="fa-solid fa-expand"></i>
+            </button>
+            <button id="ai-close" type="button" class="ai-tool-button" title="关闭">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </header>
+
+        <div class="ai-window-body">
+          <aside class="ai-history">
+            <div class="ai-history-head">
+              <span>历史会话</span>
+            </div>
+            <div id="ai-history-list" class="ai-history-list"></div>
+          </aside>
+
+          <main class="ai-chat">
+            <div id="ai-chat-messages" class="ai-chat-messages"></div>
+            <div id="ai-preview-panel" class="ai-preview-panel hidden"></div>
+            <form id="ai-chat-form" class="ai-chat-form">
+              <div class="ai-input-row">
+                <input id="ai-question" type="text" placeholder="请输入查询年月与门店名称，检索对应门店 POS 数据" aria-label="咨询内容" autocomplete="off">
+                <button type="submit">
+                  <i class="fa-solid fa-paper-plane"></i>
+                  发送
+                </button>
+              </div>
+            </form>
+          </main>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Login View Container -->
+  <div id="login-container" class="h-screen w-screen flex items-center justify-center relative overflow-hidden px-4 login-shell">
+    <!-- Subtle tech dots background -->
+    <div class="absolute inset-0 z-0 opacity-[0.03]" style="background-image: radial-gradient(#2563eb 1.5px, transparent 1.5px); background-size: 32px 32px;"></div>
+    
+    <!-- Decorative abstract blobs -->
+    <div class="absolute -top-24 -right-24 w-96 h-96 bg-brand/10 rounded-full blur-3xl z-0"></div>
+    <div class="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-400/10 rounded-full blur-3xl z-0"></div>
+
+    <div id="login-view-slot" class="relative z-10 w-full flex items-center justify-center"></div>
+    <div class="absolute bottom-8 text-slate-400 text-xs font-medium z-10">
+      Copyright 2019 by ORION. All right reserved
+    </div>
+  </div>
+
+  <!-- Global Overlay (Dialog, Drawer, Toast) -->
+  <div id="overlay-container"></div>
+
+  <!-- Scripts -->
+  <script src="js/core/store.js?v=20260612-remove-footer-status"></script>
+  <script src="js/core/global-period.js?v=20260611-global-period"></script>
+  <script src="js/core/i18n.js?v=20260612-korean-global-5"></script>
+  <script src="js/components/dialog.js?v=20260611-merge"></script>
+  <script src="js/components/drawer.js?v=20260611-merge"></script>
+  <script src="js/components/ai-assistant.js?v=20260612-ai-card-detail-count"></script>
+  <script src="js/views/login.js?v=20260611-merge"></script>
+  <script src="js/views/dashboard.js?v=20260611-remove-dashboard-period-label"></script>
+  <script src="js/views/ingestion.js?v=20260612-inbox-archive-flow-3"></script>
+  <script src="js/views/qa.js?v=20260611-exception-original-preview"></script>
+  <script src="js/views/ledger.js?v=20260611-merge"></script>
+  <script src="js/core/app.js?v=20260611-global-period"></script>
+</body>
+</html>
