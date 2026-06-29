@@ -3,11 +3,14 @@ const AIAssistant = {
   activeId: null,
   lastResult: null,
   dragState: null,
+  fabDragState: null,
+  suppressFabClick: false,
 
   init() {
     this.cacheDom();
     if (!this.fab || !this.windowEl) return;
 
+    this.restoreFabPosition();
     this.createConversation('默认咨询');
     this.bindEvents();
   },
@@ -27,7 +30,14 @@ const AIAssistant = {
   },
 
   bindEvents() {
-    this.fab.addEventListener('click', () => this.open());
+    this.fab.addEventListener('click', (event) => {
+      if (this.suppressFabClick) {
+        event.preventDefault();
+        return;
+      }
+      this.open();
+    });
+    this.fab.addEventListener('mousedown', (event) => this.startFabDrag(event));
     this.closeBtn.addEventListener('click', () => this.close());
     this.fullscreenBtn.addEventListener('click', () => this.toggleFullscreen());
     this.newChatBtn.addEventListener('click', () => this.createConversation());
@@ -38,7 +48,11 @@ const AIAssistant = {
 
     this.header.addEventListener('mousedown', (event) => this.startDrag(event));
     document.addEventListener('mousemove', (event) => this.drag(event));
-    document.addEventListener('mouseup', () => this.stopDrag());
+    document.addEventListener('mousemove', (event) => this.dragFab(event));
+    document.addEventListener('mouseup', () => {
+      this.stopDrag();
+      this.stopFabDrag();
+    });
   },
 
   open() {
@@ -83,6 +97,66 @@ const AIAssistant = {
 
   stopDrag() {
     this.dragState = null;
+  },
+
+  restoreFabPosition() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('pos-ai-fab-position') || 'null');
+      if (!saved || typeof saved.left !== 'number' || typeof saved.top !== 'number') return;
+      const left = Math.min(Math.max(10, saved.left), Math.max(10, window.innerWidth - this.fab.offsetWidth - 10));
+      const top = Math.min(Math.max(10, saved.top), Math.max(10, window.innerHeight - this.fab.offsetHeight - 10));
+      this.fab.style.right = 'auto';
+      this.fab.style.bottom = 'auto';
+      this.fab.style.left = `${left}px`;
+      this.fab.style.top = `${top}px`;
+    } catch (error) {
+      localStorage.removeItem('pos-ai-fab-position');
+    }
+  },
+
+  startFabDrag(event) {
+    if (event.button !== 0) return;
+    const rect = this.fab.getBoundingClientRect();
+    this.fabDragState = {
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      moved: false
+    };
+    this.fab.classList.add('dragging');
+    this.fab.style.right = 'auto';
+    this.fab.style.bottom = 'auto';
+    this.fab.style.left = `${rect.left}px`;
+    this.fab.style.top = `${rect.top}px`;
+    event.preventDefault();
+  },
+
+  dragFab(event) {
+    if (!this.fabDragState) return;
+    const distance = Math.hypot(event.clientX - this.fabDragState.startX, event.clientY - this.fabDragState.startY);
+    if (distance > 3) this.fabDragState.moved = true;
+    const maxLeft = window.innerWidth - this.fab.offsetWidth - 10;
+    const maxTop = window.innerHeight - this.fab.offsetHeight - 10;
+    const left = Math.min(Math.max(10, event.clientX - this.fabDragState.offsetX), Math.max(10, maxLeft));
+    const top = Math.min(Math.max(10, event.clientY - this.fabDragState.offsetY), Math.max(10, maxTop));
+    this.fab.style.left = `${left}px`;
+    this.fab.style.top = `${top}px`;
+  },
+
+  stopFabDrag() {
+    if (!this.fabDragState) return;
+    const moved = this.fabDragState.moved;
+    this.fabDragState = null;
+    this.fab.classList.remove('dragging');
+    if (moved) {
+      this.suppressFabClick = true;
+      const rect = this.fab.getBoundingClientRect();
+      localStorage.setItem('pos-ai-fab-position', JSON.stringify({ left: rect.left, top: rect.top }));
+      setTimeout(() => {
+        this.suppressFabClick = false;
+      }, 0);
+    }
   },
 
   createConversation(title = '新的 POS 咨询') {

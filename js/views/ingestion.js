@@ -141,12 +141,7 @@ const IngestionView = {
   },
   
   renderAction() {
-    return `
-      <div class="flex items-center text-sm text-[#1d2129] font-bold mr-6">
-        <span class="w-1 h-4 bg-brand rounded-full mr-2"></span>
-        <span data-i18n="nav_ingestion">文件收取</span>
-      </div>
-    `;
+    return '';
   },
   
   render() {
@@ -1763,10 +1758,11 @@ const IngestionView = {
   },
 
   updateStashBatchButton() {
-    const rowCheckboxes = Array.from(document.querySelectorAll('.row-cb-ingestion-stash'));
+    const container = document.getElementById('ingestion-stash-container');
+    const rowCheckboxes = Array.from(container?.querySelectorAll('.row-cb-ingestion-stash') || []);
     const selected = rowCheckboxes.filter((checkbox) => checkbox.checked).length;
     const approveBtn = document.getElementById('btn-batch-approve');
-    const selectAll = document.getElementById('ingestion-stash-select-all');
+    const selectAll = container?.querySelector('#ingestion-stash-select-all');
 
     if (approveBtn) {
       approveBtn.disabled = selected === 0;
@@ -1782,8 +1778,9 @@ const IngestionView = {
   },
 
   bindStashEvents() {
-    const selectAll = document.getElementById('ingestion-stash-select-all');
-    const rowCheckboxes = Array.from(document.querySelectorAll('.row-cb-ingestion-stash'));
+    const container = document.getElementById('ingestion-stash-container');
+    const selectAll = container?.querySelector('#ingestion-stash-select-all');
+    const rowCheckboxes = Array.from(container?.querySelectorAll('.row-cb-ingestion-stash') || []);
 
     selectAll?.addEventListener('change', (event) => {
       rowCheckboxes.forEach((checkbox) => {
@@ -1796,7 +1793,7 @@ const IngestionView = {
       checkbox.addEventListener('change', () => this.updateStashBatchButton());
     });
 
-    document.querySelectorAll('.ingestion-stash-preview-trigger').forEach((trigger) => {
+    container?.querySelectorAll('.ingestion-stash-preview-trigger').forEach((trigger) => {
       trigger.addEventListener('click', (event) => {
         event.stopPropagation();
         const index = Number(trigger.dataset.index);
@@ -2495,10 +2492,11 @@ const IngestionView = {
     const handleBatchAction = (action) => {
       if (this.activeDataMode === 'stash') {
         if (action !== 'approve') return;
-        const selected = document.querySelectorAll('.row-cb-ingestion-stash:checked').length;
+        const container = document.getElementById('ingestion-stash-container');
+        const selected = container?.querySelectorAll('.row-cb-ingestion-stash:checked').length || 0;
         if (selected === 0) return;
         Dialog.toast(`已通过 ${selected} 条暂存数据`, 'success');
-        document.querySelectorAll('.row-cb-ingestion-stash').forEach((checkbox) => {
+        container?.querySelectorAll('.row-cb-ingestion-stash').forEach((checkbox) => {
           checkbox.checked = false;
         });
         this.updateStashBatchButton();

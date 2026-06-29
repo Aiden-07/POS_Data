@@ -2,6 +2,8 @@ const Store = {
   state: {
     lang: 'cn',
     isAuthenticated: false,
+    userName: 'Aiden',
+    userRole: 'POS担当',
     team: 'Team A',
     lastUpdated: new Date().toLocaleString(),
     currentView: 'login',

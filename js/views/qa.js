@@ -51,12 +51,7 @@ const QAView = {
   },
   
   renderAction() {
-    return `
-      <div class="flex items-center text-sm text-[#1d2129] font-bold mr-6">
-        <span class="w-1 h-4 bg-brand rounded-full mr-2"></span>
-        <span data-i18n="nav_qa">质量检查</span>
-      </div>
-    `;
+    return '';
   },
 
   getConfidenceSummary() {
