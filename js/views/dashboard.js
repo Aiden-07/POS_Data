@@ -382,7 +382,7 @@ const DashboardView = {
         <div class="glass-card overflow-hidden xl:col-span-1">
           <div class="px-7 py-5 border-b border-blue-50 flex justify-between items-center bg-white/50">
             <div>
-              <h3 class="font-extrabold text-[#1d2129] text-base">Team 数据提报进度</h3>
+              <h3 class="font-extrabold text-[#1d2129] text-base">Team 数据提交进度</h3>
               <p class="text-xs text-[#86909c] mt-1">按团队跟踪标准文件提报完成情况</p>
             </div>
             <button id="progress-sort-btn" class="px-3 py-1.5 text-xs rounded-lg bg-blue-50 text-brand hover:bg-brand hover:text-white transition-colors flex items-center gap-2">

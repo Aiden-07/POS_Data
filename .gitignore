@@ -15,6 +15,8 @@ Thumbs.db
 logs/
 tmp/
 temp/
+PosDataSystem.zip
+PosDataSystem/
 
 # Python caches and environments
 __pycache__/

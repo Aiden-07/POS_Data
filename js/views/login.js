@@ -1,5 +1,6 @@
 const LoginView = {
   outsideClickHandler: null,
+  rememberedCredentialKey: 'pos_demo_remembered_login',
 
   render() {
     return `
@@ -35,16 +36,25 @@ const LoginView = {
         <form id="login-form" class="w-full flex flex-col gap-5">
           <div class="relative group">
             <i class="fa-solid fa-user absolute left-4 top-1/2 -translate-y-1/2 text-brand/70 group-focus-within:text-brand transition-colors"></i>
-            <input type="text" data-i18n="username_placeholder" placeholder="请输入账号" class="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 focus:bg-white transition-all text-sm text-slate-800 font-medium placeholder-slate-400">
+            <input type="text" id="login-account" data-i18n="username_placeholder" placeholder="请输入账号" class="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 focus:bg-white transition-all text-sm text-slate-800 font-medium placeholder-slate-400">
           </div>
           
           <div class="relative group">
             <i class="fa-solid fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-brand/70 group-focus-within:text-brand transition-colors"></i>
             <input type="password" id="login-password" data-i18n="password_placeholder" placeholder="请输入密码" class="w-full pl-11 pr-12 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 focus:bg-white transition-all text-sm text-slate-800 font-medium placeholder-slate-400">
-            <button type="button" id="toggle-password" class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-brand transition-colors focus:outline-none">
+            <button type="button" id="toggle-password" class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-brand transition-colors focus:outline-none" aria-label="显示密码" aria-pressed="false" title="显示密码">
               <i class="fa-solid fa-eye-slash" id="toggle-password-icon"></i>
             </button>
           </div>
+
+          <p id="login-error-message" class="hidden -mt-2 text-sm text-red-600 font-medium leading-5">
+            账号或密码不正确，忘记密码请联系管理员重置密码
+          </p>
+
+          <label class="flex items-center gap-2 -mt-1 text-sm text-slate-600 cursor-pointer select-none">
+            <input id="remember-password" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-brand focus:ring-brand/30">
+            <span>记住密码</span>
+          </label>
           
           <button type="submit" class="w-full bg-brand hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl mt-4 transition-all duration-300 shadow-lg shadow-brand/30 hover:shadow-brand/50 hover:-translate-y-0.5 flex items-center justify-center gap-2" data-i18n="login_btn">
             登录
@@ -83,6 +93,35 @@ const LoginView = {
     I18n.updateDOM();
     this.updateLanguageDropdown();
     this.bindEvents();
+    this.restoreRememberedCredential();
+  },
+
+  restoreRememberedCredential() {
+    try {
+      const remembered = JSON.parse(localStorage.getItem(this.rememberedCredentialKey) || 'null');
+      if (!remembered?.remember) return;
+      const accountInput = document.getElementById('login-account');
+      const passwordInput = document.getElementById('login-password');
+      const rememberInput = document.getElementById('remember-password');
+      if (accountInput) accountInput.value = remembered.account || '';
+      if (passwordInput) passwordInput.value = remembered.password || '';
+      if (rememberInput) rememberInput.checked = true;
+    } catch (error) {
+      localStorage.removeItem(this.rememberedCredentialKey);
+    }
+  },
+
+  persistRememberedCredential(account, password) {
+    const rememberInput = document.getElementById('remember-password');
+    if (rememberInput?.checked) {
+      localStorage.setItem(this.rememberedCredentialKey, JSON.stringify({
+        remember: true,
+        account,
+        password
+      }));
+      return;
+    }
+    localStorage.removeItem(this.rememberedCredentialKey);
   },
 
   bindEvents() {
@@ -90,10 +129,35 @@ const LoginView = {
     if (form) {
       form.addEventListener('submit', (e) => {
         e.preventDefault();
-        Store.setState({ isAuthenticated: true });
-        window.location.hash = '#dashboard';
+        const accountInput = document.getElementById('login-account');
+        const passwordInput = document.getElementById('login-password');
+        const errorMessage = document.getElementById('login-error-message');
+        const account = accountInput?.value.trim() || '';
+        const password = passwordInput?.value.trim() || '';
+
+        if (account === 'A123456' && password === '123456') {
+          errorMessage?.classList.add('hidden');
+          this.persistRememberedCredential(account, password);
+          Store.setState({ isAuthenticated: true });
+          window.location.hash = '#dashboard';
+          return;
+        }
+
+        errorMessage?.classList.remove('hidden');
+        accountInput?.classList.add('border-red-300', 'focus:border-red-500', 'focus:ring-red-100');
+        passwordInput?.classList.add('border-red-300', 'focus:border-red-500', 'focus:ring-red-100');
       });
     }
+
+    const accountInput = document.getElementById('login-account');
+    const loginPasswordInput = document.getElementById('login-password');
+    const clearLoginError = () => {
+      document.getElementById('login-error-message')?.classList.add('hidden');
+      accountInput?.classList.remove('border-red-300', 'focus:border-red-500', 'focus:ring-red-100');
+      loginPasswordInput?.classList.remove('border-red-300', 'focus:border-red-500', 'focus:ring-red-100');
+    };
+    accountInput?.addEventListener('input', clearLoginError);
+    loginPasswordInput?.addEventListener('input', clearLoginError);
     
     // Password Toggle Logic
     const togglePasswordBtn = document.getElementById('toggle-password');
@@ -102,9 +166,12 @@ const LoginView = {
     
     if (togglePasswordBtn && passwordInput) {
       togglePasswordBtn.addEventListener('click', () => {
-        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
-        passwordInput.setAttribute('type', type);
-        togglePasswordIcon.className = type === 'password' ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+        const willShowPassword = passwordInput.getAttribute('type') === 'password';
+        passwordInput.setAttribute('type', willShowPassword ? 'text' : 'password');
+        togglePasswordIcon.className = willShowPassword ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash';
+        togglePasswordBtn.setAttribute('aria-pressed', String(willShowPassword));
+        togglePasswordBtn.setAttribute('aria-label', willShowPassword ? '隐藏密码' : '显示密码');
+        togglePasswordBtn.setAttribute('title', willShowPassword ? '隐藏密码' : '显示密码');
       });
     }
     

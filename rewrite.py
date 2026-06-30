@@ -203,7 +203,7 @@ dash_render = """  render() {
         <!-- Progress Tracking -->
         <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.06)] border border-white overflow-hidden mt-6">
           <div class="px-7 py-5 border-b border-gray-100 flex justify-between items-center bg-white/50">
-            <h3 class="font-bold text-[#1d2129] text-base flex items-center gap-2">Team 数据提报进度</h3>
+            <h3 class="font-bold text-[#1d2129] text-base flex items-center gap-2">Team 数据提交进度</h3>
             <div class="flex bg-[#f7f8fa] rounded-lg p-1">
               <button class="px-4 py-1.5 text-xs font-medium bg-white shadow-sm rounded-md text-[#1d2129] transition-all">今日</button>
               <button class="px-4 py-1.5 text-xs font-medium text-[#86909c] hover:text-[#1d2129] transition-all">本周</button>
@@ -568,4 +568,3 @@ sdk_js = re.sub(r'  renderAction\(\) \{.*?\n  \},', sdk_render_action, sdk_js, f
 sdk_js = re.sub(r'  render\(\) \{.*?\n  \},', sdk_render, sdk_js, flags=re.DOTALL)
 with open('js/views/sdk.js', 'w') as f:
     f.write(sdk_js)
-

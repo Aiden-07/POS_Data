@@ -252,11 +252,8 @@ def build_docx(md_path: Path, out_path: Path):
             text = heading.group(2).strip()
             if level == 1:
                 p = doc.add_paragraph()
-                set_paragraph_spacing(p, before=0, after=3, line=1.1)
+                set_paragraph_spacing(p, before=0, after=16, line=1.1)
                 add_rich_text(p, text, size=22, bold=True, color=DARK_ACCENT)
-                subtitle = doc.add_paragraph()
-                set_paragraph_spacing(subtitle, before=0, after=16, line=1.1)
-                add_rich_text(subtitle, "由 Markdown PRD 转换生成，用于开发交付与评审。", size=10, color=MUTED)
             else:
                 style = "Heading 1" if level == 2 else "Heading 2" if level == 3 else "Heading 3"
                 doc.add_paragraph(text, style=style)

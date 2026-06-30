@@ -19,6 +19,56 @@ const IngestionView = {
     // 韩文模式：显示完整文本
     return text;
   },
+
+  isDuplicateAttachment(attachment) {
+    const reason = attachment?.rejectReason || '';
+    return reason.includes('重复') || reason.includes('覆盖/忽略');
+  },
+
+  getInboxStatusStyle(statusText) {
+    if (statusText === '正常') {
+      return 'bg-green-50 text-green-700 border-green-100';
+    }
+    if (statusText === '待处理') {
+      return 'bg-amber-50 text-amber-700 border-amber-100';
+    }
+    return 'bg-slate-50 text-slate-600 border-slate-100';
+  },
+
+  getRoutedInboxAttachments(targetStatus) {
+    return this.getInboxData().flatMap((inboxItem) => {
+      const sourceRow = this.data.find(row => row.id === inboxItem.id) || {};
+      return inboxItem.attachments
+        .map((attachment, attachmentIndex) => ({
+          attachment,
+          attachmentIndex,
+          inboxItem,
+          sourceRow
+        }))
+        .filter(item => item.attachment.status === targetStatus);
+    });
+  },
+
+  recalcInboxItemStatus(inboxItem) {
+    if (!inboxItem?.attachments?.length) return;
+
+    const hasPending = inboxItem.attachments.some(item => item.status === '待处理');
+    const allNormal = inboxItem.attachments.every(item => item.status === '正常');
+    const needsAttention = inboxItem.attachments
+      .filter(item => item.status !== '正常')
+      .map(item => item.rejectReason)
+      .filter(reason => reason && reason !== '-');
+
+    inboxItem.isNormal = allNormal;
+    if (allNormal) {
+      inboxItem.statusText = '正常';
+      inboxItem.suggestion = '-';
+      return;
+    }
+
+    inboxItem.statusText = hasPending ? '待处理' : '已处理';
+    inboxItem.suggestion = [...new Set(needsAttention)].join('；') || '-';
+  },
   
   // 筛选状态
   filters: {
@@ -89,7 +139,20 @@ const IngestionView = {
     let result = [...this.data];
 
     if (this.activeDataMode === 'archive') {
-      result = result.filter(row => row.status.includes('已归档'));
+      const archivedAttachmentRows = this.getRoutedInboxAttachments('已归档').map(({ attachment, attachmentIndex, inboxItem, sourceRow }) => ({
+        ...sourceRow,
+        id: `${inboxItem.id}-att-${attachmentIndex}`,
+        sourceEmailId: inboxItem.id,
+        sourceAttIdx: attachmentIndex,
+        fileName: attachment.name,
+        status: '已归档',
+        handler: sourceRow.handler || sourceRow.team || 'POS担当',
+        suggestion: '-'
+      }));
+      result = [
+        ...archivedAttachmentRows,
+        ...result.filter(row => row.status.includes('已归档'))
+      ];
     } else {
       result = result.filter(row => !row.status.includes('已归档'));
     }
@@ -332,7 +395,7 @@ const IngestionView = {
                   <span class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? '全选' : '전체 선택'}</span>
                 </label>
                 <div class="border-t border-gray-100 my-1"></div>
-                ${[['正常', '정상'], ['全部异常', '전체 이상'], ['部分异常', '부분 이상']].map(([val, label]) => `
+                ${[['正常', '정상'], ['待处理', '처리 대기'], ['已处理', '처리 완료']].map(([val, label]) => `
                   <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
                     <input type="checkbox" value="${val}" class="inbox-status-checkbox rounded border-gray-300 text-brand" ${this.inboxStatusFilter.includes(val) ? 'checked' : ''}>
                     <span class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? val : label}</span>
@@ -371,7 +434,6 @@ const IngestionView = {
             
             <!-- 批量操作区 -->
             <div class="ml-auto flex items-center gap-2">
-              <input type="file" id="upload-file-input" class="hidden" accept=".xlsx,.xls,.csv,.zip">
               <button type="button" id="btn-upload-file"
                 class="px-4 py-2 bg-brand hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:shadow-brand/30 hover:-translate-y-0.5">
                 <i class="fa-solid fa-upload mr-1"></i>${this.getCurrentLang() === 'cn' ? '上传文件' : '파일 업로드'}
@@ -544,7 +606,7 @@ const IngestionView = {
     };
     
     // 定义异常邮件索引及异常类型（只有3-4条异常数据）
-    // type: 'all'=全部异常, 'partial'=部分异常
+    // type: 'all'=全部附件驳回, 'partial'=部分附件驳回
     const abnormalMap = {
       4: { type: 'all' },
       5: { type: 'all', reason: '门店名称或者门店编码缺失' },
@@ -590,57 +652,43 @@ const IngestionView = {
         
         if (abnormalCfg) {
           if (abnormalCfg.type === 'all') {
-            // 全部异常：所有附件都驳回，使用统一驳回原因
+            // 所有附件都驳回，使用统一驳回原因
             status = '驳回';
             rejectReason = idx === 4
               ? '文件损坏、打不开'
               : abnormalCfg.reason || rejectionReasons[(idx + i) % rejectionReasons.length];
           } else if (abnormalCfg.type === 'partial') {
-            // 部分异常：一半正常一半驳回
+            // 一半正常一半驳回
             status = (i % 2 === 1) ? '驳回' : '正常';
             rejectReason = status === '驳回'
               ? (idx === 11 ? '文件加密，打不开' : rejectionReasons[(idx + i) % rejectionReasons.length])
               : '-';
           }
         }
+
+        if ((idx === 2 && i === 0) || (idx === 3 && i === 1)) {
+          status = '待处理';
+          rejectReason = '该文件解析后发现“A门店、B门店”与原始门店数据列表中有重复，请确定是否覆盖/忽略';
+        }
+
+        if (idx === 2 && i === 1) {
+          status = '已归档';
+          rejectReason = '-';
+        }
+
+        if (idx === 2 && i === 2) {
+          status = '暂存';
+          rejectReason = '-';
+        }
         
         attachments.push({
-          name: isZip && i === 0
-            ? `${storeNameCN}-数据压缩包.zip`
+          name: (isZip && i === 0) || (idx === 2 && i === 0)
+            ? `${storeNameCN}-销售明细包.zip`
             : `${storeNameCN}${i > 0 ? '-' + (i + 1) : ''}-销售明细.xlsx`,
           status,
           rejectReason,
           sourceMethod: sourceMethods[(idx + i) % sourceMethods.length]
         });
-      }
-      
-      // 判断邮件状态
-      const allNormal = attachments.every(a => a.status === '正常');
-      const allRejected = attachments.every(a => a.status !== '正常');
-      const hasAbnormal = attachments.some(a => a.status !== '正常');
-      
-      let statusText = '正常';
-      let isNormal = true;
-      
-      if (allRejected) {
-        statusText = '全部异常';
-        isNormal = false;
-      } else if (hasAbnormal && !allNormal) {
-        statusText = '部分异常';
-        isNormal = false;
-      }
-      
-      // AI建议：根据附件驳回原因生成对应的建议
-      let suggestion = '-';
-      if (!isNormal) {
-        const rejectedReasons = attachments
-          .filter(a => a.status !== '正常')
-          .map(a => a.rejectReason)
-          .filter(r => r && r !== '-');
-        const uniqueReasons = [...new Set(rejectedReasons)];
-        suggestion = uniqueReasons
-          .map(r => rejectionToSuggestion[r] || r)
-          .join('；');
       }
       
       const emailSubject = isZip
@@ -651,19 +699,27 @@ const IngestionView = {
         ? `请查收${storeNameCN}POS数据压缩包，解压后进行标准化处理。`
         : `请查收${storeNameCN}12月POS数据附件，烦请完成收取与质检。`;
       
-      return {
+      const inboxItem = {
         id: row.id,
         index: idx + 1,
         emailSubject,
         emailBody,
         attachmentCount,
-        isNormal,
-        statusText,
-        suggestion,
+        isNormal: true,
+        statusText: '正常',
+        suggestion: '-',
         provider,
         provideTime,
         attachments
       };
+      this.recalcInboxItemStatus(inboxItem);
+      if (inboxItem.suggestion !== '-') {
+        inboxItem.suggestion = inboxItem.suggestion
+          .split('；')
+          .map(reason => rejectionToSuggestion[reason] || reason)
+          .join('；');
+      }
+      return inboxItem;
     });
     
     this.inboxDataCache = inboxItems;
@@ -704,13 +760,12 @@ const IngestionView = {
           <tr>
             <th class="px-3 py-3 w-12"></th>
             <th class="px-3 py-3 w-12">序号</th>
-            <th class="px-4 py-3 min-w-[280px]">${cn ? '邮件标题' : '이메일 제목'}</th>
-            <th class="px-4 py-3 min-w-[200px]">${cn ? '正文内容' : '본문 내용'}</th>
-            <th class="px-4 py-3 w-24 text-center">${cn ? '邮件附件数' : '첨부 수'}</th>
+            <th class="px-4 py-3 min-w-[280px]">${cn ? '标题' : '제목'}</th>
+            <th class="px-4 py-3 min-w-[200px]">${cn ? '内容' : '내용'}</th>
+            <th class="px-4 py-3 w-24 text-center">${cn ? '附件数' : '첨부 수'}</th>
             <th class="px-4 py-3 w-32 text-center whitespace-nowrap">${cn ? '状态' : '상태'}</th>
             <th class="px-4 py-3 w-44">${cn ? '材料提供人' : '제공자'}</th>
             <th class="px-4 py-3 w-32">${cn ? '材料提供时间' : '제공 시간'}</th>
-            <th class="px-4 py-3 min-w-[180px]">${cn ? 'AI建议' : 'AI 제안'}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100" id="inbox-tbody">
@@ -741,7 +796,7 @@ const IngestionView = {
           <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-[#4e5969]">${item.attachmentCount}</span>
         </td>
         <td class="px-4 py-3 text-center">
-          <span class="px-2.5 py-1 rounded-full text-xs font-semibold border ${item.statusText === '正常' ? 'bg-green-50 text-green-700 border-green-100' : item.statusText === '全部异常' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-amber-50 text-amber-600 border-amber-100'}">
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold border ${this.getInboxStatusStyle(item.statusText)}">
             ${item.statusText}
           </span>
         </td>
@@ -751,9 +806,6 @@ const IngestionView = {
         <td class="px-4 py-3">
           <span class="text-sm text-[#4e5969]">${item.provideTime}</span>
         </td>
-        <td class="px-4 py-3">
-          <div class="hover-tip max-w-xs truncate ${item.isNormal ? 'text-[#86909c]' : item.statusText === '全部异常' ? 'text-red-600' : 'text-amber-600'}" data-tip="${this.escapeHtml(item.suggestion)}">${this.escapeHtml(item.suggestion)}</div>
-        </td>
       </tr>
     `;
   },
@@ -762,16 +814,16 @@ const IngestionView = {
     const cn = this.getCurrentLang() === 'cn';
     return `
       <tr class="inbox-detail-row hidden" data-parent-id="${item.id}">
-        <td colspan="9" class="p-0 bg-[#f7faff]">
+        <td colspan="8" class="p-0 bg-[#f7faff]">
           <div class="px-8 py-4 border-t border-blue-100">
-            <table class="w-full text-left text-xs text-[#4e5969] border border-gray-100 rounded-lg overflow-hidden">
+            <table class="w-full table-fixed text-left text-xs text-[#4e5969] border border-gray-100 rounded-lg overflow-hidden">
               <thead class="bg-[#eef2fb] text-[#1d2129] font-semibold">
                 <tr>
-                  <th class="px-4 py-2.5 w-[140px]">${cn ? '附件名称' : '첨부 파일명'}</th>
-                  <th class="px-4 py-2.5 w-20 text-center">${cn ? '附件状态' : '첨부 상태'}</th>
-                  <th class="px-4 py-2.5 w-[140px]">${cn ? '驳回说明' : '거부 사유'}</th>
-                  <th class="px-4 py-2.5 w-24">${cn ? '来源方式' : '출처 방식'}</th>
-                  <th class="px-4 py-2.5 w-20 text-center">${cn ? '操作' : '조작'}</th>
+                  <th class="px-4 py-2.5 w-[34%]">${cn ? '附件名称' : '첨부 파일명'}</th>
+                  <th class="px-4 py-2.5 w-[120px] text-center">${cn ? '附件状态' : '첨부 상태'}</th>
+                  <th class="px-4 py-2.5 w-[28%]">${cn ? '异常说明' : '이상 설명'}</th>
+                  <th class="px-4 py-2.5 w-[140px]">${cn ? '来源方式' : '출처 방식'}</th>
+                  <th class="px-4 py-2.5 w-[220px] text-left">${cn ? '操作' : '조작'}</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-100 bg-white">
@@ -787,33 +839,227 @@ const IngestionView = {
   renderAttachmentRow(emailId, att, index) {
     const isRejected = att.status === '驳回';
     const isArchived = att.status === '已归档';
+    const isPending = att.status === '待处理';
+    const isStashed = att.status === '暂存';
+    const isDuplicatePending = isPending && this.isDuplicateAttachment(att);
     return `
       <tr class="hover:bg-slate-50 transition-colors" data-email-id="${emailId}" data-att-idx="${index}">
-        <td class="px-4 py-2.5 max-w-0">
+        <td class="px-4 py-2.5 w-[34%] max-w-0">
           <span class="inbox-att-name-text cursor-pointer text-brand hover:text-blue-700 hover:underline transition-colors truncate block" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '点击预览' : '클릭하여 미리보기'}">${this.escapeHtml(att.name)}</span>
         </td>
-        <td class="px-4 py-2.5 text-center">
-          <span class="px-2 py-0.5 rounded-full text-xs font-semibold border ${isRejected ? 'bg-red-50 text-red-600 border-red-100' : isArchived ? 'bg-slate-50 text-slate-500 border-slate-100' : 'bg-green-50 text-green-700 border-green-100'}">
+        <td class="px-4 py-2.5 w-[120px] text-center">
+          <span class="px-2 py-0.5 rounded-full text-xs font-semibold border ${isRejected ? 'bg-red-50 text-red-600 border-red-100' : isPending ? 'bg-amber-50 text-amber-700 border-amber-100' : isArchived ? 'bg-slate-50 text-slate-500 border-slate-100' : isStashed ? 'bg-blue-50 text-brand border-blue-100' : 'bg-green-50 text-green-700 border-green-100'}">
             ${att.status}
           </span>
         </td>
-        <td class="px-4 py-2.5 ${isRejected ? 'text-red-600' : 'text-[#86909c]'}">${this.escapeHtml(att.rejectReason)}</td>
-        <td class="px-4 py-2.5 text-[#4e5969]">${att.sourceMethod}</td>
-        <td class="px-4 py-2.5 text-center">
-          <div class="flex items-center justify-center gap-1.5">
+        <td class="px-4 py-2.5 w-[28%] max-w-0 ${isRejected ? 'text-red-600' : isPending ? 'text-amber-700' : 'text-[#86909c]'}">
+          <div class="truncate" title="${this.escapeHtml(att.rejectReason)}">${this.escapeHtml(att.rejectReason)}</div>
+        </td>
+        <td class="px-4 py-2.5 w-[140px] text-[#4e5969]">${att.sourceMethod}</td>
+        <td class="px-4 py-2.5 w-[220px]">
+          <div class="flex items-center justify-start gap-1.5 whitespace-nowrap">
             <button type="button" class="inbox-att-preview-btn px-2 py-1 text-xs rounded text-slate-500 hover:bg-slate-100 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '预览附件' : '첨부 미리보기'}">
               <i class="fa-regular fa-eye"></i>
             </button>
             <button type="button" class="inbox-att-archive-btn px-2 py-1 text-xs rounded text-[#86909c] hover:bg-gray-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '归档' : '보관'}">
               <i class="fa-solid fa-folder-minus"></i>
             </button>
-            <button type="button" class="inbox-att-reject-btn px-2 py-1 text-xs rounded text-red-500 hover:bg-red-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="驳回">
-              <i class="fa-solid fa-xmark"></i>
+            <button type="button" class="inbox-att-reject-btn px-2 py-1 text-xs rounded transition-all ${isRejected ? 'text-gray-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-50'}" data-email-id="${emailId}" data-att-idx="${index}" title="${isRejected ? '已驳回' : '驳回'}" ${isRejected ? 'disabled' : ''}>
+              <i class="fa-solid fa-reply"></i>
             </button>
+            ${isDuplicatePending ? `
+              <button type="button" class="inbox-att-duplicate-action px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-all" data-action="cover" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '覆盖重复数据' : '중복 데이터 덮어쓰기'}">
+                ${this.getCurrentLang() === 'cn' ? '覆盖' : '덮어쓰기'}
+              </button>
+              <button type="button" class="inbox-att-duplicate-action px-2 py-1 text-xs rounded text-[#4e5969] hover:bg-gray-50 transition-all" data-action="ignore" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '忽略重复数据' : '중복 데이터 무시'}">
+                ${this.getCurrentLang() === 'cn' ? '忽略' : '무시'}
+              </button>
+            ` : ''}
           </div>
         </td>
       </tr>
     `;
+  },
+
+  resolveDuplicateAttachment(emailId, attachmentIndex, action) {
+    const inboxItem = this.getInboxData().find(item => String(item.id) === String(emailId));
+    const attachment = inboxItem?.attachments?.[attachmentIndex];
+    if (!inboxItem || !attachment || !this.isDuplicateAttachment(attachment)) return;
+
+    const cn = this.getCurrentLang() === 'cn';
+    const resolvedText = action === 'cover'
+      ? (cn ? '已覆盖重复门店' : '중복 매장을 덮어썼습니다')
+      : (cn ? '已忽略重复门店' : '중복 매장을 무시했습니다');
+
+    attachment.status = '正常';
+    attachment.rejectReason = resolvedText;
+    this.recalcInboxItemStatus(inboxItem);
+    this.renderInbox();
+    Dialog.toast(resolvedText, 'success');
+  },
+
+  openInboxAttachmentRejectConfirm(emailId, attachmentIndex) {
+    const overlay = document.getElementById('overlay-container');
+    const inboxItem = this.getInboxData().find(item => String(item.id) === String(emailId));
+    const attachment = inboxItem?.attachments?.[attachmentIndex];
+    if (!overlay || !inboxItem || !attachment || attachment.status === '驳回') return;
+
+    const cn = this.getCurrentLang() === 'cn';
+    const provider = inboxItem.provider || '-';
+    const abnormalReason = attachment.rejectReason && attachment.rejectReason !== '-'
+      ? attachment.rejectReason
+      : (cn ? '暂未识别到具体异常原因' : '구체적인 이상 원인이 확인되지 않았습니다');
+
+    overlay.innerHTML = `
+      <div id="inbox-reject-overlay" class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6">
+        <div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden animate-[fadeIn_0.18s_ease-out]" role="dialog" aria-modal="true" aria-labelledby="inbox-reject-title">
+          <div class="px-6 py-5 border-b border-gray-100 flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <h3 id="inbox-reject-title" class="text-lg font-bold text-[#1d2129]">${cn ? '确认驳回附件' : '첨부 파일 반려 확인'}</h3>
+              <p class="mt-1 text-sm text-[#86909c] truncate" title="${this.escapeHtml(attachment.name)} · ${this.escapeHtml(inboxItem.emailSubject)}">${this.escapeHtml(attachment.name)} · ${this.escapeHtml(inboxItem.emailSubject)}</p>
+            </div>
+            <button type="button" id="inbox-reject-close" class="w-8 h-8 shrink-0 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" aria-label="${cn ? '关闭' : '닫기'}">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <div class="px-6 py-5 space-y-4">
+            <div class="rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+              <div class="text-xs font-semibold text-red-500 mb-1">${cn ? '异常说明' : '이상 설명'}</div>
+              <div class="text-sm leading-6 text-[#1d2129]">${this.escapeHtml(abnormalReason)}</div>
+            </div>
+            <div class="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 flex items-center justify-between gap-4">
+              <span class="text-sm text-[#4e5969]">${cn ? '退回至材料提供人' : '자료 제공자에게 반려'}</span>
+              <span class="text-sm font-bold text-brand truncate" title="${this.escapeHtml(provider)}">${this.escapeHtml(provider)}</span>
+            </div>
+            <div>
+              <label for="inbox-reject-manual-note" class="block mb-2 text-xs font-semibold text-[#4e5969]">${cn ? '手动备注信息' : '수동 메모'}</label>
+              <textarea id="inbox-reject-manual-note" rows="4" maxlength="500"
+                class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm leading-6 text-[#1d2129] resize-none focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+                placeholder="${cn ? '请输入补充说明或处理建议' : '추가 설명 또는 처리 의견을 입력하세요'}"></textarea>
+              <div class="mt-1 text-right text-xs text-[#86909c]"><span id="inbox-reject-note-count">0</span>/500</div>
+            </div>
+            <p class="text-xs text-[#86909c] leading-5"><span class="font-semibold text-[#4e5969]">${cn ? '说明：' : '안내: '}</span>${cn ? '本次操作仅驳回当前附件，不影响同一材料中的其他附件。' : '현재 첨부 파일만 반려하며 같은 자료의 다른 첨부 파일에는 영향을 주지 않습니다.'}</p>
+          </div>
+          <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
+            <button type="button" id="inbox-reject-cancel" class="px-4 py-2 rounded-lg text-sm text-[#4e5969] bg-gray-100 hover:bg-gray-200 transition-colors">${cn ? '取消' : '취소'}</button>
+            <button type="button" id="inbox-reject-submit" class="px-4 py-2 rounded-lg text-sm text-white bg-red-500 hover:bg-red-600 transition-colors shadow-sm">${cn ? '确认驳回' : '반려 확인'}</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const close = () => {
+      overlay.innerHTML = '';
+    };
+    const modalOverlay = overlay.querySelector('#inbox-reject-overlay');
+    const noteInput = overlay.querySelector('#inbox-reject-manual-note');
+    const noteCount = overlay.querySelector('#inbox-reject-note-count');
+
+    overlay.querySelector('#inbox-reject-close')?.addEventListener('click', close);
+    overlay.querySelector('#inbox-reject-cancel')?.addEventListener('click', close);
+    modalOverlay?.addEventListener('click', event => {
+      if (event.target === modalOverlay) close();
+    });
+    noteInput?.addEventListener('input', () => {
+      if (noteCount) noteCount.textContent = String(noteInput.value.length);
+    });
+    overlay.querySelector('#inbox-reject-submit')?.addEventListener('click', () => {
+      const manualNote = noteInput?.value?.trim() || '';
+      attachment.status = '驳回';
+      attachment.rejectReason = manualNote
+        ? `${abnormalReason}；人工备注：${manualNote}`
+        : abnormalReason;
+
+      this.recalcInboxItemStatus(inboxItem);
+
+      close();
+      this.renderInbox();
+      Dialog.toast(
+        cn
+          ? `附件“${attachment.name}”已驳回至 ${provider}`
+          : `첨부 파일 “${attachment.name}”이(가) ${provider}에게 반려되었습니다`,
+        'success'
+      );
+    });
+  },
+
+  openOriginalFileRejectConfirm(rowId) {
+    const cn = this.getCurrentLang() === 'cn';
+    const rowData = this.data.find(row => String(row.id) === String(rowId));
+    if (!rowData) return;
+
+    const inboxItem = this.getInboxData().find(item => String(item.id) === String(rowId));
+    const sourceText = inboxItem?.emailSubject || rowData.fileName;
+    const overlay = document.createElement('div');
+    overlay.id = 'original-reject-overlay';
+    overlay.className = 'fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6';
+    overlay.innerHTML = `
+      <div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden animate-[fadeIn_0.18s_ease-out]" role="dialog" aria-modal="true" aria-labelledby="original-reject-title">
+        <div class="flex items-start justify-between gap-4 px-6 py-5 border-b border-gray-100">
+          <div class="min-w-0">
+            <h3 id="original-reject-title" class="text-lg font-bold text-[#1d2129]">${cn ? '确认驳回文件' : '파일 반려 확인'}</h3>
+            <p class="mt-1 text-sm text-[#86909c] truncate" title="${this.escapeHtml(rowData.fileName)} · ${this.escapeHtml(sourceText)}">${this.escapeHtml(rowData.fileName)} · ${this.escapeHtml(sourceText)}</p>
+          </div>
+          <button type="button" id="original-reject-close" class="w-8 h-8 shrink-0 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" aria-label="${cn ? '关闭' : '닫기'}">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <div class="px-6 py-5 space-y-4">
+          <label class="block">
+            <span class="block mb-2 text-xs font-semibold text-[#4e5969]">${cn ? '手动备注信息' : '수동 메모'}</span>
+            <textarea id="original-reject-manual-note" rows="4" maxlength="500"
+              class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm leading-6 text-[#1d2129] resize-none focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+              placeholder="${cn ? '可补充本次驳回的具体说明' : '이번 반려에 대한 상세 설명을 입력하세요'}">${this.escapeHtml(rowData.remark || '')}</textarea>
+            <div class="mt-1 text-right text-xs text-[#86909c]"><span id="original-reject-note-count">0</span>/500</div>
+          </label>
+          <p class="text-xs text-[#86909c] leading-5"><span class="font-semibold text-[#4e5969]">${cn ? '说明：' : '안내: '}</span>${cn ? '本次操作将驳回当前原始门店数据文件，并记录原因与备注。' : '현재 원본 매장 데이터 파일을 반려하고 사유와 메모를 기록합니다.'}</p>
+        </div>
+        <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
+          <button type="button" id="original-reject-cancel" class="px-4 py-2 rounded-lg text-sm text-[#4e5969] bg-gray-100 hover:bg-gray-200 transition-colors">${cn ? '取消' : '취소'}</button>
+          <button type="button" id="original-reject-submit" class="px-4 py-2 rounded-lg text-sm text-white bg-red-500 hover:bg-red-600 transition-colors shadow-sm">${cn ? '确认驳回' : '반려 확인'}</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const noteInput = overlay.querySelector('#original-reject-manual-note');
+    const noteCount = overlay.querySelector('#original-reject-note-count');
+    const close = () => overlay.remove();
+    const syncCount = () => {
+      if (noteCount && noteInput) noteCount.textContent = String(noteInput.value.length);
+    };
+
+    overlay.querySelector('#original-reject-close')?.addEventListener('click', close);
+    overlay.querySelector('#original-reject-cancel')?.addEventListener('click', close);
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) close();
+    });
+    noteInput?.addEventListener('input', syncCount);
+    syncCount();
+
+    overlay.querySelector('#original-reject-submit')?.addEventListener('click', () => {
+      const manualNote = noteInput?.value.trim() || '';
+      const remark = manualNote || '手动驳回';
+
+      this.data = this.data.map(row => {
+        if (String(row.id) === String(rowId)) {
+          return {
+            ...row,
+            status: '已驳回',
+            handler: row.team,
+            remark
+          };
+        }
+        return row;
+      });
+      this.updateStats();
+      this.applyFilters();
+      close();
+      Dialog.toast(cn ? '已驳回该文件' : '파일을 반려했습니다');
+    });
+
+    noteInput?.focus();
   },
   
   bindInboxEvents() {
@@ -985,22 +1231,18 @@ const IngestionView = {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const emailId = btn.getAttribute('data-email-id');
-        const attIdx = btn.getAttribute('data-att-idx');
-        
-        const cn = self.getCurrentLang() === 'cn';
-        Dialog.show({
-          title: cn ? '驳回附件' : '첨부 파일 거부',
-          content: cn ? '确认驳回该附件？' : '이 첨부 파일을 거부하시겠습니까?',
-          onConfirm: () => {
-            const inboxItem = self.getInboxData().find(d => d.id === emailId);
-            if (inboxItem && inboxItem.attachments[attIdx]) {
-              inboxItem.attachments[attIdx].status = '驳回';
-              inboxItem.attachments[attIdx].rejectReason = cn ? '人工驳回' : '수동 거부';
-            }
-            self.renderInbox();
-            Dialog.toast(cn ? '已驳回附件' : '첨부 파일을 거부했습니다');
-          }
-        });
+        const attIdx = Number(btn.getAttribute('data-att-idx') || 0);
+        self.openInboxAttachmentRejectConfirm(emailId, attIdx);
+      });
+    });
+
+    detailRow.querySelectorAll('.inbox-att-duplicate-action').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const emailId = btn.getAttribute('data-email-id');
+        const attIdx = Number(btn.getAttribute('data-att-idx') || 0);
+        const action = btn.getAttribute('data-action') || 'ignore';
+        self.resolveDuplicateAttachment(emailId, attIdx, action);
       });
     });
     
@@ -1068,11 +1310,7 @@ const IngestionView = {
           attachment.rejectReason = '-';
         }
       });
-      const hasAbnormal = inboxItem.attachments.some(att => att.status !== '正常');
-      const allAbnormal = inboxItem.attachments.length > 0 && inboxItem.attachments.every(att => att.status !== '正常');
-      inboxItem.statusText = allAbnormal ? '全部异常' : hasAbnormal ? '部分异常' : '正常';
-      inboxItem.isNormal = !hasAbnormal;
-      inboxItem.suggestion = hasAbnormal ? inboxItem.suggestion : '-';
+      this.recalcInboxItemStatus(inboxItem);
     }
 
     this.updateStats();
@@ -1164,6 +1402,45 @@ const IngestionView = {
     `).join('');
     
     const sortIcon = '<i class="fa-solid fa-sort opacity-30"></i>';
+    const isZipPreview = /\.zip$/i.test(att.name);
+    const zipFiles = isZipPreview ? [
+      {
+        name: cn ? '门店销售明细.xlsx' : '매장 판매 상세.xlsx',
+        type: 'xlsx',
+        status: cn ? '正常' : '정상',
+        rows: initialRows
+      },
+      {
+        name: cn ? '产品销售汇总.csv' : '제품 판매 요약.csv',
+        type: 'csv',
+        status: cn ? '正常' : '정상',
+        rows: initialRows.slice(0, 12).map((row, index) => ({
+          ...row,
+          quantity: row.quantity + index,
+          amount: (Number(row.amount) + index * 3.6).toFixed(1),
+          remark: cn ? '汇总数据' : '요약 데이터'
+        }))
+      },
+      {
+        name: cn ? '重复门店清单.xlsx' : '중복 매장 목록.xlsx',
+        type: 'xlsx',
+        status: cn ? '待处理' : '처리 대기',
+        rows: initialRows.slice(0, 6).map((row, index) => ({
+          ...row,
+          storeName: index % 2 === 0 ? 'A门店' : 'B门店',
+          remark: cn ? '与原始门店数据列表重复' : '원본 매장 데이터 목록과 중복'
+        }))
+      }
+    ] : [];
+    const renderZipFiles = () => zipFiles.map((file, index) => `
+      <button type="button" class="zip-file-item w-full text-left px-3 py-3 border-b border-gray-100 hover:bg-blue-50 transition-colors ${index === 0 ? 'bg-blue-50' : ''}" data-zip-index="${index}">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-semibold text-xs text-[#1d2129] truncate" title="${this.escapeHtml(file.name)}">${this.escapeHtml(file.name)}</span>
+          <span class="px-2 py-0.5 rounded-full text-[11px] ${file.status === '待处理' ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'}">${this.escapeHtml(file.status)}</span>
+        </div>
+        <div class="mt-1 text-[11px] text-[#86909c]">${file.type.toUpperCase()}</div>
+      </button>
+    `).join('');
     
     const overlay = document.createElement('div');
     overlay.className = 'inbox-preview-overlay';
@@ -1190,22 +1467,36 @@ const IngestionView = {
           </div>
         </div>
         <div class="inbox-preview-body">
-          <div class="flex flex-col h-full bg-white shadow-sm overflow-hidden">
+          <div class="${isZipPreview ? 'grid grid-cols-[200px_1fr]' : 'flex flex-col'} h-full bg-white shadow-sm overflow-hidden">
+            ${isZipPreview ? `
+              <aside class="border-r border-gray-100 bg-slate-50 overflow-auto">
+                <div class="px-4 py-3 border-b border-gray-100 bg-white">
+                  <div class="text-xs font-bold text-[#1d2129]">${cn ? '文件列表' : '파일 목록'}</div>
+                  <div class="mt-1 text-[11px] text-[#86909c]">${zipFiles.length} ${cn ? '个文件' : '개 파일'}</div>
+                </div>
+                <div id="zip-file-list">${renderZipFiles()}</div>
+              </aside>
+            ` : ''}
             <div class="flex-1 overflow-auto p-0">
+              ${isZipPreview ? `
+                <div id="zip-file-alert" class="hidden sticky top-0 z-20 border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-700">
+                  ${cn ? 'A门店、B门店 与原始门店数据列表重复，请确认是否覆盖或忽略。' : 'A/B 매장이 원본 매장 데이터 목록과 중복됩니다.'}
+                </div>
+              ` : ''}
               <table class="w-full min-w-[1380px] text-xs text-center border-collapse preview-data-table">
-                <thead class="bg-gray-100 text-slate-600 sticky top-0 border-b border-gray-200 shadow-sm">
-                  <tr>
-                    ${previewColumns.map((column) => `
-                      <th class="border-r border-gray-200 p-2 ${column.className} preview-sort-th cursor-pointer hover:bg-gray-200 select-none transition-colors" data-sort="${column.key}">
-                        ${column.label} <span class="sort-icon ml-1 opacity-40">${sortIcon}</span>
-                      </th>
-                    `).join('')}
-                  </tr>
-                </thead>
-                <tbody class="text-slate-700 font-mono" id="preview-data-tbody">
-                  ${renderPreviewRows(initialRows)}
-                </tbody>
-              </table>
+                  <thead class="bg-gray-100 text-slate-600 sticky top-0 border-b border-gray-200 shadow-sm">
+                    <tr>
+                      ${previewColumns.map((column) => `
+                        <th class="border-r border-gray-200 p-2 ${column.className} preview-sort-th cursor-pointer hover:bg-gray-200 select-none transition-colors" data-sort="${column.key}">
+                          ${column.label} <span class="sort-icon ml-1 opacity-40">${sortIcon}</span>
+                        </th>
+                      `).join('')}
+                    </tr>
+                  </thead>
+                  <tbody class="text-slate-700 font-mono" id="preview-data-tbody">
+                    ${renderPreviewRows(isZipPreview ? zipFiles[0].rows : initialRows)}
+                  </tbody>
+                </table>
             </div>
           </div>
         </div>
@@ -1216,8 +1507,8 @@ const IngestionView = {
     
     // ---- 列排序（三态：无排序→正序→倒序→无排序）----
     const tbody = overlay.querySelector('#preview-data-tbody');
-    const originalRows = [...initialRows];
-    let currentRows = [...initialRows];
+    let originalRows = isZipPreview ? [...zipFiles[0].rows] : [...initialRows];
+    let currentRows = [...originalRows];
     let sortField = null;
     let sortState = 0; // 0=none, 1=asc, 2=desc
     
@@ -1272,6 +1563,27 @@ const IngestionView = {
         sortRows();
       });
     });
+
+    if (isZipPreview) {
+      const alert = overlay.querySelector('#zip-file-alert');
+      overlay.querySelectorAll('.zip-file-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const index = Number(btn.getAttribute('data-zip-index') || 0);
+          const file = zipFiles[index];
+          originalRows = [...file.rows];
+          currentRows = [...originalRows];
+          sortField = null;
+          sortState = 0;
+          tbody.innerHTML = renderPreviewRows(currentRows);
+          updateSortIcons();
+          overlay.querySelectorAll('.zip-file-item').forEach(item => item.classList.remove('bg-blue-50'));
+          btn.classList.add('bg-blue-50');
+          if (alert) {
+            alert.classList.toggle('hidden', !file.name.includes('重复门店'));
+          }
+        });
+      });
+    }
     
     // ---- 全屏按钮 ----
     const zoomBtn = overlay.querySelector('.inbox-preview-zoom-btn');
@@ -1584,17 +1896,22 @@ const IngestionView = {
       
       // 从收件箱数据中获取来源邮件和来源附件信息
       const inboxData = this.getInboxData();
-      const inboxItem = inboxData.find(item => item.id === row.id);
+      const sourceEmailId = row.sourceEmailId || row.id;
+      const inboxItem = inboxData.find(item => item.id === sourceEmailId);
       const sourceEmail = inboxItem ? inboxItem.emailSubject : (row.fileName + ' 邮件');
       const sourceAttachments = inboxItem ? inboxItem.attachments : [];
       
       // 来源附件：每个文件只对应收件箱中的一个附件（一对一映射）
-      const sourceAttIdx = sourceAttachments.length > 0 ? (parseInt(row.id.replace('F', '')) - 1) % sourceAttachments.length : 0;
+      const sourceAttIdx = typeof row.sourceAttIdx === 'number'
+        ? row.sourceAttIdx
+        : sourceAttachments.length > 0
+          ? (parseInt(row.id.replace('F', '')) - 1) % sourceAttachments.length
+          : 0;
       const mappedAtt = sourceAttachments.length > 0 ? sourceAttachments[sourceAttIdx] : null;
       
       const sourceAttHtml = mappedAtt
         ? `<span class="inbox-source-att-link inline-block px-1.5 py-0.5 rounded text-xs cursor-pointer text-brand bg-blue-50 hover:bg-blue-100 transition-all" 
-                data-email-id="${row.id}" data-att-idx="${sourceAttIdx}" title="${this.escapeHtml(mappedAtt.name)}">
+                data-email-id="${sourceEmailId}" data-att-idx="${sourceAttIdx}" title="${this.escapeHtml(mappedAtt.name)}">
             ${this.escapeHtml(mappedAtt.name.length > 14 ? mappedAtt.name.substring(0, 14) + '...' : mappedAtt.name)}
           </span>`
         : '<span class="text-[#86909c] text-xs">-</span>';
@@ -1613,7 +1930,7 @@ const IngestionView = {
           </td>
           <td class="px-4 py-3">
             <span class="inbox-source-email-link text-brand hover:text-blue-700 hover:underline cursor-pointer text-xs font-medium" 
-                  data-email-id="${row.id}" title="${this.escapeHtml(sourceEmail)}">
+                  data-email-id="${sourceEmailId}" title="${this.escapeHtml(sourceEmail)}">
               ${this.escapeHtml(sourceEmail.length > 20 ? sourceEmail.substring(0, 20) + '...' : sourceEmail)}
             </span>
           </td>
@@ -1648,7 +1965,7 @@ const IngestionView = {
                 <i class="fa-solid fa-check"></i>
               </button>
               <button class="px-2 py-1 text-xs rounded text-red-500 hover:bg-red-50 action-btn" data-action="reject" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '驳回' : '거부'}">
-                <i class="fa-solid fa-xmark"></i>
+                <i class="fa-solid fa-reply"></i>
               </button>
               <button class="px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 action-btn row-edit-btn" data-action="edit" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '编辑' : '편집'}">
                 <i class="fa-solid fa-pen-to-square row-edit-icon"></i>
@@ -1672,7 +1989,27 @@ const IngestionView = {
     const rows = (typeof QAView !== 'undefined' && Array.isArray(QAView.standardData))
       ? QAView.standardData
       : [];
-    return rows.map((row, index) => ({ row, index })).slice(0, 5);
+    const stashedAttachmentRows = this.getRoutedInboxAttachments('暂存').map(({ attachment, attachmentIndex, inboxItem, sourceRow }, index) => {
+      const salesTeam = this.getLocalizedText(sourceRow.team || '华北 Team');
+      return {
+        row: {
+          storeName: attachment.name,
+          storeCode: '-',
+          aiNote: '附件已暂存，待补充门店字段后进入质量检查。',
+          salesTeam,
+          region: sourceRow.region || '华北区域',
+          salesOffice: sourceRow.salesOffice || '石家庄营业所',
+          dealer: sourceRow.dealer || this.getLocalizedText(sourceRow.storeName) || '-',
+          sourceEmailId: inboxItem.id,
+          sourceAttIdx: attachmentIndex
+        },
+        index: `stash-${inboxItem.id}-${attachmentIndex}-${index}`
+      };
+    });
+    return [
+      ...stashedAttachmentRows,
+      ...rows.map((row, index) => ({ row, index })).slice(0, 5)
+    ];
   },
 
   getFilteredStashRows() {
@@ -1707,7 +2044,7 @@ const IngestionView = {
       <tr class="hover:bg-slate-50 transition-colors">
         <td class="px-4 py-3"><input type="checkbox" class="row-cb-ingestion-stash rounded border-gray-300 text-brand focus:ring-brand"></td>
         <td class="px-4 py-3">
-          <button type="button" class="ingestion-stash-preview-trigger font-medium text-slate-800 flex items-center gap-2 hover:text-brand transition-colors" data-index="${index}" title="预览 ${row.storeName}">
+          <button type="button" class="ingestion-stash-preview-trigger font-medium text-slate-800 flex items-center gap-2 hover:text-brand transition-colors" data-index="${index}" data-email-id="${row.sourceEmailId || ''}" data-att-idx="${typeof row.sourceAttIdx === 'number' ? row.sourceAttIdx : ''}" title="预览 ${row.storeName}">
             <i class="fa-solid fa-store text-brand"></i>
             <span class="truncate max-w-[176px]">${row.storeName}</span>
           </button>
@@ -1719,7 +2056,7 @@ const IngestionView = {
         <td class="px-4 py-3 max-w-[160px] text-[#86909c]">-</td>
         <td class="px-4 py-3 max-w-[180px] text-[#86909c]">-</td>
         <td class="px-4 py-3">
-          <button type="button" class="ingestion-stash-preview-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-index="${index}" title="预览"><i class="fa-regular fa-eye"></i></button>
+          <button type="button" class="ingestion-stash-preview-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-index="${index}" data-email-id="${row.sourceEmailId || ''}" data-att-idx="${typeof row.sourceAttIdx === 'number' ? row.sourceAttIdx : ''}" title="预览"><i class="fa-regular fa-eye"></i></button>
         </td>
       </tr>
     `).join('');
@@ -1796,6 +2133,16 @@ const IngestionView = {
     container?.querySelectorAll('.ingestion-stash-preview-trigger').forEach((trigger) => {
       trigger.addEventListener('click', (event) => {
         event.stopPropagation();
+        const emailId = trigger.dataset.emailId;
+        const attIdx = trigger.dataset.attIdx;
+        if (emailId && attIdx !== '') {
+          const inboxItem = this.getInboxData().find(item => String(item.id) === String(emailId));
+          const attachment = inboxItem?.attachments?.[Number(attIdx)];
+          if (inboxItem && attachment) {
+            this.showInboxAttachmentPreview(inboxItem, attachment);
+          }
+          return;
+        }
         const index = Number(trigger.dataset.index);
         if (typeof QAView !== 'undefined' && typeof QAView.openStandardPreview === 'function') {
           QAView.openStandardPreview(index);
@@ -2063,42 +2410,7 @@ const IngestionView = {
             Dialog.toast(this.getCurrentLang() === 'cn' ? '已保存' : '저장되었습니다');
           }
         } else if (action === 'reject') {
-          // 驳回操作 - 带备注输入
-          const rejectTitle = this.getCurrentLang() === 'cn' ? '驳回文件' : '파일 거부';
-          const remarkLabel = this.getCurrentLang() === 'cn' ? '文件异常现象' : '파일 이상 현상';
-          const confirmBtnText = this.getCurrentLang() === 'cn' ? '确认驳回' : '거부 확인';
-          const cancelBtnText = this.getCurrentLang() === 'cn' ? '取消' : '취소';
-          const successText = this.getCurrentLang() === 'cn' ? '已成功驳回文件' : '파일을 성공적으로 거부했습니다';
-          
-          // 创建带备注输入的对话框
-          Dialog.show({
-            title: rejectTitle,
-            content: `
-              <div class="flex flex-col gap-3">
-                <p class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? '请填写文件异常现象' : '파일 이상 현상을 입력해 주세요'}</p>
-                <textarea id="reject-remark-input" class="w-full p-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-brand resize-none" rows="4" placeholder="${remarkLabel}">${rowData.remark || ''}</textarea>
-              </div>
-            `,
-            showCancel: true,
-            confirmText: confirmBtnText,
-            cancelText: cancelBtnText,
-            onConfirm: () => {
-              const remarkInput = document.getElementById('reject-remark-input');
-              const remark = remarkInput ? remarkInput.value : '';
-              
-              this.data = this.data.map(row => {
-                if (row.id === id) {
-                  row.status = '已驳回';
-                  row.handler = row.team;
-                  row.remark = remark;
-                }
-                return row;
-              });
-              this.updateStats();
-              this.applyFilters();
-              Dialog.toast(successText);
-            }
-          });
+          this.openOriginalFileRejectConfirm(id);
         } else {
           // 通过、归档操作
           const actionNames = this.getCurrentLang() === 'cn' 
@@ -2241,23 +2553,8 @@ const IngestionView = {
       }
     });
 
-    const uploadBtn = document.getElementById('btn-upload-file');
-    const uploadInput = document.getElementById('upload-file-input');
-
-    uploadBtn?.addEventListener('click', () => {
-      uploadInput?.click();
-    });
-
-    uploadInput?.addEventListener('change', (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      Dialog.toast(
-        this.getCurrentLang() === 'cn'
-          ? `已选择文件：${file.name}`
-          : `파일 선택됨: ${file.name}`
-      );
-      e.target.value = '';
+    document.getElementById('btn-upload-file')?.addEventListener('click', () => {
+      this.showUploadModal();
     });
     
     // 点击其他地方关闭下拉
@@ -2273,6 +2570,135 @@ const IngestionView = {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  },
+
+  showUploadModal() {
+    const cn = this.getCurrentLang() === 'cn';
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/35 p-4';
+    overlay.innerHTML = `
+      <div class="w-full max-w-xl overflow-hidden rounded-lg bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="upload-modal-title">
+        <div class="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <div>
+            <h3 id="upload-modal-title" class="text-base font-bold text-[#1d2129]">${cn ? '上传文件' : '파일 업로드'}</h3>
+            <p class="mt-1 text-xs text-[#86909c]">${cn ? '填写材料信息并上传本地文件' : '자료 정보를 입력하고 로컬 파일을 업로드하세요'}</p>
+          </div>
+          <button type="button" class="upload-modal-close flex h-8 w-8 items-center justify-center rounded-md text-[#86909c] hover:bg-gray-100" aria-label="${cn ? '关闭' : '닫기'}">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <form id="upload-material-form" class="space-y-5 px-6 py-5">
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '标题' : '제목'} <span class="text-red-500">*</span></span>
+            <input id="upload-material-title" type="text" maxlength="100" required
+              class="w-full rounded-md border border-gray-200 px-3 py-2.5 text-sm outline-none transition-colors focus:border-brand"
+              placeholder="${cn ? '请输入标题' : '제목을 입력하세요'}">
+          </label>
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '内容' : '내용'}</span>
+            <textarea id="upload-material-content" rows="4" maxlength="500"
+              class="w-full resize-none rounded-md border border-gray-200 px-3 py-2.5 text-sm outline-none transition-colors focus:border-brand"
+              placeholder="${cn ? '请输入内容' : '내용을 입력하세요'}"></textarea>
+          </label>
+          <div>
+            <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '本地文件' : '로컬 파일'} <span class="text-red-500">*</span></span>
+            <input id="upload-material-files" type="file" multiple class="hidden" accept=".xlsx,.xls,.csv,.zip">
+            <button type="button" id="upload-file-picker"
+              class="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-blue-300 bg-blue-50/50 px-4 py-5 text-sm font-medium text-brand hover:bg-blue-50">
+              <i class="fa-solid fa-cloud-arrow-up"></i>
+              <span>${cn ? '选择本地文件' : '로컬 파일 선택'}</span>
+            </button>
+            <div id="upload-file-list" class="mt-3 hidden space-y-2"></div>
+            <p id="upload-file-error" class="mt-2 hidden text-xs text-red-500">${cn ? '请至少选择一个文件' : '파일을 하나 이상 선택하세요'}</p>
+          </div>
+        </form>
+        <div class="flex justify-end gap-2 border-t border-gray-100 bg-gray-50/60 px-6 py-4">
+          <button type="button" class="upload-modal-close rounded-md border border-gray-200 bg-white px-4 py-2 text-sm text-[#4e5969] hover:bg-gray-50">${cn ? '取消' : '취소'}</button>
+          <button type="submit" form="upload-material-form" class="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            <i class="fa-solid fa-upload mr-1"></i>${cn ? '确认上传' : '업로드'}
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    const fileInput = overlay.querySelector('#upload-material-files');
+    const fileList = overlay.querySelector('#upload-file-list');
+    const fileError = overlay.querySelector('#upload-file-error');
+    let selectedFiles = [];
+
+    const close = () => overlay.remove();
+    const renderFiles = () => {
+      fileList.classList.toggle('hidden', selectedFiles.length === 0);
+      fileList.innerHTML = selectedFiles.map((file, index) => `
+        <div class="flex items-center gap-3 rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
+          <i class="fa-regular fa-file-excel text-emerald-600"></i>
+          <span class="min-w-0 flex-1 truncate text-sm text-[#4e5969]" title="${this.escapeHtml(file.name)}">${this.escapeHtml(file.name)}</span>
+          <span class="text-xs text-[#86909c]">${(file.size / 1024).toFixed(1)} KB</span>
+          <button type="button" class="upload-file-remove flex h-7 w-7 items-center justify-center rounded text-[#86909c] hover:bg-red-50 hover:text-red-500" data-index="${index}" title="${cn ? '移除' : '삭제'}">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      `).join('');
+      fileList.querySelectorAll('.upload-file-remove').forEach(button => {
+        button.addEventListener('click', () => {
+          selectedFiles.splice(Number(button.dataset.index), 1);
+          renderFiles();
+        });
+      });
+    };
+
+    overlay.querySelectorAll('.upload-modal-close').forEach(button => button.addEventListener('click', close));
+    overlay.addEventListener('click', event => {
+      if (event.target === overlay) close();
+    });
+    overlay.querySelector('#upload-file-picker').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      selectedFiles = Array.from(fileInput.files || []);
+      fileError.classList.add('hidden');
+      renderFiles();
+    });
+    overlay.querySelector('#upload-material-title').focus();
+
+    overlay.querySelector('#upload-material-form').addEventListener('submit', event => {
+      event.preventDefault();
+      const titleInput = overlay.querySelector('#upload-material-title');
+      const title = titleInput.value.trim();
+      const content = overlay.querySelector('#upload-material-content').value.trim();
+      if (!title) {
+        titleInput.focus();
+        return;
+      }
+      if (selectedFiles.length === 0) {
+        fileError.classList.remove('hidden');
+        return;
+      }
+
+      const now = new Date();
+      const uploadedItem = {
+        id: `local-${Date.now()}`,
+        index: 1,
+        emailSubject: title,
+        emailBody: content || '-',
+        attachmentCount: selectedFiles.length,
+        isNormal: true,
+        statusText: '正常',
+        suggestion: '-',
+        provider: Store?.getState?.()?.user?.name || '当前用户',
+        provideTime: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+        attachments: selectedFiles.map(file => ({
+          name: file.name,
+          status: '正常',
+          rejectReason: '-',
+          sourceMethod: '本地上传'
+        }))
+      };
+      this.inboxDataCache = [uploadedItem, ...this.getInboxData()]
+        .map((item, index) => ({ ...item, index: index + 1 }));
+      this.renderInbox();
+      close();
+      Dialog.toast(cn ? `已上传 ${selectedFiles.length} 个文件` : `${selectedFiles.length}개 파일을 업로드했습니다`, 'success');
+    });
   },
 
   buildExcelPreviewFiles(fileName) {
@@ -2435,7 +2861,7 @@ const IngestionView = {
 
     const rejectReasonHeader = document.createElement('th');
     rejectReasonHeader.className = 'px-4 py-3 min-w-36';
-    rejectReasonHeader.textContent = '驳回说明';
+    rejectReasonHeader.textContent = '异常说明';
 
     filenameHeader.after(statusHeader, rejectReasonHeader);
 
@@ -2532,11 +2958,7 @@ const IngestionView = {
                     attachment.rejectReason = '-';
                   }
                 });
-                const hasAbnormal = inboxItem.attachments.some(att => att.status !== '正常');
-                const allAbnormal = inboxItem.attachments.length > 0 && inboxItem.attachments.every(att => att.status !== '正常');
-                inboxItem.statusText = allAbnormal ? '全部异常' : hasAbnormal ? '部分异常' : '正常';
-                inboxItem.isNormal = !hasAbnormal;
-                inboxItem.suggestion = hasAbnormal ? inboxItem.suggestion : '-';
+                this.recalcInboxItemStatus(inboxItem);
               }
             });
             this.updateStats();
