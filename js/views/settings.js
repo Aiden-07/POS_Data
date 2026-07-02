@@ -44,7 +44,7 @@ const SettingsView = {
       name: '华北区域经理',
       description: '负责华北区域 POS 数据收取、质检和台账查看',
       functions: ['文件收取', '质量检查', '台账与汇总', '数据分析', '导出'],
-      dataScope: '按区域',
+      dataScope: '按组织范围',
       dataScopeValue: '华北区域',
       users: 1,
       status: '启用'
@@ -54,7 +54,7 @@ const SettingsView = {
       name: '营业所负责人',
       description: '仅管理所属营业所下经销商和门店数据',
       functions: ['文件收取', '质量检查', '台账与汇总'],
-      dataScope: '按营业所',
+      dataScope: '按组织范围',
       dataScopeValue: '石家庄营业所',
       users: 1,
       status: '启用'
@@ -73,6 +73,14 @@ const SettingsView = {
     region: ['华北区域', '华中区域', '东北区域', '华东区域', '西北区域', '华南区域'],
     office: ['石家庄营业所', '北京营业所', '呼和浩特营业所', '天津营业所'],
     dealer: ['河北聚昊商贸', '邯郸格耀商贸', '维多利商业', '益尚客商贸']
+  },
+  orgTree: {
+    华北区域: ['石家庄营业所', '北京营业所', '呼和浩特营业所', '天津营业所'],
+    华中区域: ['郑州营业所', '武汉营业所', '长沙营业所'],
+    东北区域: ['沈阳营业所', '长春营业所', '哈尔滨营业所'],
+    华东区域: ['上海营业所', '南京营业所', '杭州营业所'],
+    西北区域: ['西安营业所', '兰州营业所', '乌鲁木齐营业所'],
+    华南区域: ['广州营业所', '深圳营业所', '南宁营业所']
   },
   fieldTypes: ['时间', '组织', '门店', '产品', '数量', '金额'],
   fieldConfigs: [
@@ -1013,6 +1021,10 @@ const SettingsView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
     const editing = Boolean(role);
+    const selectedScopeType = role?.dataScope === '全部数据' ? '全部数据' : '按组织范围';
+    const selectedScopeValues = role?.dataScopeValue
+      ? role.dataScopeValue.split('、').map((item) => item.trim()).filter(Boolean)
+      : [];
     overlay.innerHTML = `
       <div class="settings-modal-backdrop">
         <form id="settings-role-form" class="settings-modal wide">
@@ -1025,9 +1037,9 @@ const SettingsView = {
           </div>
           <div class="settings-form-grid settings-role-form-grid">
             <label>角色名称<input name="name" value="${role?.name || ''}" required></label>
-            <label>
+            <label class="settings-data-permission">
               <span class="settings-label-with-help">
-                数据权限策略
+                数据权限
                 <span class="settings-help-wrap">
                   <button class="settings-help-button" type="button" aria-label="数据权限说明">?</button>
                   <span class="settings-help-popover">
@@ -1035,11 +1047,12 @@ const SettingsView = {
                   </span>
                 </span>
               </span>
-              <select name="dataScope" id="settings-role-scope-type">${['全部数据', '按区域', '按营业所', '按经销商', '仅本人相关数据'].map((item) => `<option ${role?.dataScope === item ? 'selected' : ''}>${item}</option>`).join('')}</select>
-            </label>
-            <label>
-              <span>数据权限范围</span>
-              <select name="dataScopeValue" id="settings-role-scope-value">${this.renderRoleScopeOptions(role?.dataScope || '按区域', role?.dataScopeValue)}</select>
+              <select name="dataScope" id="settings-role-scope-type">
+                ${['全部数据', '按组织范围'].map((item) => `<option ${selectedScopeType === item ? 'selected' : ''}>${item}</option>`).join('')}
+              </select>
+              <div id="settings-role-org-scope" class="settings-org-scope ${selectedScopeType === '全部数据' ? 'hidden' : ''}">
+                ${this.renderRoleOrgDropdown(selectedScopeValues)}
+              </div>
             </label>
           </div>
           <div class="settings-permission-tree">
@@ -1063,20 +1076,56 @@ const SettingsView = {
     `;
     this.bindModalClose(overlay);
     document.getElementById('settings-role-scope-type')?.addEventListener('change', (event) => {
-      const scopeValue = document.getElementById('settings-role-scope-value');
-      if (scopeValue) scopeValue.innerHTML = this.renderRoleScopeOptions(event.target.value);
+      document.getElementById('settings-role-org-scope')?.classList.toggle('hidden', event.target.value === '全部数据');
     });
+    document.getElementById('settings-org-scope-trigger')?.addEventListener('click', () => {
+      document.getElementById('settings-org-scope-dropdown')?.classList.toggle('open');
+    });
+    document.getElementById('settings-org-scope-dropdown')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+    document.addEventListener('click', (event) => {
+      const dropdown = document.getElementById('settings-org-scope-dropdown');
+      if (!dropdown || dropdown.contains(event.target)) return;
+      dropdown.classList.remove('open');
+    });
+    document.querySelector('.settings-org-dropdown-menu')?.addEventListener('change', (event) => {
+      const input = event.target.closest('input[type="checkbox"]');
+      if (!input) return;
+      if (input.dataset.orgType === 'all') {
+        document.querySelectorAll('.settings-org-tree input[data-org-type="region"], .settings-org-tree input[data-org-type="office"]').forEach((item) => {
+          item.checked = input.checked;
+          item.indeterminate = false;
+        });
+        this.syncRoleOrgTree();
+        return;
+      }
+      if (input.dataset.orgType === 'region') {
+        const regionNode = input.closest('.settings-org-region');
+        regionNode?.querySelectorAll('input[data-org-type="office"]').forEach((office) => {
+          office.checked = input.checked;
+        });
+      }
+      this.syncRoleOrgTree();
+    });
+    this.syncRoleOrgTree();
     document.getElementById('settings-role-form')?.addEventListener('submit', (event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
       const functionValues = data.getAll('functions');
+      const dataScope = data.get('dataScope');
+      const selectedOrgValues = this.getSelectedRoleOrgValues();
+      if (dataScope === '按组织范围' && selectedOrgValues.length === 0) {
+        Dialog.toast('请选择至少一个区域或营业所', 'warning');
+        return;
+      }
       const nextRole = {
         id: role?.id || `r-${Date.now()}`,
         name: data.get('name'),
         description: role?.description || `${data.get('name')}权限配置`,
         functions: [...new Set(functionValues.map((item) => item.split(':')[0]))],
-        dataScope: data.get('dataScope'),
-        dataScopeValue: data.get('dataScopeValue'),
+        dataScope,
+        dataScopeValue: dataScope === '全部数据' ? '全部区域' : selectedOrgValues.join('、'),
         users: role?.users || 0,
         status: role?.status || '启用'
       };
@@ -1090,6 +1139,104 @@ const SettingsView = {
     });
   },
 
+  renderRoleOrgDropdown(selectedValues = []) {
+    return `
+      <div id="settings-org-scope-dropdown" class="settings-org-dropdown">
+        <button type="button" id="settings-org-scope-trigger" class="settings-org-dropdown-trigger">
+          <span>
+            <strong>组织范围</strong>
+            <em id="settings-org-dropdown-summary">请选择组织范围</em>
+          </span>
+          <i class="fa-solid fa-chevron-down"></i>
+        </button>
+        <div class="settings-org-dropdown-menu">
+          <div class="settings-org-dropdown-tools">
+            <label>
+              <input type="checkbox" data-org-type="all">
+              <span>全选</span>
+            </label>
+            <small>选择一级区域后显示对应营业所</small>
+          </div>
+          <div class="settings-org-tree">
+            ${this.renderRoleOrgTree(selectedValues)}
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  renderRoleOrgTree(selectedValues = []) {
+    const selected = new Set(selectedValues);
+    return Object.entries(this.orgTree).map(([region, offices]) => {
+      const hasOfficeSelected = offices.some((office) => selected.has(office));
+      const regionSelected = selected.has(region) || hasOfficeSelected;
+      return `
+        <div class="settings-org-region ${regionSelected ? 'is-active' : ''}">
+          <label class="settings-org-region-label">
+            <input type="checkbox" data-org-type="region" value="${region}" ${regionSelected ? 'checked' : ''}>
+            <span>${region}</span>
+            <i class="fa-solid fa-chevron-down"></i>
+          </label>
+          <div class="settings-org-offices">
+            ${offices.map((office) => `
+              <label>
+                <input type="checkbox" data-org-type="office" value="${office}" ${regionSelected || selected.has(office) ? 'checked' : ''}>
+                <span>${office}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }).join('');
+  },
+
+  syncRoleOrgTree() {
+    const allRegionInputs = [...document.querySelectorAll('.settings-org-tree input[data-org-type="region"]')];
+    const allOfficeInputs = [...document.querySelectorAll('.settings-org-tree input[data-org-type="office"]')];
+    document.querySelectorAll('.settings-org-region').forEach((regionNode) => {
+      const regionInput = regionNode.querySelector('input[data-org-type="region"]');
+      const officeInputs = [...regionNode.querySelectorAll('input[data-org-type="office"]')];
+      const checkedCount = officeInputs.filter((input) => input.checked).length;
+      if (regionInput) {
+        regionNode.classList.toggle('is-active', regionInput.checked || checkedCount > 0);
+        regionInput.checked = officeInputs.length > 0 && checkedCount === officeInputs.length;
+        regionInput.indeterminate = checkedCount > 0 && checkedCount < officeInputs.length;
+      }
+    });
+
+    const selected = this.getSelectedRoleOrgValues();
+    const selectedRegions = allRegionInputs.filter((input) => input.checked && !input.indeterminate).length;
+    const selectedOffices = allOfficeInputs.filter((input) => input.checked).length;
+    const allInput = document.querySelector('input[data-org-type="all"]');
+    if (allInput) {
+      allInput.checked = selectedOffices > 0 && selectedOffices === allOfficeInputs.length;
+      allInput.indeterminate = selectedOffices > 0 && selectedOffices < allOfficeInputs.length;
+    }
+    const summary = document.getElementById('settings-org-dropdown-summary');
+    if (summary) {
+      if (!selected.length) {
+        summary.textContent = '请选择组织范围';
+      } else if (selectedRegions > 1 || selectedOffices > 3) {
+        summary.textContent = `已选 ${selectedRegions} 个区域 / ${selectedOffices} 个营业所`;
+      } else {
+        summary.textContent = selected.join('、');
+      }
+    }
+  },
+
+  getSelectedRoleOrgValues() {
+    const values = [];
+    document.querySelectorAll('.settings-org-region').forEach((regionNode) => {
+      const regionInput = regionNode.querySelector('input[data-org-type="region"]');
+      if (regionInput?.checked) {
+        values.push(regionInput.value);
+        return;
+      }
+      regionNode.querySelectorAll('input[data-org-type="office"]:checked').forEach((office) => values.push(office.value));
+    });
+    return values;
+  },
+
   bindModalClose(overlay) {
     const close = () => {
       overlay.innerHTML = '';
@@ -1098,24 +1245,11 @@ const SettingsView = {
     overlay.querySelector('.settings-modal-cancel')?.addEventListener('click', close);
   },
 
-  renderRoleScopeOptions(scopeType, selected = '') {
-    const map = {
-      '全部数据': ['全部区域'],
-      '按区域': this.orgOptions.region,
-      '按营业所': this.orgOptions.office,
-      '按经销商': this.orgOptions.dealer,
-      '仅本人相关数据': ['本人上传/处理/待办数据']
-    };
-    return (map[scopeType] || map['按区域']).map((item) => `<option ${selected === item ? 'selected' : ''}>${item}</option>`).join('');
-  },
-
   renderScopeRuleGrid() {
     return `
       <div class="settings-rule-grid compact">
-        <div><strong>按区域</strong><span>只能查看所选区域下的营业所、经销商、门店和 POS 明细。</span></div>
-        <div><strong>按营业所</strong><span>只能查看该营业所及其下属经销商、门店数据。</span></div>
-        <div><strong>按经销商</strong><span>只能查看指定经销商及其门店数据。</span></div>
-        <div><strong>仅本人相关数据</strong><span>用于流程待办、上传记录等个人范围数据。</span></div>
+        <div><strong>全部数据</strong><span>可查看平台内全部区域、营业所及其下属数据。</span></div>
+        <div><strong>按组织范围</strong><span>可按区域或营业所授权；选择区域时自动包含其下全部营业所。</span></div>
       </div>
     `;
   }

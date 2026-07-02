@@ -430,7 +430,7 @@ const QAView = {
             <input type="checkbox" class="row-cb-qa-standard rounded border-gray-300 text-brand focus:ring-brand" value="${index}">
           </td>
           <td class="px-4 py-3">
-            <button type="button" class="qa-standard-preview-trigger font-medium text-slate-800 flex items-center gap-2 hover:text-brand transition-colors" data-index="${index}" title="预览 ${row.storeName}">
+            <button type="button" class="qa-standard-preview-trigger font-medium text-brand flex items-center gap-2 hover:text-blue-700 hover:underline transition-colors" data-index="${index}" title="预览 ${row.storeName}">
               <i class="fa-solid fa-store text-brand"></i>
               <span class="truncate max-w-[176px]">${row.storeName}</span>
             </button>
@@ -448,7 +448,9 @@ const QAView = {
           <td class="px-4 py-3 max-w-[180px] truncate" title="${row.dealer}">${row.dealer}</td>
           <td class="px-4 py-3">
             <div class="flex items-center gap-1">
-              <button type="button" class="qa-standard-preview-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-index="${index}" title="预览"><i class="fa-regular fa-eye"></i></button>
+              <button type="button" class="qa-standard-detail-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-index="${index}" title="单据详情">
+                <i class="fa-solid fa-list-check"></i>
+              </button>
               <button class="px-2 py-1 text-xs rounded text-red-500 hover:bg-red-50" title="删除"><i class="fa-regular fa-trash-can"></i></button>
             </div>
           </td>
@@ -512,7 +514,7 @@ const QAView = {
         <tr class="hover:bg-slate-50 transition-colors">
           <td class="px-4 py-3"><input type="checkbox" class="row-cb-qa-stash rounded border-gray-300 text-brand focus:ring-brand"></td>
           <td class="px-4 py-3">
-            <button type="button" class="qa-standard-preview-trigger font-medium text-slate-800 flex items-center gap-2 hover:text-brand transition-colors" data-index="${index}" title="预览 ${row.storeName}">
+            <button type="button" class="qa-standard-preview-trigger font-medium text-brand flex items-center gap-2 hover:text-blue-700 hover:underline transition-colors" data-index="${index}" title="预览 ${row.storeName}">
               <i class="fa-solid fa-store text-brand"></i>
               <span class="truncate max-w-[176px]">${row.storeName}</span>
             </button>
@@ -523,9 +525,7 @@ const QAView = {
           <td class="px-4 py-3 max-w-[120px] text-[#86909c]">-</td>
           <td class="px-4 py-3 max-w-[160px] text-[#86909c]">-</td>
           <td class="px-4 py-3 max-w-[180px] text-[#86909c]">-</td>
-          <td class="px-4 py-3">
-            <button type="button" class="qa-standard-preview-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-index="${index}" title="预览"><i class="fa-regular fa-eye"></i></button>
-          </td>
+          <td class="px-4 py-3 text-[#d1d5db]">-</td>
         </tr>
       `;
     }).join('');
@@ -648,7 +648,9 @@ const QAView = {
           <td class="px-4 py-3 max-w-[80px] truncate" title="${row.acc || ''}">${row.acc || '-'}</td>
           <td class="px-4 py-3 max-w-[140px] truncate" title="${row.dealer || ''}">${row.dealer || '-'}</td>
           <td class="px-4 py-3 font-mono text-xs">${row.storeCode || '-'}</td>
-          <td class="px-4 py-3 max-w-[140px] truncate" title="${row.storeName || ''}">${row.storeName || '-'}</td>
+          <td class="px-4 py-3 max-w-[140px]">
+            <button type="button" class="qa-exception-preview-trigger max-w-full truncate text-brand hover:text-blue-700 hover:underline transition-colors text-left" data-id="${row.id}" title="预览 ${row.storeName || ''}">${row.storeName || '-'}</button>
+          </td>
           <td class="px-4 py-3 font-mono text-xs">${row.barcode || '-'}</td>
           <td class="px-4 py-3 max-w-xs truncate" title="${row.productName || ''}">${row.productName || '-'}</td>
           <td class="px-4 py-3 text-right">${row.quantity || '-'}</td>
@@ -664,9 +666,6 @@ const QAView = {
           <td class="px-4 py-3 text-xs max-w-xs truncate" title="${aiJudgment}">${aiJudgment || '-'}</td>
           <td class="px-4 py-3">
             <div class="flex items-center gap-1">
-              <button class="px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 action-btn" data-action="preview" data-id="${row.id}" title="预览">
-                <i class="fa-regular fa-eye"></i>
-              </button>
               <button class="px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 action-btn" data-action="edit" data-id="${row.id}" title="编辑">
                 <i class="fa-regular fa-pen-to-square"></i>
               </button>
@@ -1098,6 +1097,31 @@ const QAView = {
         this.openStandardPreview(Number(trigger.dataset.index));
       });
     });
+    document.querySelectorAll('.qa-standard-detail-trigger').forEach((trigger) => {
+      trigger.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const index = Number(trigger.dataset.index);
+        const row = this.getFilteredStandardData()[index]?.row || this.standardData[index];
+        if (!row || typeof IngestionView === 'undefined' || typeof IngestionView.openDocumentDetail !== 'function') return;
+        IngestionView.openDocumentDetail({
+          moduleName: '质量检查 - 标准POS表',
+          currentNode: '标准POS表',
+          title: row.storeName,
+          nameLabel: '门店名称',
+          statusText: 'AI质检通过',
+          row,
+          moduleFields: [
+            { label: '门店编码', value: row.storeCode || '-' },
+            { label: '置信度', value: row.confidence || '-' },
+            { label: 'AI判断', value: row.aiNote || '-' },
+            { label: '所属营业Team', value: row.salesTeam || '-' },
+            { label: '所属区域', value: row.region || '-' },
+            { label: '所属营业所', value: row.salesOffice || '-' },
+            { label: '所属经销商', value: row.dealer || '-' }
+          ]
+        });
+      });
+    });
     document.querySelectorAll('.qa-detail-compare-trigger').forEach((trigger) => {
       trigger.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -1107,6 +1131,14 @@ const QAView = {
   },
 
   bindExceptionEvents() {
+    document.querySelectorAll('.qa-exception-preview-trigger').forEach((trigger) => {
+      trigger.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const row = this.data.find((item) => item.id === trigger.dataset.id);
+        if (row) this.openExceptionOriginalPreview(row);
+      });
+    });
+
     document.querySelectorAll('#qa-tbody .action-btn').forEach((button) => {
       button.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -1114,10 +1146,6 @@ const QAView = {
         const row = this.data.find((item) => item.id === button.dataset.id);
         if (!row) return;
         const action = button.dataset.action;
-        if (action === 'preview') {
-          this.openExceptionOriginalPreview(row);
-          return;
-        }
         if (action === 'reject') {
           this.openExceptionRejectConfirm(row);
           return;

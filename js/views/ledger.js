@@ -32,6 +32,7 @@ const LedgerView = {
   groupBy: '',
   collapsedGroups: new Set(),
   closePanelsBound: false,
+  advancedFiltersExpanded: false,
 
   tableColumns: [
     { key: 'month', label: '年月', width: 'w-24', order: 10, value: (item) => item.month },
@@ -128,7 +129,7 @@ const LedgerView = {
           </div>
         </div>
         <div class="overflow-auto flex-1 relative px-2">
-          <table class="w-full table-fixed min-w-[1240px] text-left text-sm text-[#4e5969]" id="ledger-table">
+          <table class="w-full table-fixed min-w-[1360px] text-left text-sm text-[#4e5969]" id="ledger-table">
             <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10" id="ledger-thead">
               ${this.renderTableHeader()}
             </thead>
@@ -185,9 +186,9 @@ const LedgerView = {
           const classes = ['px-4', 'py-3', column.width || 'w-28'];
           if (column.align === 'right') classes.push('text-right');
           if (index === 0) classes.push('rounded-tl-lg');
-          if (index === columns.length - 1) classes.push('rounded-tr-lg');
           return `<th class="${classes.join(' ')}">${column.label}</th>`;
         }).join('')}
+        <th class="px-4 py-3 w-20 rounded-tr-lg">操作</th>
       </tr>
     `;
   },
@@ -195,42 +196,81 @@ const LedgerView = {
   renderFilters() {
     return `
       <div class="ledger-filter-panel" id="ledger-filter-panel">
-        <div class="ledger-filter-line">
-          <div class="ledger-filter-label">选择时间</div>
-          <div class="ledger-filter-content ledger-time-controls">
-            <span class="ledger-filter-icon"><i class="fa-regular fa-calendar"></i></span>
-            <select id="ledger-filter-year" class="ledger-inline-select">
-              <option value="2026">2026年</option>
-              <option value="2025">2025年</option>
-              <option value="2024">2024年</option>
-            </select>
-            <select id="ledger-filter-month" class="ledger-inline-select">
-              ${Array.from({ length: 12 }, (_, index) => {
-                const value = String(index + 1).padStart(2, '0');
-                return `<option value="${value}">${index + 1}月</option>`;
-              }).join('')}
-            </select>
-          </div>
-        </div>
-        <div class="ledger-filter-line">
+        <div class="ledger-filter-line ledger-filter-main">
           <div class="ledger-filter-label">关键字</div>
           <div class="ledger-filter-content ledger-keyword-controls">
             <input id="ledger-filter-keyword" type="text" class="ledger-inline-input wide" placeholder="经销商、门店名称/编码、产品名称/编码">
+            <button id="ledger-filter-submit" class="ledger-filter-primary" type="button">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>查询</span>
+            </button>
+            <button id="ledger-filter-expand" class="ledger-filter-expand" type="button" aria-expanded="${this.advancedFiltersExpanded}">
+              <span>${this.advancedFiltersExpanded ? '收起筛选' : '展开筛选'}</span>
+              <span id="ledger-filter-active-count" class="ledger-filter-count ${this.getAdvancedFilterCount() ? '' : 'hidden'}">${this.getAdvancedFilterCount()}</span>
+              <i class="fa-solid fa-chevron-${this.advancedFiltersExpanded ? 'up' : 'down'}"></i>
+            </button>
           </div>
         </div>
-        ${this.renderOrgSelector()}
-        <div class="ledger-filter-actions">
-          <button id="ledger-filter-submit" class="ledger-filter-primary" type="button">
-            <i class="fa-solid fa-magnifying-glass"></i>
-            <span>查询</span>
-          </button>
-          <button id="ledger-filter-reset" class="ledger-filter-secondary" type="button">
-            <i class="fa-solid fa-rotate-right"></i>
-            <span>重置</span>
-          </button>
+        <div id="ledger-advanced-filters" class="ledger-advanced-filters ${this.advancedFiltersExpanded ? '' : 'hidden'}">
+          <div class="ledger-filter-line">
+            <div class="ledger-filter-label">选择时间</div>
+            <div class="ledger-filter-content ledger-time-controls">
+              <span class="ledger-filter-icon"><i class="fa-regular fa-calendar"></i></span>
+              <select id="ledger-filter-year" class="ledger-inline-select">
+                <option value="2026">2026年</option>
+                <option value="2025">2025年</option>
+                <option value="2024">2024年</option>
+              </select>
+              <select id="ledger-filter-month" class="ledger-inline-select">
+                ${Array.from({ length: 12 }, (_, index) => {
+                  const value = String(index + 1).padStart(2, '0');
+                  return `<option value="${value}">${index + 1}月</option>`;
+                }).join('')}
+              </select>
+            </div>
+          </div>
+          ${this.renderOrgSelector()}
+          <div class="ledger-filter-actions">
+            <button id="ledger-filter-reset" class="ledger-filter-secondary" type="button">
+              <i class="fa-solid fa-rotate-right"></i>
+              <span>重置筛选</span>
+            </button>
+          </div>
         </div>
       </div>
     `;
+  },
+
+  getAdvancedFilterCount() {
+    let count = 0;
+    if (this.filters.year !== '2026' || this.filters.month !== '06') count += 1;
+    if (this.orgNavigator.region) count += 1;
+    if (this.orgNavigator.office) count += 1;
+    if (this.orgNavigator.dealer) count += 1;
+    return count;
+  },
+
+  updateAdvancedFilterCount() {
+    const count = this.getAdvancedFilterCount();
+    const badge = document.getElementById('ledger-filter-active-count');
+    if (!badge) return;
+    badge.textContent = String(count);
+    badge.classList.toggle('hidden', count === 0);
+  },
+
+  toggleAdvancedFilters() {
+    this.advancedFiltersExpanded = !this.advancedFiltersExpanded;
+    const panel = document.getElementById('ledger-advanced-filters');
+    const button = document.getElementById('ledger-filter-expand');
+    if (!panel || !button) return;
+
+    panel.classList.toggle('hidden', !this.advancedFiltersExpanded);
+    button.setAttribute('aria-expanded', String(this.advancedFiltersExpanded));
+    button.querySelector('span')?.replaceChildren(
+      document.createTextNode(this.advancedFiltersExpanded ? '收起筛选' : '展开筛选')
+    );
+    const icon = button.querySelector('i');
+    if (icon) icon.className = `fa-solid fa-chevron-${this.advancedFiltersExpanded ? 'up' : 'down'}`;
   },
 
   renderOrgSelector() {
@@ -283,7 +323,7 @@ const LedgerView = {
   },
   
   getSkeletonRows() {
-    const columnCount = this.getVisibleColumns().length;
+    const columnCount = this.getVisibleColumns().length + 1;
     return Array(5).fill(0).map(() => `
       <tr>
         ${Array.from({ length: columnCount }).map(() => '<td class="px-4 py-3"><div class="h-4 w-24 skeleton rounded"></div></td>').join('')}
@@ -362,7 +402,7 @@ const LedgerView = {
     if (!rows.length) {
       return `
         <tr>
-          <td colspan="${this.getVisibleColumns().length}" class="px-4 py-16 text-center">
+          <td colspan="${this.getVisibleColumns().length + 1}" class="px-4 py-16 text-center">
             <div class="inline-flex flex-col items-center gap-3 text-[#86909c]">
               <span class="w-12 h-12 rounded-2xl bg-blue-50 text-brand flex items-center justify-center text-lg">
                 <i class="fa-solid fa-filter-circle-xmark"></i>
@@ -385,8 +425,17 @@ const LedgerView = {
     `).join('');
   },
 
+  getLedgerRowKey(item) {
+    return [
+      item.month,
+      item.storeCode,
+      item.barcode || item.productCode,
+      item.productName
+    ].join('|');
+  },
+
   renderDataCells(item) {
-    return this.getVisibleColumns().map((column) => {
+    const cells = this.getVisibleColumns().map((column) => {
       const value = column.value(item);
       const classes = ['px-4', 'py-3'];
       if (column.align === 'right') classes.push('text-right');
@@ -396,6 +445,13 @@ const LedgerView = {
       const title = column.truncate ? ` title="${this.escapeHtml(value)}"` : '';
       return `<td class="${classes.join(' ')}"${title}>${this.escapeHtml(value)}</td>`;
     }).join('');
+    return `${cells}
+      <td class="px-4 py-3">
+        <button type="button" class="ledger-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-colors" data-ledger-key="${this.escapeHtml(this.getLedgerRowKey(item))}" title="单据详情">
+          <i class="fa-solid fa-list-check"></i>
+        </button>
+      </td>
+    `;
   },
 
   getGroupLabel(item) {
@@ -412,7 +468,7 @@ const LedgerView = {
       result.get(label).push(item);
       return result;
     }, new Map());
-    const columnCount = this.getVisibleColumns().length;
+    const columnCount = this.getVisibleColumns().length + 1;
 
     return [...groups.entries()].map(([label, items]) => {
       const collapsed = this.collapsedGroups.has(label);
@@ -488,6 +544,7 @@ const LedgerView = {
         dealer: this.orgNavigator.dealer
       }
     };
+    this.updateAdvancedFilterCount();
   },
 
   resetFilters() {
@@ -508,6 +565,7 @@ const LedgerView = {
     };
     this.syncFilterControls();
     this.renderOrgSelectorIntoDom();
+    this.updateAdvancedFilterCount();
     this.loadDataMock();
   },
 
@@ -531,6 +589,7 @@ const LedgerView = {
         this.orgNavigator.dealer = '';
       }
       this.renderOrgSelectorIntoDom();
+      this.updateAdvancedFilterCount();
       return;
     }
 
@@ -546,6 +605,7 @@ const LedgerView = {
       this.orgNavigator.dealer = value;
     }
     this.renderOrgSelectorIntoDom();
+    this.updateAdvancedFilterCount();
   },
 
   toggleToolPanel(panelId, buttonId) {
@@ -630,6 +690,16 @@ const LedgerView = {
       this.loadDataMock();
     });
 
+    document.getElementById('ledger-filter-keyword')?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      this.readFilters();
+      this.loadDataMock();
+    });
+
+    document.getElementById('ledger-filter-expand')?.addEventListener('click', () => {
+      this.toggleAdvancedFilters();
+    });
+
     document.getElementById('ledger-filter-reset')?.addEventListener('click', () => {
       this.resetFilters();
     });
@@ -638,6 +708,34 @@ const LedgerView = {
       const columnButton = event.target.closest('#ledger-column-btn');
       const groupButton = event.target.closest('#ledger-group-btn');
       const groupToggle = event.target.closest('.ledger-group-toggle');
+      const detailButton = event.target.closest('.ledger-detail-btn');
+      if (detailButton) {
+        const rowKey = detailButton.getAttribute('data-ledger-key');
+        const row = this.getFilteredRows().find(item => this.getLedgerRowKey(item) === rowKey);
+        if (row && typeof IngestionView !== 'undefined' && typeof IngestionView.openDocumentDetail === 'function') {
+          IngestionView.openDocumentDetail({
+            moduleName: '台账与汇总 - 标准POS门店列表',
+            currentNode: '台账与汇总',
+            title: row.storeName,
+            nameLabel: '门店名称',
+            statusText: '已入账',
+            row,
+            moduleFields: [
+              { label: '年月', value: row.month || '-' },
+              { label: 'ACC', value: row.acc || '-' },
+              { label: '经销商名称', value: row.dealer || '-' },
+              { label: '门店编码', value: row.storeCode || '-' },
+              { label: '产品编码', value: row.barcode || '-' },
+              { label: '产品名称', value: row.productName || '-' },
+              { label: '销售数量', value: String(row.quantity || '-') },
+              { label: '销售金额', value: `￥${row.amount || '-'}` },
+              { label: '所属区域', value: row.fullRegion || '-' },
+              { label: '所属营业所', value: row.salesOffice || '-' }
+            ]
+          });
+        }
+        return;
+      }
       if (columnButton) {
         this.toggleToolPanel('ledger-column-panel', 'ledger-column-btn');
         return;

@@ -2,6 +2,9 @@ const IngestionView = {
   data: [],
   filteredData: [],
   activeDataMode: 'files',
+  promotedStashKeys: new Set(),
+  failedStashKeys: new Set(),
+  approvedOriginalIds: new Set(),
   
   // 获取当前语言
   getCurrentLang() {
@@ -47,6 +50,10 @@ const IngestionView = {
         }))
         .filter(item => item.attachment.status === targetStatus);
     });
+  },
+
+  getDisplayMonth(row = {}) {
+    return row.month || row.period || '2026年05月';
   },
 
   recalcInboxItemStatus(inboxItem) {
@@ -98,9 +105,11 @@ const IngestionView = {
     try {
       const res = await fetch('data/files_mock.json?v=20260610-attachment-audit-columns');
       this.data = await res.json();
+      this.loadApprovedOriginalIds();
       // 添加处理人字段，并保留内部驳回备注
       this.data = this.data.map(row => ({
         ...row,
+        status: this.approvedOriginalIds.has(String(row.id)) ? '已通过' : row.status,
         handler: row.status.includes('异常') ? row.team : 'POS担当',
         remark: row.remark || ''
       }));
@@ -132,6 +141,24 @@ const IngestionView = {
       const parsed = JSON.parse(savedPagination);
       this.pagination.page = parsed.page || 1;
     }
+  },
+
+  loadApprovedOriginalIds() {
+    try {
+      const savedIds = JSON.parse(localStorage.getItem('ingestion_approved_original_ids') || '[]');
+      this.approvedOriginalIds = new Set(Array.isArray(savedIds) ? savedIds.map(String) : []);
+    } catch (error) {
+      this.approvedOriginalIds = new Set();
+    }
+  },
+
+  saveApprovedOriginalIds() {
+    localStorage.setItem('ingestion_approved_original_ids', JSON.stringify([...this.approvedOriginalIds]));
+  },
+
+  markOriginalRowsApproved(ids) {
+    ids.map(String).forEach(id => this.approvedOriginalIds.add(id));
+    this.saveApprovedOriginalIds();
   },
   
   // 筛选逻辑
@@ -488,27 +515,7 @@ const IngestionView = {
           
           <table class="w-full text-left text-sm text-[#4e5969]" id="ingestion-table">
             <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
-              <tr>
-                <th class="px-5 py-4 w-12 rounded-tl-lg">
-                  <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-brand focus:ring-brand">
-                </th>
-                <th class="px-3 py-4 max-w-44">${this.getCurrentLang() === 'cn' ? '文件名称' : '파일명'}</th>
-                <th class="px-4 py-4 min-w-44">${this.getCurrentLang() === 'cn' ? '来源邮件' : '출처 이메일'}</th>
-                <th class="px-4 py-4 min-w-36">${this.getCurrentLang() === 'cn' ? '来源附件' : '출처 첨부'}</th>
-                <th class="px-5 py-4">${this.getCurrentLang() === 'cn' ? '营业Team' : '영업 Team'}</th>
-                <th class="px-5 py-4">
-                  <div class="flex items-center gap-1">
-                    ${this.getCurrentLang() === 'cn' ? '处理人' : '처리자'}
-                    <i class="fa-solid fa-circle-info text-xs text-[#86909c] cursor-help" title="${this.getCurrentLang() === 'cn' ? '处理人信息' : '처리자 정보'}"></i>
-                  </div>
-                </th>
-                <th class="px-5 py-4 w-24 rounded-tr-lg">
-                  <div class="flex items-center gap-1">
-                    ${this.getCurrentLang() === 'cn' ? '操作' : '조작'}
-                    <i class="fa-solid fa-circle-info text-xs text-[#86909c] cursor-help" title="${this.getCurrentLang() === 'cn' ? '操作按钮' : '조작 버튼'}"></i>
-                  </div>
-                </th>
-              </tr>
+              <tr id="ingestion-table-head-row"></tr>
             </thead>
             <tbody id="ingestion-tbody" class="divide-y divide-gray-100">
               <tr><td colspan="7" class="text-center py-12 text-[#86909c]">Loading...</td></tr>
@@ -537,7 +544,7 @@ const IngestionView = {
           <div class="text-sm text-[#86909c]">
             ${this.getCurrentLang() === 'cn' ? '共' : '총'} <span id="total-count">0</span> ${this.getCurrentLang() === 'cn' ? '条数据' : '개 데이터'}
           </div>
-          <div class="flex items-center gap-2">
+          <div id="pagination-controls" class="flex items-center gap-2">
             <button type="button" id="btn-prev-page" class="px-3 py-1.5 text-xs rounded bg-gray-100 text-[#4e5969] hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all" disabled>
               <i class="fa-solid fa-chevron-left mr-1"></i>${this.getCurrentLang() === 'cn' ? '上一页' : '이전'}
             </button>
@@ -755,7 +762,7 @@ const IngestionView = {
     const cn = this.getCurrentLang() === 'cn';
     
     tableContainer.innerHTML = `
-      <table class="w-full min-w-[1200px] text-left text-sm text-[#4e5969]" id="inbox-table">
+      <table class="w-full min-w-[1280px] text-left text-sm text-[#4e5969]" id="inbox-table">
         <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
           <tr>
             <th class="px-3 py-3 w-12"></th>
@@ -858,14 +865,14 @@ const IngestionView = {
         <td class="px-4 py-2.5 w-[140px] text-[#4e5969]">${att.sourceMethod}</td>
         <td class="px-4 py-2.5 w-[220px]">
           <div class="flex items-center justify-start gap-1.5 whitespace-nowrap">
-            <button type="button" class="inbox-att-preview-btn px-2 py-1 text-xs rounded text-slate-500 hover:bg-slate-100 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '预览附件' : '첨부 미리보기'}">
-              <i class="fa-regular fa-eye"></i>
-            </button>
             <button type="button" class="inbox-att-archive-btn px-2 py-1 text-xs rounded text-[#86909c] hover:bg-gray-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '归档' : '보관'}">
               <i class="fa-solid fa-folder-minus"></i>
             </button>
             <button type="button" class="inbox-att-reject-btn px-2 py-1 text-xs rounded transition-all ${isRejected ? 'text-gray-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-50'}" data-email-id="${emailId}" data-att-idx="${index}" title="${isRejected ? '已驳回' : '驳回'}" ${isRejected ? 'disabled' : ''}>
               <i class="fa-solid fa-reply"></i>
+            </button>
+            <button type="button" class="inbox-att-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '单据详情' : '문서 상세'}">
+              <i class="fa-solid fa-list-check"></i>
             </button>
             ${isDuplicatePending ? `
               <button type="button" class="inbox-att-duplicate-action px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-all" data-action="cover" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '覆盖重复数据' : '중복 데이터 덮어쓰기'}">
@@ -1206,16 +1213,6 @@ const IngestionView = {
       self.showInboxAttachmentPreview(inboxItem, attachment);
     };
     
-    // 预览按钮（小眼睛）
-    detailRow.querySelectorAll('.inbox-att-preview-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const emailId = btn.getAttribute('data-email-id');
-        const attIdx = parseInt(btn.getAttribute('data-att-idx') || '0');
-        previewAttachment(emailId, attIdx);
-      });
-    });
-
     // 归档按钮
     detailRow.querySelectorAll('.inbox-att-archive-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -1245,6 +1242,39 @@ const IngestionView = {
         self.resolveDuplicateAttachment(emailId, attIdx, action);
       });
     });
+
+    detailRow.querySelectorAll('.inbox-att-detail-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const emailId = btn.getAttribute('data-email-id');
+        const attIdx = Number(btn.getAttribute('data-att-idx') || 0);
+        const inboxItem = self.getInboxData().find(d => String(d.id) === String(emailId));
+        const attachment = inboxItem?.attachments?.[attIdx];
+        if (!inboxItem || !attachment) return;
+        self.openDocumentDetail({
+          moduleName: self.getCurrentLang() === 'cn' ? '文件收取 - 收件箱' : '파일 수집 - 받은 편지함',
+          currentNode: self.getCurrentLang() === 'cn' ? '收件箱附件' : '받은 편지함 첨부',
+          title: attachment.name,
+          nameLabel: self.getCurrentLang() === 'cn' ? '附件名称' : '첨부 파일명',
+          statusText: attachment.status || inboxItem.statusText || '-',
+          row: {
+            fileName: attachment.name,
+            storeName: attachment.name,
+            sourceEmailId: inboxItem.id,
+            sourceAttIdx: attIdx,
+            sourceMethod: attachment.sourceMethod,
+            reason: attachment.rejectReason
+          },
+          inboxItem,
+          attachment,
+          attachmentIndex: attIdx,
+          moduleFields: [
+            { label: self.getCurrentLang() === 'cn' ? '来源方式' : '출처 방식', value: attachment.sourceMethod || '-' },
+            { label: self.getCurrentLang() === 'cn' ? '异常说明' : '이상 설명', value: attachment.rejectReason || '-' }
+          ]
+        });
+      });
+    });
     
     // 附件名称点击预览
     detailRow.querySelectorAll('.inbox-att-name-text').forEach(nameEl => {
@@ -1255,6 +1285,425 @@ const IngestionView = {
         previewAttachment(emailId, attIdx);
       });
     });
+  },
+
+  getZipAttachmentFiles(inboxItem, attachment) {
+    const cn = this.getCurrentLang() === 'cn';
+    return [
+      {
+        name: cn ? '门店销售明细.xlsx' : '매장 판매 상세.xlsx',
+        type: 'XLSX',
+        status: cn ? '正常' : '정상',
+        note: cn ? '已识别为 POS 明细数据' : 'POS 상세 데이터로 인식됨'
+      },
+      {
+        name: cn ? '产品销售汇总.csv' : '제품 판매 요약.csv',
+        type: 'CSV',
+        status: cn ? '正常' : '정상',
+        note: cn ? '已识别为汇总辅助文件' : '요약 보조 파일로 인식됨'
+      },
+      {
+        name: cn ? '重复门店清单.xlsx' : '중복 매장 목록.xlsx',
+        type: 'XLSX',
+        status: cn ? '待处理' : '처리 대기',
+        note: cn ? 'A门店、B门店 与原始门店数据列表重复' : 'A/B 매장이 원본 매장 데이터 목록과 중복'
+      }
+    ];
+  },
+
+  getAttachmentStatusClass(status) {
+    if (status === '正常' || status === '정상') return 'bg-green-50 text-green-700 border-green-100';
+    if (status === '待处理' || status === '처리 대기') return 'bg-amber-50 text-amber-700 border-amber-100';
+    if (status === '驳回') return 'bg-red-50 text-red-600 border-red-100';
+    if (status === '已归档') return 'bg-slate-50 text-slate-500 border-slate-100';
+    if (status === '暂存') return 'bg-blue-50 text-brand border-blue-100';
+    return 'bg-gray-50 text-[#4e5969] border-gray-100';
+  },
+
+  buildInboxDocumentLogs(inboxItem) {
+    const cn = this.getCurrentLang() === 'cn';
+    const logs = [
+      {
+        node: cn ? '收件箱' : '받은 편지함',
+        action: cn ? '材料进入收件箱' : '자료가 받은 편지함에 들어옴',
+        time: inboxItem.provideTime || '-',
+        status: cn ? '完成' : '완료',
+        tone: 'success'
+      },
+      {
+        node: cn ? '数据处理' : '데이터 처리',
+        action: cn ? `系统解析 ${inboxItem.attachmentCount || inboxItem.attachments?.length || 0} 个来源附件` : '시스템이 첨부 파일을 분석',
+        time: inboxItem.provideTime || '-',
+        status: cn ? '完成' : '완료',
+        tone: 'success'
+      }
+    ];
+
+    (inboxItem.attachments || []).forEach((attachment) => {
+      let node = cn ? '原始门店数据列表' : '원본 매장 데이터 목록';
+      let action = cn ? '附件识别通过，等待进入质量检查' : '첨부 파일 인식 완료';
+      let tone = 'success';
+
+      if (attachment.status === '已归档') {
+        node = cn ? '归档（非POS表）' : '보관(비POS표)';
+        action = cn ? '附件被归档为非 POS 数据' : '비 POS 데이터로 보관됨';
+        tone = 'muted';
+      } else if (attachment.status === '暂存') {
+        node = cn ? '暂存数据' : '임시 저장 데이터';
+        action = cn ? '缺少门店编码或所属组织，等待补全后流入原始门店数据列表' : '매장 코드 또는 조직 정보 보완 대기';
+        tone = 'info';
+      } else if (attachment.status === '待处理') {
+        node = cn ? '待处理' : '처리 대기';
+        action = attachment.rejectReason || (cn ? '存在待处理异常' : '처리 대기 이상 존재');
+        tone = 'warning';
+      } else if (attachment.status === '驳回') {
+        node = cn ? '已处理' : '처리 완료';
+        action = attachment.rejectReason || (cn ? '附件已驳回' : '첨부 파일 반려됨');
+        tone = 'danger';
+      }
+
+      logs.push({
+        node,
+        action: `${attachment.name}：${action}`,
+        time: inboxItem.provideTime || '-',
+        status: attachment.status,
+        tone
+      });
+    });
+
+    if (inboxItem.statusText === '正常') {
+      logs.push({
+        node: cn ? '质量检查' : '품질 검사',
+        action: cn ? '可进入质量检查，后续通过后流入标准 POS 表与台账汇总' : '품질 검사 진입 가능',
+        time: '-',
+        status: cn ? '待执行' : '실행 대기',
+        tone: 'info'
+      });
+    }
+
+    return logs;
+  },
+
+  renderInboxSourceAttachments(inboxItem) {
+    const cn = this.getCurrentLang() === 'cn';
+    const attachments = inboxItem.attachments || [];
+    if (!attachments.length) {
+      return `<div class="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-[#86909c]">${cn ? '暂无来源附件' : '첨부 파일 없음'}</div>`;
+    }
+
+    return attachments.map((attachment, index) => {
+      const isZip = /\.zip$/i.test(attachment.name || '');
+      const zipFiles = isZip ? this.getZipAttachmentFiles(inboxItem, attachment) : [];
+      const statusClass = this.getAttachmentStatusClass(attachment.status);
+      return `
+        <div class="rounded-xl border border-gray-100 bg-white overflow-hidden">
+          <button type="button" class="doc-source-attachment-trigger w-full px-4 py-3 flex items-start justify-between gap-3 text-left hover:bg-blue-50/40 transition-colors" data-email-id="${inboxItem.id}" data-att-idx="${index}">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <i class="fa-solid ${isZip ? 'fa-file-zipper text-amber-500' : 'fa-file-excel text-green-600'}"></i>
+                <span class="text-sm font-semibold text-brand truncate hover:underline">${this.escapeHtml(attachment.name)}</span>
+              </div>
+              <div class="mt-1 text-xs text-[#86909c]">${cn ? '来源方式' : '출처 방식'}：${this.escapeHtml(attachment.sourceMethod || '-')}</div>
+            </div>
+            <span class="shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusClass}">${this.escapeHtml(attachment.status || '-')}</span>
+          </button>
+          ${isZip ? `
+            <div class="border-t border-gray-100 bg-slate-50 px-4 py-3">
+              <div class="mb-2 text-xs font-semibold text-[#4e5969]">${cn ? '文件列表' : '파일 목록'} · ${zipFiles.length}</div>
+              <div class="space-y-2">
+                ${zipFiles.map((file, fileIndex) => `
+                  <button type="button" class="doc-source-zip-file-trigger w-full rounded-lg bg-white border border-gray-100 px-3 py-2 text-left hover:border-blue-200 hover:bg-blue-50/50 transition-colors" data-email-id="${inboxItem.id}" data-att-idx="${index}" data-zip-index="${fileIndex}">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="min-w-0 truncate text-xs font-semibold text-[#1d2129]">${this.escapeHtml(file.name)}</span>
+                      <span class="px-2 py-0.5 rounded-full text-[11px] border ${this.getAttachmentStatusClass(file.status)}">${this.escapeHtml(file.status)}</span>
+                    </div>
+                    <div class="mt-1 flex items-center justify-between gap-2 text-[11px] text-[#86909c]">
+                      <span>${this.escapeHtml(file.type)}</span>
+                      <span class="truncate">${this.escapeHtml(file.note)}</span>
+                    </div>
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+  },
+
+  findDocumentSource(row = {}) {
+    const inboxData = this.getInboxData();
+    if (row.sourceEmailId) {
+      const inboxItem = inboxData.find(item => String(item.id) === String(row.sourceEmailId));
+      const attachmentIndex = typeof row.sourceAttIdx === 'number' ? row.sourceAttIdx : 0;
+      return {
+        inboxItem,
+        attachment: inboxItem?.attachments?.[attachmentIndex],
+        attachmentIndex
+      };
+    }
+
+    const name = String(row.fileName || row.storeName || row.title || '').replace(/\.(xlsx|xls|csv|zip)$/i, '');
+    const inboxItem = inboxData.find(item => {
+      const subject = String(item.emailSubject || '');
+      const body = String(item.emailBody || '');
+      const attachments = item.attachments || [];
+      return subject.includes(name) || body.includes(name) || attachments.some(att => String(att.name || '').includes(name));
+    }) || inboxData[0];
+    const attachmentIndex = Math.max(0, (inboxItem?.attachments || []).findIndex(att => String(att.name || '').includes(name)));
+    return {
+      inboxItem,
+      attachment: inboxItem?.attachments?.[attachmentIndex >= 0 ? attachmentIndex : 0],
+      attachmentIndex: attachmentIndex >= 0 ? attachmentIndex : 0
+    };
+  },
+
+  buildDocumentDetailLogs(context = {}) {
+    const cn = this.getCurrentLang() === 'cn';
+    const logs = [];
+    const inboxItem = context.inboxItem;
+    const currentNode = context.currentNode || context.moduleName || (cn ? '当前模块' : '현재 모듈');
+    if (inboxItem) {
+      logs.push({
+        node: cn ? '收件箱' : '받은 편지함',
+        action: cn ? `接收来源邮件：${inboxItem.emailSubject || '-'}` : `원본 메일 수신：${inboxItem.emailSubject || '-'}`,
+        time: inboxItem.provideTime || '-',
+        status: cn ? '已接收' : '수신됨',
+        tone: 'info'
+      });
+    }
+
+    const statusText = context.statusText || context.row?.status || context.attachment?.status || '-';
+    logs.push({
+      node: currentNode,
+      action: context.logAction || (cn ? `单据进入${currentNode}，状态为「${statusText}」` : `${currentNode} 진입, 상태 ${statusText}`),
+      time: context.row?.updatedAt || inboxItem?.provideTime || '-',
+      status: statusText,
+      tone: /异常|驳回|失败/.test(statusText) ? 'danger' : /待处理|暂存/.test(statusText) ? 'warning' : 'success'
+    });
+
+    if (/质量检查|标准POS/.test(context.moduleName || currentNode)) {
+      logs.push({
+        node: cn ? 'AI质检' : 'AI 검사',
+        action: context.row?.aiNote || (cn ? '已完成标准 POS 字段校验和组织关系校验' : '표준 POS 필드 및 조직 관계 검사 완료'),
+        time: '-',
+        status: cn ? '已质检' : '검사 완료',
+        tone: 'success'
+      });
+    }
+
+    if (/台账|汇总/.test(context.moduleName || currentNode)) {
+      logs.push({
+        node: cn ? '台账与汇总' : '대장 및 집계',
+        action: cn ? '人工审核通过后进入标准 POS 明细台账' : '검토 후 표준 POS 상세 대장 반영',
+        time: '-',
+        status: cn ? '已入账' : '반영됨',
+        tone: 'success'
+      });
+    }
+
+    return logs;
+  },
+
+  openDocumentDetail(context = {}) {
+    if (typeof Drawer === 'undefined') return;
+    const cn = this.getCurrentLang() === 'cn';
+    const row = context.row || {};
+    const source = context.inboxItem ? context : this.findDocumentSource(row);
+    const inboxItem = source.inboxItem || context.inboxItem;
+    const title = context.title || row.storeName || row.fileName || context.attachment?.name || (cn ? '单据详情' : '문서 상세');
+    const nameLabel = context.nameLabel || (cn ? '单据名称' : '문서명');
+    const statusText = context.statusText || row.status || context.attachment?.status || '-';
+    const statusClass = this.getInboxStatusStyle(statusText);
+    const logToneClass = {
+      success: 'bg-green-50 text-green-700 border-green-100',
+      warning: 'bg-amber-50 text-amber-700 border-amber-100',
+      danger: 'bg-red-50 text-red-600 border-red-100',
+      info: 'bg-blue-50 text-brand border-blue-100',
+      muted: 'bg-slate-50 text-slate-500 border-slate-100'
+    };
+    const logs = this.buildDocumentDetailLogs({ ...context, inboxItem });
+    const content = `
+      <div class="space-y-5">
+        <section class="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
+          <div class="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <div class="text-xs font-semibold text-[#86909c]">${this.escapeHtml(nameLabel)}</div>
+              <h4 class="mt-1 text-base font-extrabold text-[#1d2129] truncate" title="${this.escapeHtml(title)}">${this.escapeHtml(title)}</h4>
+              <p class="mt-1 text-sm text-[#4e5969]">${this.escapeHtml(context.moduleName || '-')}</p>
+            </div>
+            <span class="shrink-0 px-3 py-1 rounded-full text-xs font-semibold border ${statusClass}">${this.escapeHtml(statusText)}</span>
+          </div>
+        </section>
+
+        <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
+          <h4 class="text-sm font-extrabold text-[#1d2129] mb-4">${cn ? '来源邮件' : '원본 메일'}</h4>
+          ${inboxItem ? `
+            <div class="rounded-xl bg-slate-50 px-4 py-3 text-sm">
+              <div class="font-bold text-[#1d2129] truncate" title="${this.escapeHtml(inboxItem.emailSubject || '-')}">${this.escapeHtml(inboxItem.emailSubject || '-')}</div>
+              <div class="mt-1 text-[#4e5969] truncate" title="${this.escapeHtml(inboxItem.emailBody || '-')}">${this.escapeHtml(inboxItem.emailBody || '-')}</div>
+              <div class="mt-2 grid grid-cols-2 gap-3 text-xs text-[#86909c]">
+                <span>${cn ? '材料提供人' : '제공자'}：${this.escapeHtml(inboxItem.provider || '-')}</span>
+                <span>${cn ? '材料提供时间' : '제공 시간'}：${this.escapeHtml(inboxItem.provideTime || '-')}</span>
+              </div>
+            </div>
+          ` : `<div class="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-[#86909c]">${cn ? '暂无来源邮件' : '원본 메일 없음'}</div>`}
+        </section>
+
+        <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
+          <div class="flex items-center justify-between gap-3 mb-4">
+            <h4 class="text-sm font-extrabold text-[#1d2129]">${cn ? '来源附件' : '원본 첨부 파일'}</h4>
+            <span class="text-xs text-[#86909c]">${cn ? '保留原始附件结构，压缩包可查看内部文件' : '원본 첨부 구조 유지'}</span>
+          </div>
+          <div class="space-y-3">
+            ${inboxItem ? this.renderInboxSourceAttachments(inboxItem) : `<div class="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-[#86909c]">${cn ? '暂无来源附件' : '첨부 파일 없음'}</div>`}
+          </div>
+        </section>
+
+        <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
+          <h4 class="text-sm font-extrabold text-[#1d2129] mb-4">${cn ? '状态日志流转' : '상태 로그 흐름'}</h4>
+          <div class="space-y-3">
+            ${logs.map((log, index) => `
+              <div class="flex gap-3">
+                <div class="flex flex-col items-center">
+                  <span class="w-7 h-7 rounded-full bg-blue-50 text-brand flex items-center justify-center text-xs font-bold">${index + 1}</span>
+                  ${index < logs.length - 1 ? '<span class="flex-1 w-px bg-gray-200 my-1"></span>' : ''}
+                </div>
+                <div class="flex-1 rounded-xl border border-gray-100 bg-slate-50 px-4 py-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="font-bold text-sm text-[#1d2129]">${this.escapeHtml(log.node)}</div>
+                    <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border ${logToneClass[log.tone] || logToneClass.muted}">${this.escapeHtml(log.status)}</span>
+                  </div>
+                  <div class="mt-1 text-sm leading-6 text-[#4e5969]">${this.escapeHtml(log.action)}</div>
+                  <div class="mt-1 text-xs text-[#86909c]">${this.escapeHtml(log.time)}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </section>
+      </div>
+    `;
+
+    const overlay = Drawer.show({
+      title: cn ? '单据详情' : '문서 상세',
+      content,
+      width: '680px'
+    });
+
+    overlay.querySelectorAll('.doc-source-attachment-trigger, .doc-source-zip-file-trigger').forEach(btn => {
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const emailId = btn.getAttribute('data-email-id');
+        const attIdx = Number(btn.getAttribute('data-att-idx') || 0);
+        const zipIndex = Number(btn.getAttribute('data-zip-index') || 0);
+        const item = this.getInboxData().find(row => String(row.id) === String(emailId));
+        const attachment = item?.attachments?.[attIdx];
+        if (!item || !attachment) return;
+        if (attachment.status === '驳回') {
+          Dialog.toast(cn ? '文件异常、无法预览' : '파일 이상으로 미리볼 수 없습니다', 'warning');
+          return;
+        }
+        this.showInboxAttachmentPreview(item, attachment, zipIndex);
+      });
+    });
+  },
+
+  openInboxDocumentDetail(inboxItem) {
+    if (inboxItem) {
+      this.openDocumentDetail({
+        moduleName: this.getCurrentLang() === 'cn' ? '文件收取 - 收件箱' : '파일 수집 - 받은 편지함',
+        currentNode: this.getCurrentLang() === 'cn' ? '收件箱' : '받은 편지함',
+        title: inboxItem.emailSubject,
+        nameLabel: this.getCurrentLang() === 'cn' ? '单据标题' : '문서 제목',
+        statusText: inboxItem.statusText,
+        row: { sourceEmailId: inboxItem.id },
+        inboxItem
+      });
+      return;
+    }
+    if (!inboxItem || typeof Drawer === 'undefined') return;
+    const cn = this.getCurrentLang() === 'cn';
+    const statusClass = this.getInboxStatusStyle(inboxItem.statusText);
+    const logs = this.buildInboxDocumentLogs(inboxItem);
+    const logToneClass = {
+      success: 'bg-green-50 text-green-700 border-green-100',
+      warning: 'bg-amber-50 text-amber-700 border-amber-100',
+      danger: 'bg-red-50 text-red-600 border-red-100',
+      info: 'bg-blue-50 text-brand border-blue-100',
+      muted: 'bg-slate-50 text-slate-500 border-slate-100'
+    };
+    const content = `
+      <div class="space-y-5">
+        <section class="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
+          <div class="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <div class="text-xs font-semibold text-[#86909c]">${cn ? '单据标题' : '문서 제목'}</div>
+              <h4 class="mt-1 text-base font-extrabold text-[#1d2129] truncate" title="${this.escapeHtml(inboxItem.emailSubject)}">${this.escapeHtml(inboxItem.emailSubject)}</h4>
+              <p class="mt-1 text-sm text-[#4e5969] truncate" title="${this.escapeHtml(inboxItem.emailBody)}">${this.escapeHtml(inboxItem.emailBody)}</p>
+            </div>
+            <span class="shrink-0 px-3 py-1 rounded-full text-xs font-semibold border ${statusClass}">${this.escapeHtml(inboxItem.statusText)}</span>
+          </div>
+        </section>
+
+        <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
+          <div class="flex items-center justify-between gap-3 mb-4">
+            <h4 class="text-sm font-extrabold text-[#1d2129]">${cn ? '来源附件' : '원본 첨부 파일'}</h4>
+            <span class="text-xs text-[#86909c]">${cn ? '保留原始附件结构，压缩包可查看内部文件' : '원본 첨부 구조 유지'}</span>
+          </div>
+          <div class="space-y-3">
+            ${this.renderInboxSourceAttachments(inboxItem)}
+          </div>
+        </section>
+
+        <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
+          <h4 class="text-sm font-extrabold text-[#1d2129] mb-4">${cn ? '状态日志流转' : '상태 로그 흐름'}</h4>
+          <div class="space-y-3">
+            ${logs.map((log, index) => `
+              <div class="flex gap-3">
+                <div class="flex flex-col items-center">
+                  <span class="w-7 h-7 rounded-full bg-blue-50 text-brand flex items-center justify-center text-xs font-bold">${index + 1}</span>
+                  ${index < logs.length - 1 ? '<span class="flex-1 w-px bg-gray-200 my-1"></span>' : ''}
+                </div>
+                <div class="flex-1 rounded-xl border border-gray-100 bg-slate-50 px-4 py-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="font-bold text-sm text-[#1d2129]">${this.escapeHtml(log.node)}</div>
+                    <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border ${logToneClass[log.tone] || logToneClass.muted}">${this.escapeHtml(log.status)}</span>
+                  </div>
+                  <div class="mt-1 text-sm leading-6 text-[#4e5969]">${this.escapeHtml(log.action)}</div>
+                  <div class="mt-1 text-xs text-[#86909c]">${this.escapeHtml(log.time)}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </section>
+      </div>
+    `;
+
+    const overlay = Drawer.show({
+      title: cn ? '单据详情' : '문서 상세',
+      content,
+      width: '640px'
+    });
+
+    const bindPreview = (selector) => {
+      overlay.querySelectorAll(selector).forEach(btn => {
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const attIdx = Number(btn.getAttribute('data-att-idx') || 0);
+          const attachment = inboxItem.attachments?.[attIdx];
+          if (!attachment) return;
+          if (attachment.status === '驳回') {
+            Dialog.toast(cn ? '文件异常、无法预览' : '파일 이상으로 미리볼 수 없습니다', 'warning');
+            return;
+          }
+          const zipIndex = Number(btn.getAttribute('data-zip-index') || 0);
+          this.showInboxAttachmentPreview(inboxItem, attachment, zipIndex);
+        });
+      });
+    };
+
+    bindPreview('.doc-source-attachment-trigger');
+    bindPreview('.doc-source-zip-file-trigger');
   },
 
   archiveInboxAttachment(emailId, attIdx) {
@@ -1351,7 +1800,7 @@ const IngestionView = {
   },
   
   // 收件箱附件预览弹窗（屏幕居中）
-  showInboxAttachmentPreview(inboxItem, att) {
+  showInboxAttachmentPreview(inboxItem, att, initialZipIndex = 0) {
     const self = this;
     const cn = this.getCurrentLang() === 'cn';
     
@@ -1432,8 +1881,11 @@ const IngestionView = {
         }))
       }
     ] : [];
+    const selectedZipIndex = isZipPreview
+      ? Math.min(Math.max(Number(initialZipIndex) || 0, 0), zipFiles.length - 1)
+      : 0;
     const renderZipFiles = () => zipFiles.map((file, index) => `
-      <button type="button" class="zip-file-item w-full text-left px-3 py-3 border-b border-gray-100 hover:bg-blue-50 transition-colors ${index === 0 ? 'bg-blue-50' : ''}" data-zip-index="${index}">
+      <button type="button" class="zip-file-item w-full text-left px-3 py-3 border-b border-gray-100 hover:bg-blue-50 transition-colors ${index === selectedZipIndex ? 'bg-blue-50' : ''}" data-zip-index="${index}">
         <div class="flex items-center justify-between gap-2">
           <span class="font-semibold text-xs text-[#1d2129] truncate" title="${this.escapeHtml(file.name)}">${this.escapeHtml(file.name)}</span>
           <span class="px-2 py-0.5 rounded-full text-[11px] ${file.status === '待处理' ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'}">${this.escapeHtml(file.status)}</span>
@@ -1479,7 +1931,7 @@ const IngestionView = {
             ` : ''}
             <div class="flex-1 overflow-auto p-0">
               ${isZipPreview ? `
-                <div id="zip-file-alert" class="hidden sticky top-0 z-20 border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-700">
+                <div id="zip-file-alert" class="${zipFiles[selectedZipIndex]?.name.includes('重复门店') ? '' : 'hidden'} sticky top-0 z-20 border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-700">
                   ${cn ? 'A门店、B门店 与原始门店数据列表重复，请确认是否覆盖或忽略。' : 'A/B 매장이 원본 매장 데이터 목록과 중복됩니다.'}
                 </div>
               ` : ''}
@@ -1494,7 +1946,7 @@ const IngestionView = {
                     </tr>
                   </thead>
                   <tbody class="text-slate-700 font-mono" id="preview-data-tbody">
-                    ${renderPreviewRows(isZipPreview ? zipFiles[0].rows : initialRows)}
+                    ${renderPreviewRows(isZipPreview ? zipFiles[selectedZipIndex].rows : initialRows)}
                   </tbody>
                 </table>
             </div>
@@ -1507,7 +1959,7 @@ const IngestionView = {
     
     // ---- 列排序（三态：无排序→正序→倒序→无排序）----
     const tbody = overlay.querySelector('#preview-data-tbody');
-    let originalRows = isZipPreview ? [...zipFiles[0].rows] : [...initialRows];
+    let originalRows = isZipPreview ? [...zipFiles[selectedZipIndex].rows] : [...initialRows];
     let currentRows = [...originalRows];
     let sortField = null;
     let sortState = 0; // 0=none, 1=asc, 2=desc
@@ -1836,16 +2288,63 @@ const IngestionView = {
     }
     return version;
   },
+
+  renderTableHeader() {
+    const headerRow = document.getElementById('ingestion-table-head-row');
+    if (!headerRow) return;
+    const cn = this.getCurrentLang() === 'cn';
+    const isOriginalStoreList = this.activeDataMode === 'files';
+    const commonStart = `
+      <th class="px-5 py-4 w-12 rounded-tl-lg">
+        <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-brand focus:ring-brand">
+      </th>
+      <th class="px-4 py-4 w-28">${cn ? '年月' : '년월'}</th>
+      <th class="px-3 py-4 max-w-44">${cn ? '门店名称' : '매장명'}</th>
+    `;
+    const commonEnd = `
+      <th class="px-5 py-4">${cn ? '营业Team' : '영업 Team'}</th>
+      <th class="px-5 py-4">
+        <div class="flex items-center gap-1">
+          ${cn ? '处理人' : '처리자'}
+          <i class="fa-solid fa-circle-info text-xs text-[#86909c] cursor-help" title="${cn ? '处理人信息' : '처리자 정보'}"></i>
+        </div>
+      </th>
+    `;
+    headerRow.innerHTML = isOriginalStoreList
+      ? `
+        ${commonStart}
+        ${commonEnd}
+        <th class="px-5 py-4 w-28">${cn ? '状态' : '상태'}</th>
+        <th class="px-5 py-4 w-32 rounded-tr-lg">
+          <div class="flex items-center gap-1">
+            ${cn ? '操作' : '조작'}
+            <i class="fa-solid fa-circle-info text-xs text-[#86909c] cursor-help" title="${cn ? '操作按钮' : '조작 버튼'}"></i>
+          </div>
+        </th>
+      `
+      : `
+        ${commonStart}
+        ${commonEnd}
+        <th class="px-5 py-4 w-32 rounded-tr-lg">
+          <div class="flex items-center gap-1">
+            ${cn ? '操作' : '조작'}
+            <i class="fa-solid fa-circle-info text-xs text-[#86909c] cursor-help" title="${cn ? '操作按钮' : '조작 버튼'}"></i>
+          </div>
+        </th>
+      `;
+  },
   
   renderTable() {
     const tbody = document.getElementById('ingestion-tbody');
     if (!tbody) return;
     
     this.hideLoading();
+    this.renderTableHeader();
     
-    // 计算分页
-    const start = (this.pagination.page - 1) * this.pagination.pageSize;
-    const end = start + this.pagination.pageSize;
+    const isOriginalStoreList = this.activeDataMode === 'files';
+    // 原始门店数据列表采用连续滚动，不再分页。
+    const start = isOriginalStoreList ? 0 : (this.pagination.page - 1) * this.pagination.pageSize;
+    const end = isOriginalStoreList ? this.filteredData.length : start + this.pagination.pageSize;
     const pageData = this.filteredData.slice(start, end);
     
     // 更新总数
@@ -1921,21 +2420,13 @@ const IngestionView = {
           <td class="px-4 py-3">
             <input type="checkbox" class="row-cb rounded border-gray-300 text-brand focus:ring-brand" value="${row.id}">
           </td>
+          <td class="px-4 py-3 text-[#4e5969]">${this.escapeHtml(this.getDisplayMonth(row))}</td>
           <td class="px-3 py-3">
-            <div class="font-medium text-slate-800 flex items-center gap-2" title="${row.fileName}">
+            <div class="font-medium flex items-center gap-2" title="${row.fileName}">
               <i class="fa-solid fa-file-excel text-green-600 flex-shrink-0"></i>
-              <span class="row-filename-text truncate max-w-[180px]">${row.fileName}</span>
+              <button type="button" class="ingestion-row-preview-trigger row-filename-text truncate max-w-[180px] text-brand hover:text-blue-700 hover:underline transition-colors text-left" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '点击预览' : '미리보기'} ${this.escapeHtml(row.fileName)}">${row.fileName}</button>
               <input type="text" class="row-filename-input hidden w-full max-w-[180px] px-1 py-0.5 border border-gray-200 rounded text-sm font-medium text-slate-800 focus:outline-none focus:border-brand" value="${this.escapeHtml(row.fileName)}">
             </div>
-          </td>
-          <td class="px-4 py-3">
-            <span class="inbox-source-email-link text-brand hover:text-blue-700 hover:underline cursor-pointer text-xs font-medium" 
-                  data-email-id="${sourceEmailId}" title="${this.escapeHtml(sourceEmail)}">
-              ${this.escapeHtml(sourceEmail.length > 20 ? sourceEmail.substring(0, 20) + '...' : sourceEmail)}
-            </span>
-          </td>
-          <td class="px-4 py-3">
-            ${sourceAttHtml}
           </td>
           <td class="px-5 py-3">
             <span class="row-team-text">${this.getLocalizedText(row.team)}</span>
@@ -1948,8 +2439,18 @@ const IngestionView = {
               ${this.getLocalizedText(row.handler) || '-'}
             </span>
           </td>
+          ${isOriginalStoreList ? `
+            <td class="px-5 py-3">
+              <span class="inline-flex px-2.5 py-1 rounded-full border text-xs font-semibold ${isApproved ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'}">
+                ${isApproved ? (this.getCurrentLang() === 'cn' ? '已通过' : '승인됨') : (this.getCurrentLang() === 'cn' ? '待通过' : '승인 대기')}
+              </span>
+            </td>
+          ` : ''}
           <td class="px-5 py-3">
             <div class="flex items-center gap-1">
+              <button class="px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 action-btn" data-action="detail" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '单据详情' : '문서 상세'}">
+                <i class="fa-solid fa-list-check"></i>
+              </button>
               ${this.activeDataMode === 'archive' ? `
               <button class="px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 action-btn" data-action="move-inbox" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '移动到收件箱' : '받은 편지함으로 이동'}">
                 <i class="fa-solid fa-inbox"></i>
@@ -1957,21 +2458,12 @@ const IngestionView = {
               <button class="px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 action-btn row-edit-btn" data-action="edit" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '编辑' : '편집'}">
                 <i class="fa-solid fa-pen-to-square row-edit-icon"></i>
               </button>
-              <button class="px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 action-btn" data-action="preview" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '预览' : '미리보기'}">
-                <i class="fa-regular fa-eye"></i>
-              </button>
               ` : `
-              <button class="px-2 py-1 text-xs rounded text-green-600 hover:bg-green-50 action-btn" data-action="approve" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '通过' : '승인'}">
+              <button class="px-2 py-1 text-xs rounded action-btn ${isApproved ? 'text-gray-300 cursor-not-allowed' : 'text-green-600 hover:bg-green-50'}" data-action="approve" data-id="${row.id}" title="${isApproved ? (this.getCurrentLang() === 'cn' ? '已通过' : '승인됨') : (this.getCurrentLang() === 'cn' ? '通过' : '승인')}" ${isApproved ? 'disabled' : ''}>
                 <i class="fa-solid fa-check"></i>
-              </button>
-              <button class="px-2 py-1 text-xs rounded text-red-500 hover:bg-red-50 action-btn" data-action="reject" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '驳回' : '거부'}">
-                <i class="fa-solid fa-reply"></i>
               </button>
               <button class="px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 action-btn row-edit-btn" data-action="edit" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '编辑' : '편집'}">
                 <i class="fa-solid fa-pen-to-square row-edit-icon"></i>
-              </button>
-              <button class="px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 action-btn" data-action="preview" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '预览' : '미리보기'}">
-                <i class="fa-regular fa-eye"></i>
               </button>
               `}
             </div>
@@ -1993,6 +2485,7 @@ const IngestionView = {
       const salesTeam = this.getLocalizedText(sourceRow.team || '华北 Team');
       return {
         row: {
+          month: this.getDisplayMonth(sourceRow),
           storeName: attachment.name,
           storeCode: '-',
           aiNote: '附件已暂存，待补充门店字段后进入质量检查。',
@@ -2009,7 +2502,29 @@ const IngestionView = {
     return [
       ...stashedAttachmentRows,
       ...rows.map((row, index) => ({ row, index })).slice(0, 5)
-    ];
+    ].map((item) => {
+      const key = this.getStashRowKey(item.row, item.index);
+      const failed = this.failedStashKeys.has(key);
+      return {
+        ...item,
+        key,
+        row: failed
+          ? {
+              ...item.row,
+              aiNote: '未校验到门店编码/所属关系，请检查门店主数据。'
+            }
+          : item.row
+      };
+    }).filter(item => !this.promotedStashKeys.has(item.key));
+  },
+
+  getStashRowKey(row, index) {
+    if (row?.sourceEmailId && typeof row.sourceAttIdx === 'number') {
+      return `attachment-${row.sourceEmailId}-${row.sourceAttIdx}`;
+    }
+    if (row?.id) return `standard-${row.id}`;
+    const name = row?.storeName || row?.fileName || 'row';
+    return `standard-${index}-${name}`;
   },
 
   getFilteredStashRows() {
@@ -2039,37 +2554,40 @@ const IngestionView = {
     if (!container) return;
 
     const rows = this.getFilteredStashRows();
-    const fixedAiNote = '门店编码缺失： 标准门店编码字段为空，且无法通过门店名称反向匹配 ERP 系统数据，导致数据无法关联。';
-    const tableRows = rows.map(({ row, index }) => `
+    const tableRows = rows.map(({ row, index, key }) => {
+      return `
       <tr class="hover:bg-slate-50 transition-colors">
-        <td class="px-4 py-3"><input type="checkbox" class="row-cb-ingestion-stash rounded border-gray-300 text-brand focus:ring-brand"></td>
+        <td class="px-4 py-3"><input type="checkbox" class="row-cb-ingestion-stash rounded border-gray-300 text-brand focus:ring-brand" data-stash-key="${this.escapeHtml(key)}"></td>
+        <td class="px-4 py-3 text-[#4e5969]">${this.escapeHtml(this.getDisplayMonth(row))}</td>
         <td class="px-4 py-3">
-          <button type="button" class="ingestion-stash-preview-trigger font-medium text-slate-800 flex items-center gap-2 hover:text-brand transition-colors" data-index="${index}" data-email-id="${row.sourceEmailId || ''}" data-att-idx="${typeof row.sourceAttIdx === 'number' ? row.sourceAttIdx : ''}" title="预览 ${row.storeName}">
+          <button type="button" class="ingestion-stash-preview-trigger font-medium text-brand flex items-center gap-2 hover:text-blue-700 hover:underline transition-colors" data-index="${index}" data-email-id="${row.sourceEmailId || ''}" data-att-idx="${typeof row.sourceAttIdx === 'number' ? row.sourceAttIdx : ''}" title="预览 ${this.escapeHtml(row.storeName)}">
             <i class="fa-solid fa-store text-brand"></i>
-            <span class="truncate max-w-[176px]">${row.storeName}</span>
+            <span class="truncate max-w-[176px]">${this.escapeHtml(row.storeName)}</span>
           </button>
         </td>
         <td class="px-4 py-3 font-mono text-[#1d2129]">-</td>
-        <td class="px-4 py-3 min-w-64"><div class="max-w-sm truncate" title="${fixedAiNote}">${fixedAiNote}</div></td>
         <td class="px-4 py-3 max-w-[160px] text-[#86909c]">-</td>
         <td class="px-4 py-3 max-w-[120px] text-[#86909c]">-</td>
         <td class="px-4 py-3 max-w-[160px] text-[#86909c]">-</td>
         <td class="px-4 py-3 max-w-[180px] text-[#86909c]">-</td>
         <td class="px-4 py-3">
-          <button type="button" class="ingestion-stash-preview-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-index="${index}" data-email-id="${row.sourceEmailId || ''}" data-att-idx="${typeof row.sourceAttIdx === 'number' ? row.sourceAttIdx : ''}" title="预览"><i class="fa-regular fa-eye"></i></button>
+          <button type="button" class="ingestion-stash-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-colors" data-stash-key="${this.escapeHtml(key)}" title="单据详情">
+            <i class="fa-solid fa-list-check"></i>
+          </button>
         </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
     container.innerHTML = `
       <div class="animate-[fadeIn_0.22s_ease-out]">
-        <table class="w-full table-fixed min-w-[1260px] text-left text-sm text-[#4e5969]">
+        <table class="w-full table-fixed min-w-[1360px] text-left text-sm text-[#4e5969]">
           <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
             <tr>
               <th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="ingestion-stash-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>
+              <th class="px-4 py-3 w-28">年月</th>
               <th class="px-4 py-3 w-48">门店名称</th>
               <th class="px-4 py-3 w-28">门店编码</th>
-              <th class="px-4 py-3 w-64">AI判断</th>
               <th class="px-4 py-3 w-36">所属营业Team</th>
               <th class="px-4 py-3 w-28">所属区域</th>
               <th class="px-4 py-3 w-36">所属营业所</th>
@@ -2150,7 +2668,147 @@ const IngestionView = {
       });
     });
 
+    container?.querySelectorAll('.ingestion-stash-detail-btn').forEach((trigger) => {
+      trigger.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const key = trigger.dataset.stashKey;
+        const item = this.getFilteredStashRows().find(row => row.key === key);
+        if (!item) return;
+        const row = item.row || {};
+        this.openDocumentDetail({
+          moduleName: '文件收取 - 暂存数据',
+          currentNode: '暂存数据',
+          title: row.storeName || '暂存单据',
+          nameLabel: '门店名称',
+          statusText: '暂存',
+          row,
+          moduleFields: [
+            { label: '门店编码', value: row.storeCode || '-' },
+            { label: 'AI判断', value: row.aiNote || '-' },
+            { label: '所属营业Team', value: row.salesTeam || '-' },
+            { label: '所属区域', value: row.region || '-' },
+            { label: '所属营业所', value: row.salesOffice || '-' },
+            { label: '所属经销商', value: row.dealer || '-' }
+          ]
+        });
+      });
+    });
+
     this.updateStashBatchButton();
+  },
+
+  getSelectedStashRows() {
+    const container = document.getElementById('ingestion-stash-container');
+    const selectedKeys = new Set(
+      Array.from(container?.querySelectorAll('.row-cb-ingestion-stash:checked') || [])
+        .map(checkbox => checkbox.dataset.stashKey)
+        .filter(Boolean)
+    );
+
+    if (selectedKeys.size === 0) return [];
+    return this.getFilteredStashRows().filter(item => selectedKeys.has(item.key));
+  },
+
+  buildPromotedStashRow(item, index) {
+    const row = item.row || {};
+    const fileName = row.storeName || `暂存数据-${index + 1}.xlsx`;
+    const storeName = fileName.replace(/\.(xlsx|xls|csv|zip)$/i, '');
+    return {
+      id: `stash-promoted-${String(item.key).replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+      month: this.getDisplayMonth(row),
+      fileName,
+      storeName,
+      storeCode: row.storeCode && row.storeCode !== '-' ? row.storeCode : `S${String(9100 + index).padStart(7, '0')}`,
+      team: row.salesTeam || '华北 Team / 화북 Team',
+      status: '正常',
+      confidence: '98%',
+      suggestion: 'AI校验通过，已从暂存数据流入原始门店数据列表。',
+      handler: 'POS担当',
+      region: row.region || '华北区域',
+      salesOffice: row.salesOffice || '石家庄营业所',
+      dealer: row.dealer || '河北聚昊商贸',
+      sourceEmailId: row.sourceEmailId,
+      sourceAttIdx: row.sourceAttIdx,
+      remark: ''
+    };
+  },
+
+  promoteStashRows(successRows) {
+    successRows.forEach((item, index) => {
+      const promoted = this.buildPromotedStashRow(item, index);
+      this.promotedStashKeys.add(item.key);
+
+      if (!this.data.some(row => row.id === promoted.id)) {
+        this.data.unshift(promoted);
+      }
+
+      if (item.row?.sourceEmailId && typeof item.row.sourceAttIdx === 'number') {
+        const inboxItem = this.getInboxData().find(row => String(row.id) === String(item.row.sourceEmailId));
+        const attachment = inboxItem?.attachments?.[item.row.sourceAttIdx];
+        if (attachment) {
+          attachment.status = '正常';
+          attachment.rejectReason = '-';
+        }
+        if (inboxItem) this.recalcInboxItemStatus(inboxItem);
+      }
+    });
+  },
+
+  showStashAiCheckResult(successRows, failedRows) {
+    const successList = successRows.length
+      ? successRows.map(item => `<li class="truncate">${this.escapeHtml(item.row.storeName || '-')}</li>`).join('')
+      : '<li class="text-[#86909c]">暂无</li>';
+    const failedList = failedRows.length
+      ? failedRows.map(item => `<li class="truncate">${this.escapeHtml(item.row.storeName || '-')}</li>`).join('')
+      : '<li class="text-[#86909c]">暂无</li>';
+
+    Dialog.show({
+      title: 'AI校验结果',
+      content: `
+        <div class="space-y-4">
+          <div class="rounded-lg border border-green-100 bg-green-50 p-3">
+            <div class="flex items-center gap-2 text-sm font-bold text-green-700">
+              <i class="fa-solid fa-circle-check"></i>
+              校验成功 ${successRows.length} 条
+            </div>
+            <p class="mt-2 text-xs leading-5 text-green-700">以下数据已流入「原始门店数据列表」，请在原始门店数据列表中进入质检。</p>
+            <ul class="mt-2 space-y-1 text-xs text-green-800">${successList}</ul>
+          </div>
+          <div class="rounded-lg border border-amber-100 bg-amber-50 p-3">
+            <div class="flex items-center gap-2 text-sm font-bold text-amber-700">
+              <i class="fa-solid fa-triangle-exclamation"></i>
+              校验失败 ${failedRows.length} 条
+            </div>
+            <p class="mt-2 text-xs leading-5 text-amber-700">未校验到门店编码/所属关系，请检查门店主数据。</p>
+            <ul class="mt-2 space-y-1 text-xs text-amber-800">${failedList}</ul>
+          </div>
+        </div>
+      `,
+      confirmText: successRows.length ? '查看原始门店数据列表' : '知道了',
+      cancelText: '留在暂存数据',
+      onConfirm: () => {
+        if (successRows.length) {
+          setTimeout(() => document.getElementById('tab-files')?.click(), 0);
+        }
+      }
+    });
+  },
+
+  handleStashAiCheck() {
+    const selectedRows = this.getSelectedStashRows();
+    if (selectedRows.length === 0) {
+      Dialog.toast('请先选择需要校验的暂存数据', 'error');
+      return;
+    }
+
+    const successRows = selectedRows.slice(0, 1);
+    const failedRows = selectedRows.slice(1);
+
+    this.promoteStashRows(successRows);
+    failedRows.forEach(item => this.failedStashKeys.add(item.key));
+    this.updateStats();
+    this.renderStashTable();
+    this.showStashAiCheckResult(successRows, failedRows);
   },
   
   // 跳转到收件箱并高亮指定邮件/附件
@@ -2261,6 +2919,19 @@ const IngestionView = {
   },
   
   renderPagination() {
+    const paginationArea = document.getElementById('pagination-area');
+    const pagerControls = document.getElementById('pagination-controls');
+    if (this.activeDataMode === 'files') {
+      paginationArea?.classList.remove('justify-between');
+      paginationArea?.classList.add('justify-end');
+      pagerControls?.classList.add('hidden');
+      return;
+    }
+
+    paginationArea?.classList.add('justify-between');
+    paginationArea?.classList.remove('justify-end');
+    pagerControls?.classList.remove('hidden');
+
     const container = document.getElementById('page-numbers');
     if (!container) return;
     
@@ -2312,6 +2983,9 @@ const IngestionView = {
         if (id === 'btn-batch-approve' && this.activeDataMode === 'archive') {
           btn.classList.add('hidden');
         }
+        if (id === 'btn-batch-reject' && this.activeDataMode === 'files') {
+          btn.classList.add('hidden');
+        }
       }
     });
   },
@@ -2342,7 +3016,29 @@ const IngestionView = {
       btn.addEventListener('click', (e) => {
         const action = e.currentTarget.getAttribute('data-action');
         const id = e.currentTarget.getAttribute('data-id');
-        const rowData = this.data.find(r => r.id === id);
+        const rowData = this.filteredData.find(r => String(r.id) === String(id)) || this.data.find(r => String(r.id) === String(id));
+        if (action === 'detail') {
+          if (!rowData) return;
+          const isArchive = this.activeDataMode === 'archive';
+          this.openDocumentDetail({
+            moduleName: isArchive ? '文件收取 - 归档（非POS表）' : '文件收取 - 原始门店数据列表',
+            currentNode: isArchive ? '归档（非POS表）' : '原始门店数据列表',
+            title: rowData.storeName || rowData.fileName,
+            nameLabel: '门店名称',
+            statusText: isArchive ? '已归档' : (rowData.status || '正常'),
+            row: rowData,
+            moduleFields: [
+              { label: '年月', value: this.getDisplayMonth(rowData) },
+              { label: '门店编码', value: rowData.storeCode || '-' },
+              { label: '营业Team', value: this.getLocalizedText(rowData.team) || '-' },
+              { label: '处理人', value: this.getLocalizedText(rowData.handler) || '-' },
+              { label: '所属区域', value: rowData.region || '-' },
+              { label: '所属营业所', value: rowData.salesOffice || '-' },
+              { label: '所属经销商', value: rowData.dealer || '-' }
+            ]
+          });
+          return;
+        }
         
         if (action === 'move-inbox') {
           this.moveArchivedToInbox(id);
@@ -2429,6 +3125,9 @@ const IngestionView = {
             title: `${confirmText}【${actionNames[action]}】`,
             content: `${confirmContentText}${rowData.fileName}${actionText}${actionNames[action]}${operationText}`,
             onConfirm: () => {
+              if (action === 'approve' && this.activeDataMode === 'files') {
+                this.markOriginalRowsApproved([id]);
+              }
               this.data = this.data.map(row => {
                 if (row.id === id) {
                   row.status = statusMap[action];
@@ -2447,7 +3146,27 @@ const IngestionView = {
         }
       });
     });
-      },
+
+    document.querySelectorAll('.ingestion-row-preview-trigger').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = e.currentTarget.getAttribute('data-id');
+        const rowData = this.filteredData.find(r => r.id === id) || this.data.find(r => r.id === id);
+        if (!rowData) return;
+
+        if (this.activeDataMode === 'archive' && rowData.sourceEmailId && typeof rowData.sourceAttIdx === 'number') {
+          const inboxItem = this.getInboxData().find(item => item.id === rowData.sourceEmailId);
+          const attachment = inboxItem?.attachments?.[rowData.sourceAttIdx];
+          if (inboxItem && attachment) {
+            this.showInboxAttachmentPreview(inboxItem, attachment);
+            return;
+          }
+        }
+
+        this.showStoreDataPreviewModal(rowData);
+      });
+    });
+  },
   
   bindFilterEvents() {
     // 文件名称搜索
@@ -2918,14 +3637,7 @@ const IngestionView = {
     const handleBatchAction = (action) => {
       if (this.activeDataMode === 'stash') {
         if (action !== 'approve') return;
-        const container = document.getElementById('ingestion-stash-container');
-        const selected = container?.querySelectorAll('.row-cb-ingestion-stash:checked').length || 0;
-        if (selected === 0) return;
-        Dialog.toast(`已通过 ${selected} 条暂存数据`, 'success');
-        container?.querySelectorAll('.row-cb-ingestion-stash').forEach((checkbox) => {
-          checkbox.checked = false;
-        });
-        this.updateStashBatchButton();
+        this.handleStashAiCheck();
         return;
       }
 
@@ -2992,6 +3704,10 @@ const IngestionView = {
           
           // 模拟接口调用
           await new Promise(resolve => setTimeout(resolve, 800));
+
+          if (action === 'approve' && this.activeDataMode === 'files') {
+            this.markOriginalRowsApproved(selected);
+          }
           
           // 更新数据状态
           this.data = this.data.map(row => {
@@ -3093,7 +3809,7 @@ const IngestionView = {
       document.getElementById('btn-upload-file')?.classList.toggle('hidden', !showOriginal);
       document.getElementById('btn-batch-archive')?.classList.toggle('hidden', showOriginal || showStash || activeTab === 'archive' || activeTab === 'files');
       document.getElementById('btn-batch-approve')?.classList.toggle('hidden', showOriginal || activeTab === 'archive');
-      document.getElementById('btn-batch-reject')?.classList.toggle('hidden', showOriginal || showStash);
+      document.getElementById('btn-batch-reject')?.classList.toggle('hidden', showOriginal || showStash || activeTab === 'files');
       document.getElementById('team-select-wrapper')?.classList.toggle('hidden', showOriginal || showStash);
       document.getElementById('inbox-status-wrapper')?.classList.toggle('hidden', !showOriginal);
       const approveBtn = document.getElementById('btn-batch-approve');
