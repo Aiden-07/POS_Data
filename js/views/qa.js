@@ -211,8 +211,7 @@ const QAView = {
     const confidenceSummary = this.getConfidenceSummary();
     return `
       <div>
-      ${this.renderQaStatsPanel()}
-      <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.06)] border border-white flex flex-col h-[calc(100vh-300px)] min-h-[520px] overflow-hidden animate-[fadeIn_0.4s_ease-out]">
+      <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.06)] border border-white flex flex-col h-[calc(100vh-170px)] min-h-[620px] overflow-hidden animate-[fadeIn_0.4s_ease-out]">
         <div class="px-7 py-4 border-b border-gray-100 flex gap-2 bg-white shrink-0">
           <button type="button" id="tab-qa-standard" class="px-4 py-2 text-sm font-medium text-brand bg-blue-50 rounded-lg transition-all border border-blue-200">
             标准POS表

@@ -9,7 +9,7 @@
   <!-- FontAwesome via CDN -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Custom Style -->
-  <link rel="stylesheet" href="style.css?v=20260629-fields-remove-status-tags">
+  <link rel="stylesheet" href="style.css?v=20260706-org-cascader">
   <!-- Tailwind Config -->
   <script>
     tailwind.config = {
@@ -212,10 +212,100 @@
   <script src="js/components/ai-assistant.js?v=20260626-ai-fab-drag"></script>
   <script src="js/views/login.js?v=20260630-password-toggle"></script>
   <script src="js/views/dashboard.js?v=20260624-remove-dashboard-action"></script>
-  <script src="js/views/ingestion.js?v=20260701-global-document-detail"></script>
+  <script src="js/views/ingestion.js?v=20260704-upload-period"></script>
   <script src="js/views/qa.js?v=20260701-global-document-detail"></script>
   <script src="js/views/ledger.js?v=20260701-global-document-detail"></script>
-  <script src="js/views/settings.js?v=20260629-fields-remove-search"></script>
+  <script src="js/views/settings.js?v=20260706-org-cascader-fix"></script>
   <script src="js/core/app.js?v=20260629-settings-fields"></script>
+<script>
+(function () {
+  const STATUS_OPTIONS = ['全部状态', '正常', '驳回', '覆盖'];
+  const REMOVED_CHILD_ACTIONS = new Set(['覆盖', '忽略', '归档', '暂存', '移动到归档', '移动到暂存']);
+
+  function isFileBoxActive() {
+    const tab = document.getElementById('tab-original');
+    return Boolean(tab && tab.textContent.includes('文件箱') && tab.className.includes('active'));
+  }
+
+  function removeParentStatusColumn(table) {
+    const headRow = table.querySelector(':scope > thead > tr');
+    if (!headRow) return;
+
+    const statusIndex = Array.from(headRow.children).findIndex((cell) => cell.textContent.trim() === '状态');
+    if (statusIndex < 0) return;
+
+    headRow.children[statusIndex].remove();
+    table.querySelectorAll(':scope > tbody > tr.inbox-master-row').forEach((row) => {
+      const cell = row.children[statusIndex];
+      if (cell) cell.remove();
+    });
+  }
+
+  function normalizeDuplicateStatus(row) {
+    const text = row.textContent || '';
+    const isDuplicate = text.includes('原始门店数据列表中有重复') || text.includes('重复');
+    if (!isDuplicate) return;
+
+    row.querySelectorAll('td, span').forEach((node) => {
+      if (node.textContent.trim() === '待处理') {
+        node.textContent = '重复';
+        node.classList.remove('text-amber-600', 'bg-amber-50', 'border-amber-100');
+        node.classList.add('text-orange-600', 'bg-orange-50', 'border-orange-100');
+      }
+    });
+  }
+
+  function removeChildOnlyActions(table) {
+    table.querySelectorAll('.inbox-att-reject-btn').forEach((button) => button.remove());
+    table.querySelectorAll('button, a').forEach((node) => {
+      if (REMOVED_CHILD_ACTIONS.has(node.textContent.trim())) node.remove();
+    });
+    table.querySelectorAll('tr').forEach(normalizeDuplicateStatus);
+  }
+
+  function normalizeStatusButton() {
+    const button = document.getElementById('inbox-status-btn');
+    if (!button) return;
+
+    const selected = button.textContent.trim();
+    if (!STATUS_OPTIONS.includes(selected)) {
+      const label = button.querySelector('span') || button;
+      label.childNodes.forEach((node) => {
+        if (node.nodeType === Node.TEXT_NODE) node.textContent = '';
+      });
+      label.prepend('全部状态');
+    }
+  }
+
+  function normalizeStatusDropdown() {
+    const labelsToRemove = new Set(['待处理', '已处理', '重复']);
+    document.querySelectorAll('button, [role="option"], [role="menuitem"]').forEach((node) => {
+      const label = node.textContent.trim();
+      if (labelsToRemove.has(label)) node.remove();
+    });
+  }
+
+  function normalizeFileBox() {
+    if (!location.hash.includes('ingestion') || !isFileBoxActive()) return;
+
+    const table = document.getElementById('inbox-table');
+    if (!table) return;
+
+    removeParentStatusColumn(table);
+    removeChildOnlyActions(table);
+    normalizeStatusButton();
+  }
+
+  window.addEventListener('DOMContentLoaded', normalizeFileBox);
+  window.addEventListener('hashchange', () => setTimeout(normalizeFileBox, 50));
+  document.addEventListener('click', () => setTimeout(() => {
+    normalizeFileBox();
+    normalizeStatusDropdown();
+  }, 50));
+
+  const observer = new MutationObserver(() => normalizeFileBox());
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+})();
+</script>
 </body>
 </html>

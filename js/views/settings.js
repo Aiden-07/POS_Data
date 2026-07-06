@@ -1097,6 +1097,8 @@ const SettingsView = {
           item.checked = input.checked;
           item.indeterminate = false;
         });
+        const regions = [...document.querySelectorAll('.settings-org-region')];
+        regions.forEach((region, index) => region.classList.toggle('is-expanded', input.checked && index === 0));
         this.syncRoleOrgTree();
         return;
       }
@@ -1105,7 +1107,29 @@ const SettingsView = {
         regionNode?.querySelectorAll('input[data-org-type="office"]').forEach((office) => {
           office.checked = input.checked;
         });
+        document.querySelectorAll('.settings-org-region').forEach((node) => {
+          node.classList.toggle('is-expanded', node === regionNode && input.checked);
+        });
       }
+      this.syncRoleOrgTree();
+    });
+    document.querySelector('.settings-org-tree')?.addEventListener('click', (event) => {
+      const expandButton = event.target.closest('.settings-org-region-expand');
+      if (!expandButton) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const regionNode = expandButton.closest('.settings-org-region');
+      const regionInput = regionNode?.querySelector('input[data-org-type="region"]');
+      if (!regionNode || !regionInput) return;
+      if (!regionInput.checked) {
+        regionInput.checked = true;
+        regionNode.querySelectorAll('input[data-org-type="office"]').forEach((office) => {
+          office.checked = true;
+        });
+      }
+      document.querySelectorAll('.settings-org-region').forEach((node) => {
+        node.classList.toggle('is-expanded', node === regionNode);
+      });
       this.syncRoleOrgTree();
     });
     this.syncRoleOrgTree();
@@ -1143,10 +1167,7 @@ const SettingsView = {
     return `
       <div id="settings-org-scope-dropdown" class="settings-org-dropdown">
         <button type="button" id="settings-org-scope-trigger" class="settings-org-dropdown-trigger">
-          <span>
-            <strong>组织范围</strong>
-            <em id="settings-org-dropdown-summary">请选择组织范围</em>
-          </span>
+          <span id="settings-org-dropdown-summary" class="settings-org-dropdown-summary">请选择组织范围</span>
           <i class="fa-solid fa-chevron-down"></i>
         </button>
         <div class="settings-org-dropdown-menu">
@@ -1158,7 +1179,12 @@ const SettingsView = {
             <small>选择一级区域后显示对应营业所</small>
           </div>
           <div class="settings-org-tree">
-            ${this.renderRoleOrgTree(selectedValues)}
+            <div class="settings-org-region-list">
+              ${this.renderRoleOrgTree(selectedValues)}
+            </div>
+            <div class="settings-org-office-stage">
+              <div class="settings-org-office-empty">选择区域后显示营业所</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1167,17 +1193,23 @@ const SettingsView = {
 
   renderRoleOrgTree(selectedValues = []) {
     const selected = new Set(selectedValues);
+    let expandedAssigned = false;
     return Object.entries(this.orgTree).map(([region, offices]) => {
       const hasOfficeSelected = offices.some((office) => selected.has(office));
       const regionSelected = selected.has(region) || hasOfficeSelected;
+      const expanded = regionSelected && !expandedAssigned;
+      if (expanded) expandedAssigned = true;
       return `
-        <div class="settings-org-region ${regionSelected ? 'is-active' : ''}">
-          <label class="settings-org-region-label">
+        <div class="settings-org-region ${regionSelected ? 'is-active' : ''} ${expanded ? 'is-expanded' : ''}">
+          <div class="settings-org-region-label">
             <input type="checkbox" data-org-type="region" value="${region}" ${regionSelected ? 'checked' : ''}>
             <span>${region}</span>
-            <i class="fa-solid fa-chevron-down"></i>
-          </label>
+            <button type="button" class="settings-org-region-expand" aria-label="展开${region}">
+              <i class="fa-solid fa-chevron-right"></i>
+            </button>
+          </div>
           <div class="settings-org-offices">
+            <strong>${region}营业所</strong>
             ${offices.map((office) => `
               <label>
                 <input type="checkbox" data-org-type="office" value="${office}" ${regionSelected || selected.has(office) ? 'checked' : ''}>
@@ -1192,7 +1224,7 @@ const SettingsView = {
 
   syncRoleOrgTree() {
     const allRegionInputs = [...document.querySelectorAll('.settings-org-tree input[data-org-type="region"]')];
-    const allOfficeInputs = [...document.querySelectorAll('.settings-org-tree input[data-org-type="office"]')];
+    const allOfficeInputs = [...document.querySelectorAll('.settings-org-region input[data-org-type="office"]')];
     document.querySelectorAll('.settings-org-region').forEach((regionNode) => {
       const regionInput = regionNode.querySelector('input[data-org-type="region"]');
       const officeInputs = [...regionNode.querySelectorAll('input[data-org-type="office"]')];
@@ -1203,6 +1235,23 @@ const SettingsView = {
         regionInput.indeterminate = checkedCount > 0 && checkedCount < officeInputs.length;
       }
     });
+    const officeStage = document.querySelector('.settings-org-office-stage');
+    const expandedRegion = document.querySelector('.settings-org-region.is-expanded');
+    if (officeStage) {
+      const expandedOffices = expandedRegion?.querySelector('.settings-org-offices');
+      if (expandedOffices) {
+        officeStage.replaceChildren(expandedOffices.cloneNode(true));
+      } else {
+        officeStage.innerHTML = '<div class="settings-org-office-empty">选择区域后显示营业所</div>';
+      }
+      officeStage.querySelectorAll('input[data-org-type="office"]').forEach((clone) => {
+        clone.addEventListener('change', () => {
+          const source = expandedRegion?.querySelector(`input[data-org-type="office"][value="${clone.value}"]`);
+          if (source) source.checked = clone.checked;
+          this.syncRoleOrgTree();
+        });
+      });
+    }
 
     const selected = this.getSelectedRoleOrgValues();
     const selectedRegions = allRegionInputs.filter((input) => input.checked && !input.indeterminate).length;
@@ -1216,10 +1265,13 @@ const SettingsView = {
     if (summary) {
       if (!selected.length) {
         summary.textContent = '请选择组织范围';
-      } else if (selectedRegions > 1 || selectedOffices > 3) {
-        summary.textContent = `已选 ${selectedRegions} 个区域 / ${selectedOffices} 个营业所`;
       } else {
-        summary.textContent = selected.join('、');
+        const visible = selected.slice(0, 2);
+        const remaining = selected.length - visible.length;
+        summary.innerHTML = `
+          ${visible.map((item) => `<span class="settings-org-tag">${item}</span>`).join('')}
+          ${remaining > 0 ? `<span class="settings-org-tag settings-org-tag-more">+${remaining}</span>` : ''}
+        `;
       }
     }
   },

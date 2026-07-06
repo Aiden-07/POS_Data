@@ -59,7 +59,6 @@ const IngestionView = {
   recalcInboxItemStatus(inboxItem) {
     if (!inboxItem?.attachments?.length) return;
 
-    const hasPending = inboxItem.attachments.some(item => item.status === '待处理');
     const allNormal = inboxItem.attachments.every(item => item.status === '正常');
     const needsAttention = inboxItem.attachments
       .filter(item => item.status !== '正常')
@@ -73,7 +72,7 @@ const IngestionView = {
       return;
     }
 
-    inboxItem.statusText = hasPending ? '待处理' : '已处理';
+    inboxItem.statusText = '已处理';
     inboxItem.suggestion = [...new Set(needsAttention)].join('；') || '-';
   },
   
@@ -238,163 +237,17 @@ const IngestionView = {
     this.loadData();
     const cn = this.getCurrentLang() === 'cn';
     return `
-      <!-- 数据看板 -->
-      <div class="grid grid-cols-1 xl:grid-cols-[1.6fr_0.7fr] gap-3 mb-3 animate-[fadeIn_0.4s_ease-out]">
-        <section class="bg-white/90 backdrop-blur-md rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.06)] border border-white px-4 py-3">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center min-w-0">
-              <h3 class="text-sm font-bold text-[#1d2129] whitespace-nowrap">${cn ? '各区域文件收取情况' : '각 지역 파일 수집 현황'}</h3>
-            </div>
-            <div class="w-8 h-8 rounded-lg bg-blue-50 text-brand flex items-center justify-center">
-              <i class="fa-solid fa-chart-column"></i>
-            </div>
-          </div>
-          <div class="grid grid-cols-3 gap-2">
-            <div class="rounded-lg border border-gray-100 bg-[#f7f9fc] px-3 py-2">
-              <div class="flex items-center justify-between mb-1">
-                <span class="text-xs font-semibold text-[#1d2129]">${cn ? '华北区域' : '화북 지역'}</span>
-                <span class="text-[11px] font-bold text-brand">85%</span>
-              </div>
-              <div class="flex items-baseline gap-1.5 whitespace-nowrap">
-                <span class="text-xs text-[#86909c]">${cn ? '已收' : '수신'}</span>
-                <span class="text-sm font-black text-brand">42</span>
-                <span class="text-xs text-[#86909c]">/ ${cn ? '异常' : '이상'}</span>
-                <span class="text-sm font-black text-red-500">3</span>
-                <span class="text-xs text-[#86909c]">/ ${cn ? '应收50' : '예정 50'}</span>
-              </div>
-              <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
-                <div class="h-full bg-brand" style="width: 84%"></div>
-                <div class="h-full bg-red-500" style="width: 6%"></div>
-              </div>
-            </div>
-            <div class="rounded-lg border border-gray-100 bg-[#f7f9fc] px-3 py-2">
-              <div class="flex items-center justify-between mb-1">
-                <span class="text-xs font-semibold text-[#1d2129]">${cn ? '东北区域' : '동북 지역'}</span>
-                <span class="text-[11px] font-bold text-brand">80%</span>
-              </div>
-              <div class="flex items-baseline gap-1.5 whitespace-nowrap">
-                <span class="text-xs text-[#86909c]">${cn ? '已收' : '수신'}</span>
-                <span class="text-sm font-black text-brand">32</span>
-                <span class="text-xs text-[#86909c]">/ ${cn ? '异常' : '이상'}</span>
-                <span class="text-sm font-black text-red-500">2</span>
-                <span class="text-xs text-[#86909c]">/ ${cn ? '应收40' : '예정 40'}</span>
-              </div>
-              <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
-                <div class="h-full bg-brand" style="width: 80%"></div>
-                <div class="h-full bg-red-500" style="width: 5%"></div>
-              </div>
-            </div>
-            <div class="rounded-lg border border-gray-100 bg-[#f7f9fc] px-3 py-2">
-              <div class="flex items-center justify-between mb-1">
-                <span class="text-xs font-semibold text-[#1d2129]">${cn ? '华东区域' : '화동 지역'}</span>
-                <span class="text-[11px] font-bold text-brand">88%</span>
-              </div>
-              <div class="flex items-baseline gap-1.5 whitespace-nowrap">
-                <span class="text-xs text-[#86909c]">${cn ? '已收' : '수신'}</span>
-                <span class="text-sm font-black text-brand">53</span>
-                <span class="text-xs text-[#86909c]">/ ${cn ? '异常' : '이상'}</span>
-                <span class="text-sm font-black text-red-500">2</span>
-                <span class="text-xs text-[#86909c]">/ ${cn ? '应收60' : '예정 60'}</span>
-              </div>
-              <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
-                <div class="h-full bg-brand" style="width: 88%"></div>
-                <div class="h-full bg-red-500" style="width: 3%"></div>
-              </div>
-            </div>
-            <div class="rounded-lg border border-gray-100 bg-[#f7f9fc] px-3 py-2">
-              <div class="flex items-center justify-between mb-1">
-                <span class="text-xs font-semibold text-[#1d2129]">${cn ? '华中区域' : '화중 지역'}</span>
-                <span class="text-[11px] font-bold text-brand">90%</span>
-              </div>
-              <div class="flex items-baseline gap-1.5 whitespace-nowrap">
-                <span class="text-xs text-[#86909c]">${cn ? '已收' : '수신'}</span>
-                <span class="text-sm font-black text-brand">27</span>
-                <span class="text-xs text-[#86909c]">/ ${cn ? '异常' : '이상'}</span>
-                <span class="text-sm font-black text-red-500">1</span>
-                <span class="text-xs text-[#86909c]">/ ${cn ? '应收30' : '예정 30'}</span>
-              </div>
-              <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
-                <div class="h-full bg-brand" style="width: 90%"></div>
-                <div class="h-full bg-red-500" style="width: 3%"></div>
-              </div>
-            </div>
-            <div class="rounded-lg border border-gray-100 bg-[#f7f9fc] px-3 py-2">
-              <div class="flex items-center justify-between mb-1">
-                <span class="text-xs font-semibold text-[#1d2129]">${cn ? '华南区域' : '화남 지역'}</span>
-                <span class="text-[11px] font-bold text-brand">84%</span>
-              </div>
-              <div class="flex items-baseline gap-1.5 whitespace-nowrap">
-                <span class="text-xs text-[#86909c]">${cn ? '已收' : '수신'}</span>
-                <span class="text-sm font-black text-brand">21</span>
-                <span class="text-xs text-[#86909c]">/ ${cn ? '异常' : '이상'}</span>
-                <span class="text-sm font-black text-red-500">1</span>
-                <span class="text-xs text-[#86909c]">/ ${cn ? '应收25' : '예정 25'}</span>
-              </div>
-              <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
-                <div class="h-full bg-brand" style="width: 84%"></div>
-                <div class="h-full bg-red-500" style="width: 4%"></div>
-              </div>
-            </div>
-            <div class="rounded-lg border border-gray-100 bg-[#f7f9fc] px-3 py-2">
-              <div class="flex items-center justify-between mb-1">
-                <span class="text-xs font-semibold text-[#1d2129]">${cn ? '西北区域' : '서북 지역'}</span>
-                <span class="text-[11px] font-bold text-brand">75%</span>
-              </div>
-              <div class="flex items-baseline gap-1.5 whitespace-nowrap">
-                <span class="text-xs text-[#86909c]">${cn ? '已收' : '수신'}</span>
-                <span class="text-sm font-black text-brand">15</span>
-                <span class="text-xs text-[#86909c]">/ ${cn ? '异常' : '이상'}</span>
-                <span class="text-sm font-black text-red-500">1</span>
-                <span class="text-xs text-[#86909c]">/ ${cn ? '应收20' : '예정 20'}</span>
-              </div>
-              <div class="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden flex">
-                <div class="h-full bg-brand" style="width: 75%"></div>
-                <div class="h-full bg-red-500" style="width: 5%"></div>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section class="bg-white/90 backdrop-blur-md rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.06)] border border-white px-4 py-3 flex flex-col justify-between">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <h3 class="text-sm font-bold text-[#1d2129]">${cn ? '文件收取率' : '파일 수집률'}</h3>
-              <p class="text-[11px] text-[#86909c] mt-0.5">${cn ? '已收文件 / 应收文件' : '수신 파일 / 예정 파일'}</p>
-            </div>
-            <div class="w-8 h-8 rounded-lg bg-green-50 text-green-600 flex items-center justify-center">
-              <i class="fa-solid fa-file-circle-check"></i>
-            </div>
-          </div>
-          <div class="mt-2 flex flex-1 items-center justify-between gap-4">
-            <div class="min-w-0">
-              <div class="text-[34px] leading-none font-black text-brand">95.7%</div>
-              <div class="mt-5 inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs text-[#4e5969]">
-                <span class="font-bold text-[#1d2129]">430</span>
-                <span class="text-[#86909c]">/ 450 ${cn ? '文件' : '파일'}</span>
-              </div>
-            </div>
-            <div class="relative w-[72px] h-[72px] rounded-full flex items-center justify-center shrink-0" style="background: conic-gradient(#165dff 344deg, #e8f0ff 0deg);">
-              <div class="w-12 h-12 rounded-full bg-white shadow-inner flex items-center justify-center text-sm font-bold text-brand">95.7%</div>
-            </div>
-          </div>
-          <div class="mt-2 h-2 rounded-full bg-blue-100 overflow-hidden">
-            <div class="h-full rounded-full bg-brand" style="width: 95.7%"></div>
-          </div>
-        </section>
-      </div>
-      <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.06)] border border-white flex flex-col h-[calc(100vh-280px)] overflow-hidden animate-[fadeIn_0.4s_ease-out]">
+      <div class="bg-white/90 backdrop-blur-md rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.06)] border border-white flex flex-col h-[calc(100vh-170px)] min-h-[620px] overflow-hidden animate-[fadeIn_0.4s_ease-out]">
         <!-- 标签切换 -->
         <div class="px-7 py-4 border-b border-gray-100 flex gap-2 bg-white shrink-0">
           <button type="button" id="tab-original" class="px-4 py-2 text-sm font-medium text-brand bg-blue-50 rounded-lg transition-all border border-blue-200">
-            ${this.getCurrentLang() === 'cn' ? '收件箱' : '받은 편지함'}
+            ${this.getCurrentLang() === 'cn' ? '文件箱' : '받은 편지함'}
           </button>
           <button type="button" id="tab-files" class="px-4 py-2 text-sm text-[#86909c] hover:text-[#1d2129] hover:bg-gray-50 rounded-lg transition-all border border-transparent">
-            ${this.getCurrentLang() === 'cn' ? '原始门店数据列表' : '원본 매장 데이터 목록'}
-          </button>
-          <button type="button" id="tab-archive" class="px-4 py-2 text-sm text-[#86909c] hover:text-[#1d2129] hover:bg-gray-50 rounded-lg transition-all border border-transparent">
-            ${this.getCurrentLang() === 'cn' ? '归档（非POS表）' : '보관(비POS표)'}
+            ${this.getCurrentLang() === 'cn' ? '单门店已匹配数据' : '원본 매장 데이터 목록'}
           </button>
           <button type="button" id="tab-stash" class="px-4 py-2 text-sm text-[#86909c] hover:text-[#1d2129] hover:bg-gray-50 rounded-lg transition-all border border-transparent">
-            ${this.getCurrentLang() === 'cn' ? '暂存数据' : '임시 저장 데이터'}
+            ${this.getCurrentLang() === 'cn' ? '单门店未匹配数据' : '임시 저장 데이터'}
           </button>
         </div>
         
@@ -422,7 +275,7 @@ const IngestionView = {
                   <span class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? '全选' : '전체 선택'}</span>
                 </label>
                 <div class="border-t border-gray-100 my-1"></div>
-                ${[['正常', '정상'], ['待处理', '처리 대기'], ['已处理', '처리 완료']].map(([val, label]) => `
+                ${[['正常', '정상'], ['驳回', '반려'], ['覆盖', '덮어쓰기']].map(([val, label]) => `
                   <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
                     <input type="checkbox" value="${val}" class="inbox-status-checkbox rounded border-gray-300 text-brand" ${this.inboxStatusFilter.includes(val) ? 'checked' : ''}>
                     <span class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? val : label}</span>
@@ -674,18 +527,8 @@ const IngestionView = {
         }
 
         if ((idx === 2 && i === 0) || (idx === 3 && i === 1)) {
-          status = '待处理';
-          rejectReason = '该文件解析后发现“A门店、B门店”与原始门店数据列表中有重复，请确定是否覆盖/忽略';
-        }
-
-        if (idx === 2 && i === 1) {
-          status = '已归档';
-          rejectReason = '-';
-        }
-
-        if (idx === 2 && i === 2) {
-          status = '暂存';
-          rejectReason = '-';
+          status = '重复';
+          rejectReason = '该文件解析后发现“A门店、B门店”与原始门店数据列表中有重复';
         }
         
         attachments.push({
@@ -742,10 +585,12 @@ const IngestionView = {
     
     const inboxData = this.getInboxData();
     
-    // 收件箱状态筛选
+    // 按子级附件状态筛选
     let filteredInboxData = inboxData;
     if (this.inboxStatusFilter.length > 0) {
-      filteredInboxData = inboxData.filter(item => this.inboxStatusFilter.includes(item.statusText));
+      filteredInboxData = inboxData.filter(item =>
+        item.attachments.some(attachment => this.inboxStatusFilter.includes(attachment.status))
+      );
     }
     
     if (filteredInboxData.length === 0) {
@@ -770,7 +615,6 @@ const IngestionView = {
             <th class="px-4 py-3 min-w-[280px]">${cn ? '标题' : '제목'}</th>
             <th class="px-4 py-3 min-w-[200px]">${cn ? '内容' : '내용'}</th>
             <th class="px-4 py-3 w-24 text-center">${cn ? '附件数' : '첨부 수'}</th>
-            <th class="px-4 py-3 w-32 text-center whitespace-nowrap">${cn ? '状态' : '상태'}</th>
             <th class="px-4 py-3 w-44">${cn ? '材料提供人' : '제공자'}</th>
             <th class="px-4 py-3 w-32">${cn ? '材料提供时间' : '제공 시간'}</th>
           </tr>
@@ -802,11 +646,6 @@ const IngestionView = {
         <td class="px-4 py-3 text-center">
           <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-[#4e5969]">${item.attachmentCount}</span>
         </td>
-        <td class="px-4 py-3 text-center">
-          <span class="px-2.5 py-1 rounded-full text-xs font-semibold border ${this.getInboxStatusStyle(item.statusText)}">
-            ${item.statusText}
-          </span>
-        </td>
         <td class="px-4 py-3">
           <span class="block max-w-[168px] truncate text-sm text-[#1d2129]" title="${this.escapeHtml(item.provider)}">${this.escapeHtml(item.provider)}</span>
         </td>
@@ -821,7 +660,7 @@ const IngestionView = {
     const cn = this.getCurrentLang() === 'cn';
     return `
       <tr class="inbox-detail-row hidden" data-parent-id="${item.id}">
-        <td colspan="8" class="p-0 bg-[#f7faff]">
+        <td colspan="7" class="p-0 bg-[#f7faff]">
           <div class="px-8 py-4 border-t border-blue-100">
             <table class="w-full table-fixed text-left text-xs text-[#4e5969] border border-gray-100 rounded-lg overflow-hidden">
               <thead class="bg-[#eef2fb] text-[#1d2129] font-semibold">
@@ -829,7 +668,6 @@ const IngestionView = {
                   <th class="px-4 py-2.5 w-[34%]">${cn ? '附件名称' : '첨부 파일명'}</th>
                   <th class="px-4 py-2.5 w-[120px] text-center">${cn ? '附件状态' : '첨부 상태'}</th>
                   <th class="px-4 py-2.5 w-[28%]">${cn ? '异常说明' : '이상 설명'}</th>
-                  <th class="px-4 py-2.5 w-[140px]">${cn ? '来源方式' : '출처 방식'}</th>
                   <th class="px-4 py-2.5 w-[220px] text-left">${cn ? '操作' : '조작'}</th>
                 </tr>
               </thead>
@@ -846,42 +684,27 @@ const IngestionView = {
   renderAttachmentRow(emailId, att, index) {
     const isRejected = att.status === '驳回';
     const isArchived = att.status === '已归档';
-    const isPending = att.status === '待处理';
+    const isDuplicate = att.status === '重复';
+    const isCovered = att.status === '覆盖';
     const isStashed = att.status === '暂存';
-    const isDuplicatePending = isPending && this.isDuplicateAttachment(att);
     return `
       <tr class="hover:bg-slate-50 transition-colors" data-email-id="${emailId}" data-att-idx="${index}">
         <td class="px-4 py-2.5 w-[34%] max-w-0">
           <span class="inbox-att-name-text cursor-pointer text-brand hover:text-blue-700 hover:underline transition-colors truncate block" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '点击预览' : '클릭하여 미리보기'}">${this.escapeHtml(att.name)}</span>
         </td>
         <td class="px-4 py-2.5 w-[120px] text-center">
-          <span class="px-2 py-0.5 rounded-full text-xs font-semibold border ${isRejected ? 'bg-red-50 text-red-600 border-red-100' : isPending ? 'bg-amber-50 text-amber-700 border-amber-100' : isArchived ? 'bg-slate-50 text-slate-500 border-slate-100' : isStashed ? 'bg-blue-50 text-brand border-blue-100' : 'bg-green-50 text-green-700 border-green-100'}">
+          <span class="px-2 py-0.5 rounded-full text-xs font-semibold border ${isRejected ? 'bg-red-50 text-red-600 border-red-100' : isDuplicate ? 'bg-amber-50 text-amber-700 border-amber-100' : isCovered ? 'bg-blue-50 text-brand border-blue-100' : isArchived ? 'bg-slate-50 text-slate-500 border-slate-100' : isStashed ? 'bg-blue-50 text-brand border-blue-100' : 'bg-green-50 text-green-700 border-green-100'}">
             ${att.status}
           </span>
         </td>
-        <td class="px-4 py-2.5 w-[28%] max-w-0 ${isRejected ? 'text-red-600' : isPending ? 'text-amber-700' : 'text-[#86909c]'}">
+        <td class="px-4 py-2.5 w-[28%] max-w-0 ${isRejected ? 'text-red-600' : isDuplicate ? 'text-amber-700' : 'text-[#86909c]'}">
           <div class="truncate" title="${this.escapeHtml(att.rejectReason)}">${this.escapeHtml(att.rejectReason)}</div>
         </td>
-        <td class="px-4 py-2.5 w-[140px] text-[#4e5969]">${att.sourceMethod}</td>
         <td class="px-4 py-2.5 w-[220px]">
           <div class="flex items-center justify-start gap-1.5 whitespace-nowrap">
-            <button type="button" class="inbox-att-archive-btn px-2 py-1 text-xs rounded text-[#86909c] hover:bg-gray-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '归档' : '보관'}">
-              <i class="fa-solid fa-folder-minus"></i>
-            </button>
-            <button type="button" class="inbox-att-reject-btn px-2 py-1 text-xs rounded transition-all ${isRejected ? 'text-gray-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-50'}" data-email-id="${emailId}" data-att-idx="${index}" title="${isRejected ? '已驳回' : '驳回'}" ${isRejected ? 'disabled' : ''}>
-              <i class="fa-solid fa-reply"></i>
-            </button>
             <button type="button" class="inbox-att-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '单据详情' : '문서 상세'}">
               <i class="fa-solid fa-list-check"></i>
             </button>
-            ${isDuplicatePending ? `
-              <button type="button" class="inbox-att-duplicate-action px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-all" data-action="cover" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '覆盖重复数据' : '중복 데이터 덮어쓰기'}">
-                ${this.getCurrentLang() === 'cn' ? '覆盖' : '덮어쓰기'}
-              </button>
-              <button type="button" class="inbox-att-duplicate-action px-2 py-1 text-xs rounded text-[#4e5969] hover:bg-gray-50 transition-all" data-action="ignore" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '忽略重复数据' : '중복 데이터 무시'}">
-                ${this.getCurrentLang() === 'cn' ? '忽略' : '무시'}
-              </button>
-            ` : ''}
           </div>
         </td>
       </tr>
@@ -1213,36 +1036,6 @@ const IngestionView = {
       self.showInboxAttachmentPreview(inboxItem, attachment);
     };
     
-    // 归档按钮
-    detailRow.querySelectorAll('.inbox-att-archive-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const emailId = btn.getAttribute('data-email-id');
-        const attIdx = parseInt(btn.getAttribute('data-att-idx') || '0');
-        self.archiveInboxAttachment(emailId, attIdx);
-      });
-    });
-    
-    // 驳回按钮
-    detailRow.querySelectorAll('.inbox-att-reject-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const emailId = btn.getAttribute('data-email-id');
-        const attIdx = Number(btn.getAttribute('data-att-idx') || 0);
-        self.openInboxAttachmentRejectConfirm(emailId, attIdx);
-      });
-    });
-
-    detailRow.querySelectorAll('.inbox-att-duplicate-action').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const emailId = btn.getAttribute('data-email-id');
-        const attIdx = Number(btn.getAttribute('data-att-idx') || 0);
-        const action = btn.getAttribute('data-action') || 'ignore';
-        self.resolveDuplicateAttachment(emailId, attIdx, action);
-      });
-    });
-
     detailRow.querySelectorAll('.inbox-att-detail-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -3293,6 +3086,9 @@ const IngestionView = {
 
   showUploadModal() {
     const cn = this.getCurrentLang() === 'cn';
+    const currentDate = new Date();
+    const previousMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+    const defaultPeriod = `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, '0')}`;
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/35 p-4';
     overlay.innerHTML = `
@@ -3318,6 +3114,11 @@ const IngestionView = {
             <textarea id="upload-material-content" rows="4" maxlength="500"
               class="w-full resize-none rounded-md border border-gray-200 px-3 py-2.5 text-sm outline-none transition-colors focus:border-brand"
               placeholder="${cn ? '请输入内容' : '내용을 입력하세요'}"></textarea>
+          </label>
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '年月' : '연월'} <span class="text-red-500">*</span></span>
+            <input id="upload-material-period" type="month" value="${defaultPeriod}" required
+              class="w-full rounded-md border border-gray-200 px-3 py-2.5 text-sm text-[#4e5969] outline-none transition-colors focus:border-brand">
           </label>
           <div>
             <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '本地文件' : '로컬 파일'} <span class="text-red-500">*</span></span>
@@ -3384,6 +3185,7 @@ const IngestionView = {
       const titleInput = overlay.querySelector('#upload-material-title');
       const title = titleInput.value.trim();
       const content = overlay.querySelector('#upload-material-content').value.trim();
+      const period = overlay.querySelector('#upload-material-period').value;
       if (!title) {
         titleInput.focus();
         return;
@@ -3399,6 +3201,7 @@ const IngestionView = {
         index: 1,
         emailSubject: title,
         emailBody: content || '-',
+        month: period ? `${period.slice(0, 4)}年${period.slice(5, 7)}月` : '',
         attachmentCount: selectedFiles.length,
         isNormal: true,
         statusText: '正常',
@@ -3788,7 +3591,6 @@ const IngestionView = {
   bindTabEvents() {
     const tabOriginal = document.getElementById('tab-original');
     const tabFiles = document.getElementById('tab-files');
-    const tabArchive = document.getElementById('tab-archive');
     const tabStash = document.getElementById('tab-stash');
     const activeClass = 'px-4 py-2 text-sm font-medium text-brand bg-blue-50 rounded-lg transition-all border border-blue-200';
     const inactiveClass = 'px-4 py-2 text-sm text-[#86909c] hover:text-[#1d2129] hover:bg-gray-50 rounded-lg transition-all border border-transparent';
@@ -3796,7 +3598,6 @@ const IngestionView = {
     const setActiveTab = (activeTab) => {
       if (tabOriginal) tabOriginal.className = activeTab === 'original' ? activeClass : inactiveClass;
       if (tabFiles) tabFiles.className = activeTab === 'files' ? activeClass : inactiveClass;
-      if (tabArchive) tabArchive.className = activeTab === 'archive' ? activeClass : inactiveClass;
       if (tabStash) tabStash.className = activeTab === 'stash' ? activeClass : inactiveClass;
       
       const showOriginal = activeTab === 'original';
@@ -3843,10 +3644,6 @@ const IngestionView = {
     
     tabFiles?.addEventListener('click', () => {
       setActiveTab('files');
-    });
-
-    tabArchive?.addEventListener('click', () => {
-      setActiveTab('archive');
     });
 
     tabStash?.addEventListener('click', () => {
