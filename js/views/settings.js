@@ -33,7 +33,7 @@ const SettingsView = {
       id: 'r-001',
       name: '系统管理员',
       description: '拥有平台全部功能和全部数据权限',
-      functions: ['全部菜单', '新建', '编辑', '删除', '导出', '审批'],
+      functions: ['全部权限'],
       dataScope: '全部数据',
       dataScopeValue: '全部区域',
       users: 1,
@@ -43,7 +43,26 @@ const SettingsView = {
       id: 'r-002',
       name: '华北区域经理',
       description: '负责华北区域 POS 数据收取、质检和台账查看',
-      functions: ['文件收取', '质量检查', '台账与汇总', '数据分析', '导出'],
+      functions: [
+        '文件收取/文件箱:查看',
+        '文件收取/文件箱:上传',
+        '文件收取/单门店已匹配数据:查看',
+        '文件收取/单门店已匹配数据:编辑',
+        '文件收取/单门店已匹配数据:质检',
+        '文件收取/单门店已匹配数据:通过',
+        '文件收取/单门店已匹配数据:驳回',
+        '文件收取/单门店未匹配数据:查看',
+        '文件收取/单门店未匹配数据:编辑',
+        '文件收取/单门店未匹配数据:校验',
+        '质量检查/标准POS表:查看',
+        '质量检查/标准POS表:通过',
+        '质量检查/异常数据:查看',
+        '质量检查/异常数据:通过',
+        '质量检查/异常数据:驳回',
+        '台账与汇总/标准POS明细:查看',
+        '台账与汇总/销售汇总:查看',
+        '台账与汇总/门店汇总:查看'
+      ],
       dataScope: '按组织范围',
       dataScopeValue: '华北区域',
       users: 1,
@@ -53,7 +72,17 @@ const SettingsView = {
       id: 'r-003',
       name: '营业所负责人',
       description: '仅管理所属营业所下经销商和门店数据',
-      functions: ['文件收取', '质量检查', '台账与汇总'],
+      functions: [
+        '文件收取/文件箱:查看',
+        '文件收取/单门店已匹配数据:查看',
+        '文件收取/单门店已匹配数据:编辑',
+        '文件收取/单门店未匹配数据:查看',
+        '质量检查/标准POS表:查看',
+        '质量检查/异常数据:查看',
+        '台账与汇总/标准POS明细:查看',
+        '台账与汇总/销售汇总:查看',
+        '台账与汇总/门店汇总:查看'
+      ],
       dataScope: '按组织范围',
       dataScopeValue: '石家庄营业所',
       users: 1,
@@ -62,12 +91,38 @@ const SettingsView = {
   ],
   selectedUserId: 'u-001',
   modules: [
-    { group: '首页概览', actions: ['查看'] },
-    { group: '文件收取', actions: ['查看', '新建', '编辑', '导出'] },
-    { group: '质量检查', actions: ['查看', '编辑', '审批', '导出'] },
-    { group: '台账与汇总', actions: ['查看', '导出'] },
-    { group: '数据分析', actions: ['查看', '导出'] },
-    { group: '系统设置', actions: ['查看', '新建', '编辑', '删除'] }
+    { group: '首页概览', children: [{ name: '首页概览', actions: ['查看'] }] },
+    {
+      group: '文件收取',
+      children: [
+        { name: '文件箱', actions: ['查看', '新建', '编辑', '上传', '导出'] },
+        { name: '单门店已匹配数据', actions: ['查看', '编辑', '质检', '通过', '驳回', '导出'] },
+        { name: '单门店未匹配数据', actions: ['查看', '编辑', '校验', '驳回', '导出'] }
+      ]
+    },
+    {
+      group: '质量检查',
+      children: [
+        { name: '标准POS表', actions: ['查看', '编辑', '通过', '删除', '导出'] },
+        { name: '异常数据', actions: ['查看', '编辑', '通过', '驳回', '删除', '导出'] }
+      ]
+    },
+    {
+      group: '台账与汇总',
+      children: [
+        { name: '标准POS明细', actions: ['查看', '编辑', '导出'] },
+        { name: '销售汇总', actions: ['查看', '导出'] },
+        { name: '门店汇总', actions: ['查看', '导出'] }
+      ]
+    },
+    {
+      group: '系统设置',
+      children: [
+        { name: '用户管理', actions: ['查看', '新建', '编辑', '禁用', '重置密码', '删除'] },
+        { name: '角色权限', actions: ['查看', '新建', '编辑', '删除'] },
+        { name: '系统日志', actions: ['查看', '导出'] }
+      ]
+    }
   ],
   orgOptions: {
     region: ['华北区域', '华中区域', '东北区域', '华东区域', '西北区域', '华南区域'],
@@ -308,7 +363,7 @@ const SettingsView = {
           </div>
           <div>
             <dt>继承功能权限</dt>
-            <dd>${role.functions.join('、')}</dd>
+            <dd>${this.summarizeRoleFunctions(role)}</dd>
           </div>
           <div>
             <dt>继承数据权限</dt>
@@ -317,7 +372,7 @@ const SettingsView = {
         </dl>
         <div class="settings-scenario">
           <strong>场景说明</strong>
-          <p>用户 ${user.name} 被分配角色：${user.role}。该用户不单独配置数据权限，自动继承角色下的功能权限和数据权限：${scopeText}。在文件收取、质量检查、台账与汇总、数据分析页面中，仅能查看该角色权限范围内的经销商、门店及对应 POS 明细数据。</p>
+          <p>用户 ${user.name} 被分配角色：${user.role}。该用户不单独配置数据权限，自动继承角色下的功能权限和数据权限：${scopeText}。在文件收取、质量检查、台账与汇总页面中，仅能查看该角色权限范围内的经销商、门店及对应 POS 明细数据。</p>
         </div>
       </aside>
     `;
@@ -330,6 +385,41 @@ const SettingsView = {
   getRoleScopeText(role) {
     if (!role) return '-';
     return role.dataScopeValue ? `${role.dataScope}：${role.dataScopeValue}` : role.dataScope;
+  },
+
+  getAllPermissionValues() {
+    return this.modules.flatMap((module) => module.children.flatMap((child) => child.actions.map((action) => `${module.group}/${child.name}:${action}`)));
+  },
+
+  getRoleFunctionValues(role) {
+    const functions = role?.functions || [];
+    if (functions.includes('全部权限') || functions.includes('全部菜单')) return this.getAllPermissionValues();
+    return functions.filter((item) => item.includes(':'));
+  },
+
+  roleHasPermission(role, value) {
+    const functions = role?.functions || [];
+    if (functions.includes('全部权限') || functions.includes('全部菜单')) return true;
+    if (functions.includes(value)) return true;
+    const [path, action] = value.split(':');
+    const [group, child] = path.split('/');
+    return functions.includes(group) || functions.includes(child) || functions.includes(action);
+  },
+
+  summarizeRoleFunctions(role) {
+    if (!role) return '-';
+    const functions = role.functions || [];
+    if (functions.includes('全部权限') || functions.includes('全部菜单')) return '全部模块全部权限';
+    const selected = this.getRoleFunctionValues(role);
+    if (!selected.length) return '-';
+    const groups = this.modules
+      .filter((module) => selected.some((value) => value.startsWith(`${module.group}/`)))
+      .map((module) => module.group);
+    return `${groups.join('、')}（${selected.length} 项）`;
+  },
+
+  getRolePermissionCount(role) {
+    return this.getRoleFunctionValues(role).length;
   },
 
   renderRoles() {
@@ -377,7 +467,7 @@ const SettingsView = {
       <tr>
         <td><strong>${role.name}</strong></td>
         <td>${role.description}</td>
-        <td>${role.functions.length} 项</td>
+        <td>${this.getRolePermissionCount(role)} 项</td>
         <td>${this.getRoleScopeText(role)}</td>
         <td>${role.users} 人</td>
         <td class="settings-row-actions">
@@ -394,7 +484,7 @@ const SettingsView = {
         <div class="settings-card settings-field-impact">
           <div>
             <strong>字段配置会同步影响质量检查和台账与汇总</strong>
-            <p>质量检查按“启用 + 参与质量检查”的字段校验原始 POS 表；台账与汇总按“启用 + 显示在台账”的字段展示表头。区域、营业所由组织架构生成，不受字段配置控制。</p>
+            <p>质量检查按“启用 + 参与质量检查”的字段校验原始 POS 表；台账与汇总按“启用 + 显示在台账”的字段展示表头。区域、营业所由系统预置组织范围生成，不受字段配置控制。</p>
           </div>
         </div>
 
@@ -481,7 +571,7 @@ const SettingsView = {
       dealerName: (item) => item.dealer,
       storeCode: (item) => item.storeCode,
       storeName: (item) => item.storeName,
-      productCode: (item) => item.barcode,
+      productCode: (item) => item.productCode || item.barcode,
       productName: (item) => item.productName,
       barcode69: (item) => item.barcode,
       quantity: (item) => item.quantity,
@@ -505,7 +595,7 @@ const SettingsView = {
     };
     return this.getLedgerFields().map((field) => ({
       key: field.key,
-      label: field.name,
+      label: field.key === 'productCode' ? '产品A码' : field.name,
       order: field.order,
       value: valueMap[field.key] || (() => '-'),
       ...(metaMap[field.key] || {})
@@ -780,9 +870,23 @@ const SettingsView = {
     } else if (action === 'reset') {
       Dialog.toast(`${user.name} 密码已重置为初始密码`);
     } else if (action === 'delete') {
-      this.users = this.users.filter((item) => item.id !== id);
-      if (this.selectedUserId === id) this.selectedUserId = this.users[0]?.id || null;
-      App.mountView('settings-users');
+      Dialog.show({
+        title: '确认删除用户',
+        content: `
+          <div class="space-y-2">
+            <p>删除后该用户将无法登录系统，且不会出现在用户列表中。</p>
+            <p class="font-semibold text-slate-800">${user.name}（${user.account}）</p>
+          </div>
+        `,
+        confirmText: '确认删除',
+        cancelText: '取消',
+        onConfirm: () => {
+          this.users = this.users.filter((item) => item.id !== id);
+          if (this.selectedUserId === id) this.selectedUserId = this.users[0]?.id || null;
+          App.mountView('settings-users');
+          Dialog.toast('用户已删除');
+        }
+      });
     }
   },
 
@@ -978,14 +1082,13 @@ const SettingsView = {
             <button type="button" class="settings-modal-close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
           </div>
           <div class="settings-form-grid">
-            <label>用户姓名<input name="name" value="${user?.name || ''}" required></label>
-            <label>登录账号<input name="account" value="${user?.account || ''}" required></label>
-            <label>初始密码<input name="password" type="password" value="${editing ? '******' : ''}" required></label>
-            <label>手机号/邮箱<input name="phone" value="${user?.phone || ''}"></label>
-            <label>分配角色<select name="role">${this.roles.map((role) => `<option ${user?.role === role.name ? 'selected' : ''}>${role.name}</option>`).join('')}</select></label>
-            <label>账号状态<select name="status"><option ${user?.status === '启用' ? 'selected' : ''}>启用</option><option ${user?.status === '停用' ? 'selected' : ''}>停用</option></select></label>
+            <label><span class="settings-label-title">用户姓名 <em>*</em></span><input name="name" value="${user?.name || ''}" required></label>
+            <label><span class="settings-label-title">登录账号 <em>*</em></span><input name="account" value="${user?.account || ''}" required></label>
+            <label><span class="settings-label-title">初始密码 <em>*</em></span><input name="password" type="password" value="${editing ? '******' : ''}" required></label>
+            <label><span class="settings-label-title">邮箱 <em>*</em></span><input name="phone" value="${user?.phone || ''}" required></label>
+            <label><span class="settings-label-title">分配角色 <em>*</em></span><select name="role" required>${this.roles.map((role) => `<option ${user?.role === role.name ? 'selected' : ''}>${role.name}</option>`).join('')}</select></label>
+            <label><span class="settings-label-title">账号状态 <em>*</em></span><select name="status" required><option ${user?.status === '启用' ? 'selected' : ''}>启用</option><option ${user?.status === '停用' ? 'selected' : ''}>停用</option></select></label>
           </div>
-          <div class="settings-modal-note">用户不再单独配置数据权限。保存后将继承所选角色的功能权限和数据权限。</div>
           <div class="settings-modal-actions">
             <button type="button" class="settings-secondary-button settings-modal-cancel">取消</button>
             <button type="submit" class="settings-primary-button">保存用户</button>
@@ -996,7 +1099,22 @@ const SettingsView = {
     this.bindModalClose(overlay);
     document.getElementById('settings-user-form')?.addEventListener('submit', (event) => {
       event.preventDefault();
+      if (!event.currentTarget.reportValidity()) return;
       const data = new FormData(event.currentTarget);
+      const requiredFields = [
+        ['name', '用户姓名'],
+        ['account', '登录账号'],
+        ['password', '初始密码'],
+        ['phone', '邮箱'],
+        ['role', '分配角色'],
+        ['status', '账号状态']
+      ];
+      const missing = requiredFields.find(([key]) => !String(data.get(key) || '').trim());
+      if (missing) {
+        Dialog.toast(`请填写${missing[1]}`, 'error');
+        event.currentTarget.querySelector(`[name="${missing[0]}"]`)?.focus();
+        return;
+      }
       const nextUser = {
         id: user?.id || `u-${Date.now()}`,
         name: data.get('name'),
@@ -1015,6 +1133,32 @@ const SettingsView = {
       overlay.innerHTML = '';
       App.mountView('settings-users');
     });
+  },
+
+  renderPermissionTree(role) {
+    return `
+      <div class="settings-permission-tree">
+        <div class="settings-permission-head">
+          <span>模块</span>
+          <span>二级目录</span>
+          <span>功能权限</span>
+        </div>
+        ${this.modules.map((module) => module.children.map((child, childIndex) => `
+          <div class="settings-permission-row">
+            <strong>${childIndex === 0 ? module.group : ''}</strong>
+            <span class="settings-permission-child">${child.name}</span>
+            <div>
+              ${child.actions.map((action) => {
+                const value = `${module.group}/${child.name}:${action}`;
+                return `
+                  <label><input type="checkbox" name="functions" value="${value}" ${this.roleHasPermission(role, value) ? 'checked' : ''}>${action}</label>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        `).join('')).join('')}
+      </div>
+    `;
   },
 
   openRoleDialog(role = null) {
@@ -1055,18 +1199,7 @@ const SettingsView = {
               </div>
             </label>
           </div>
-          <div class="settings-permission-tree">
-            ${this.modules.map((module) => `
-              <div class="settings-permission-row">
-                <strong>${module.group}</strong>
-                <div>
-                  ${module.actions.map((action) => `
-                    <label><input type="checkbox" name="functions" value="${module.group}:${action}" ${(role?.functions || []).includes(module.group) || (role?.functions || []).includes(action) ? 'checked' : ''}>${action}</label>
-                  `).join('')}
-                </div>
-              </div>
-            `).join('')}
-          </div>
+          ${this.renderPermissionTree(role)}
           <div class="settings-modal-actions">
             <button type="button" class="settings-secondary-button settings-modal-cancel">取消</button>
             <button type="submit" class="settings-primary-button">保存角色</button>
@@ -1147,7 +1280,7 @@ const SettingsView = {
         id: role?.id || `r-${Date.now()}`,
         name: data.get('name'),
         description: role?.description || `${data.get('name')}权限配置`,
-        functions: [...new Set(functionValues.map((item) => item.split(':')[0]))],
+        functions: [...new Set(functionValues)],
         dataScope,
         dataScopeValue: dataScope === '全部数据' ? '全部区域' : selectedOrgValues.join('、'),
         users: role?.users || 0,

@@ -2,12 +2,18 @@ const QAView = {
   data: [],
   activeQaTab: 'standard',
   standardDisplayMode: 'table',
+  exceptionDisplayMode: 'detail',
   rejectedStoreCodes: new Set(),
+  approvedStandardStoreCodes: new Set(),
   confidenceFilter: {
     preset: ''
   },
+  searchField: 'all',
+  searchKeyword: '',
+  standardStatusFilter: '',
   exceptionTypeFilter: '',
   statusFilter: '',
+  exceptionStatusOptions: ['待处理', '营业担当处理中', 'POS担当待处理', '已通过'],
   hierarchyFilter: {
     teams: [],
     offices: [],
@@ -222,10 +228,19 @@ const QAView = {
         </div>
         <div class="px-7 py-4 border-b border-gray-100 bg-white shrink-0">
           <div class="flex items-center gap-4 flex-wrap">
-            <div class="relative">
-              <input type="text" id="qa-filter-filename" placeholder="请输入文件名称模糊搜索"
-                class="pl-10 pr-4 py-2 w-56 border border-gray-200 rounded-lg text-sm text-[#4e5969] focus:outline-none focus:border-brand transition-all">
-              <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#86909c]"></i>
+            <div id="qa-search-combo-wrapper" class="relative flex h-10 w-[360px] items-center rounded-lg border border-gray-200 bg-white transition-all focus-within:border-brand">
+              <button type="button" id="qa-search-field-btn"
+                class="flex h-full w-36 shrink-0 items-center justify-between gap-2 border-r border-gray-100 px-3 text-left text-sm text-[#4e5969] hover:bg-gray-50 rounded-l-lg"
+                title="${this.getQaSearchFieldLabel()}">
+                <span id="qa-search-field-label" class="truncate">${this.getQaSearchFieldLabel()}</span>
+                <i class="fa-solid fa-chevron-down text-[10px] text-[#86909c]"></i>
+              </button>
+              <div class="relative min-w-0 flex-1">
+                <input type="text" id="qa-filter-filename" placeholder="搜索"
+                  class="h-10 w-full border-0 bg-transparent pl-9 pr-10 text-sm text-[#4e5969] focus:outline-none">
+                <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#86909c]"></i>
+              </div>
+              <div id="qa-search-field-dropdown" class="hidden absolute top-full left-0 mt-1 w-48 rounded-lg border border-gray-200 bg-white p-2 shadow-lg z-50"></div>
             </div>
             <div class="flex items-center gap-4" id="qa-hierarchy-block">
             <span class="text-sm font-medium text-[#4e5969]" id="qa-team-label">组织架构</span>
@@ -254,6 +269,19 @@ const QAView = {
                 <button type="button" class="qa-confidence-option w-full text-left px-2 py-1.5 hover:bg-gray-50 rounded text-sm text-[#4e5969]" data-value="low">低</button>
               </div>
             </div>
+            <span class="text-sm font-medium text-[#4e5969]" id="qa-standard-status-label-group">状态</span>
+            <div class="relative" id="qa-standard-status-select-wrapper">
+              <button type="button" id="qa-standard-status-select-btn"
+                class="px-4 py-2 w-36 border border-gray-200 rounded-lg text-sm text-[#4e5969] bg-white text-left flex items-center justify-between gap-2 focus:outline-none focus:border-brand transition-all">
+                <span id="qa-standard-status-select-label">全部</span>
+                <i class="fa-solid fa-chevron-down text-xs"></i>
+              </button>
+              <div id="qa-standard-status-dropdown" class="hidden absolute top-full left-0 mt-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-2">
+                <button type="button" class="qa-standard-status-option w-full text-left px-2 py-1.5 hover:bg-gray-50 rounded text-sm text-[#4e5969]" data-value="">全部</button>
+                <button type="button" class="qa-standard-status-option w-full text-left px-2 py-1.5 hover:bg-gray-50 rounded text-sm text-[#4e5969]" data-value="待通过">待通过</button>
+                <button type="button" class="qa-standard-status-option w-full text-left px-2 py-1.5 hover:bg-gray-50 rounded text-sm text-[#4e5969]" data-value="已通过">已通过</button>
+              </div>
+            </div>
             <span class="text-sm font-medium text-[#4e5969] hidden" id="qa-exception-type-label-group">异常类型</span>
             <div class="relative hidden" id="qa-exception-type-select-wrapper">
               <button type="button" id="qa-exception-type-select-btn"
@@ -271,14 +299,15 @@ const QAView = {
             <span class="text-sm font-medium text-[#4e5969] hidden" id="qa-status-label-group">状态</span>
             <div class="relative hidden" id="qa-status-select-wrapper">
               <button type="button" id="qa-status-select-btn"
-                class="px-4 py-2 w-36 border border-gray-200 rounded-lg text-sm text-[#4e5969] bg-white text-left flex items-center justify-between gap-2 focus:outline-none focus:border-brand transition-all">
+                class="px-4 py-2 w-44 border border-gray-200 rounded-lg text-sm text-[#4e5969] bg-white text-left flex items-center justify-between gap-2 focus:outline-none focus:border-brand transition-all">
                 <span id="qa-status-select-label">全部</span>
                 <i class="fa-solid fa-chevron-down text-xs"></i>
               </button>
-              <div id="qa-status-dropdown" class="hidden absolute top-full left-0 mt-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-2">
+              <div id="qa-status-dropdown" class="hidden absolute top-full left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-2">
                 <button type="button" class="qa-status-option w-full text-left px-2 py-1.5 hover:bg-gray-50 rounded text-sm text-[#4e5969]" data-value="">全部</button>
-                <button type="button" class="qa-status-option w-full text-left px-2 py-1.5 hover:bg-gray-50 rounded text-sm text-[#4e5969]" data-value="待处理">待处理</button>
-                <button type="button" class="qa-status-option w-full text-left px-2 py-1.5 hover:bg-gray-50 rounded text-sm text-[#4e5969]" data-value="已驳回">已驳回</button>
+                ${this.exceptionStatusOptions.map((status) => `
+                  <button type="button" class="qa-status-option w-full text-left px-2 py-1.5 hover:bg-gray-50 rounded text-sm text-[#4e5969]" data-value="${status}">${status}</button>
+                `).join('')}
               </div>
             </div>
             <button type="button" id="qa-btn-search"
@@ -300,36 +329,17 @@ const QAView = {
                 aria-label="${this.standardDisplayMode === 'table' ? '当前为表格展示，点击切换为明细数据' : '当前为明细数据展示，点击切换为表格'}">
                 <i id="qa-standard-display-toggle-icon" class="fa-solid ${this.standardDisplayMode === 'table' ? 'fa-table-cells-large' : 'fa-list-ul'}"></i>
               </button>
+              <button type="button" id="qa-exception-display-toggle"
+                class="hidden w-10 h-10 rounded-lg border border-blue-100 bg-blue-50 text-brand hover:bg-blue-100 hover:border-blue-200 transition-all flex items-center justify-center"
+                title="${this.exceptionDisplayMode === 'detail' ? '明细数据' : '文件数据'}"
+                aria-label="${this.exceptionDisplayMode === 'detail' ? '当前为明细数据展示，点击切换为文件数据' : '当前为文件数据展示，点击切换为明细数据'}">
+                <i id="qa-exception-display-toggle-icon" class="fa-solid ${this.exceptionDisplayMode === 'detail' ? 'fa-list-ul' : 'fa-table-cells-large'}"></i>
+              </button>
             </div>
           </div>
         </div>
-        <div class="overflow-auto flex-1 relative px-2" id="qa-standard-container"></div>
-        <div class="overflow-auto flex-1 relative px-2 hidden" id="qa-exception-container">
-          <table class="w-full table-fixed min-w-[1560px] text-left text-sm text-[#4e5969]">
-            <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
-              <tr>
-                <th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" class="rounded border-gray-300 text-brand focus:ring-brand"></th>
-                <th class="px-4 py-3 w-24">年月</th>
-                <th class="px-4 py-3 w-20">ACC</th>
-                <th class="px-4 py-3 w-36">经销商名称</th>
-                <th class="px-4 py-3 w-28">门店编码</th>
-                <th class="px-4 py-3 w-36">门店名称</th>
-                <th class="px-4 py-3 w-32">69 码</th>
-                <th class="px-4 py-3 w-48">产品名称</th>
-                <th class="px-4 py-3 w-20">销售数量</th>
-                <th class="px-4 py-3 w-24">销售金额</th>
-                <th class="px-4 py-3 w-24">销售成本</th>
-                <th class="px-4 py-3 w-20">零售价</th>
-                <th class="px-4 py-3 w-24">状态</th>
-                <th class="px-4 py-3 w-24">异常类型</th>
-                <th class="px-4 py-3 w-64">AI判断</th>
-                <th class="px-4 py-3 w-40 rounded-tr-lg">操作</th>
-              </tr>
-            </thead>
-            <tbody id="qa-tbody" class="divide-y divide-gray-100">
-            </tbody>
-          </table>
-        </div>
+        <div class="flex-1 min-h-0 flex flex-col px-2" id="qa-standard-container"></div>
+        <div class="flex flex-1 min-h-0 flex-col px-2 hidden" id="qa-exception-container"></div>
       </div>
     `;
   },
@@ -337,6 +347,388 @@ const QAView = {
   renderTable() {
     this.renderStandardTable();
     this.renderExceptionTable();
+  },
+
+  renderQaTableSummary(count) {
+    return `
+      <div class="flex h-10 shrink-0 items-center justify-end border-t border-gray-100 bg-white px-5 text-xs text-[#86909c]">
+        共 ${count} 条数据
+      </div>
+    `;
+  },
+
+  getHeadquarter(row = {}) {
+    if (row.headquarters) return row.headquarters;
+    if (row.region) return row.region.replace('区域', '本部');
+    if (row.salesTeam) return row.salesTeam.replace(/\s*Team$/, '本部');
+    return '';
+  },
+
+  normalizeHeadquarterToTeam(headquarters = '') {
+    return headquarters ? headquarters.replace('本部', ' Team') : '';
+  },
+
+  normalizeHeadquarterToRegion(headquarters = '') {
+    return headquarters ? headquarters.replace('本部', '区域') : '';
+  },
+
+  getQaAccOptions() {
+    return ['其它', '北京物美', '怀化佳惠', '南阳万德隆', '新玛特'];
+  },
+
+  getQaAccName(row = {}, index = 0) {
+    const source = String(row?.acc || '').trim();
+    const options = this.getQaAccOptions();
+    if (source && source !== '-') {
+      if (source === '其他') return '其它';
+      const codeMatch = source.match(/^ACC-(\d+)$/i);
+      if (codeMatch) {
+        const numeric = Number.parseInt(codeMatch[1], 10);
+        return options[Math.max(0, numeric - 100) % options.length];
+      }
+      if (['华北', '东北', '华东', '华中', '华南', '西北', '西南'].includes(source)) {
+        return options[Math.abs(source.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)) % options.length];
+      }
+      return source;
+    }
+    const seed = `${row?.storeCode || ''}${row?.storeName || ''}${row?.region || ''}`;
+    const hashed = seed
+      ? seed.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)
+      : index;
+    return options[Math.abs(hashed) % options.length];
+  },
+
+  getOrganizationRows() {
+    const matchedExceptionRows = this.data.map((row) => {
+      const matched = this.standardData.find((item) => item.storeCode === row.storeCode || item.storeName === row.storeName) || {};
+      return {
+        ...row,
+        headquarters: this.getHeadquarter(matched) || this.getHeadquarter(row),
+        salesOffice: matched.salesOffice || row.salesOffice,
+        dealer: matched.dealer || row.dealer
+      };
+    });
+    return [...this.standardData, ...matchedExceptionRows].filter(row => this.getHeadquarter(row) || row.salesOffice || row.dealer);
+  },
+
+  getInlineEditOptions(field, context = {}) {
+    const fromStandard = (key) => [...new Set(this.standardData.map(row => row[key]).filter(Boolean))];
+    const fromException = (key) => [...new Set(this.data.map(row => row[key]).filter(Boolean))];
+    const orgRows = this.getOrganizationRows();
+    const selectedHeadquarter = context.headquarters || '';
+    const selectedOffice = context.salesOffice || '';
+    const officeRows = selectedHeadquarter
+      ? orgRows.filter((row) => this.getHeadquarter(row) === selectedHeadquarter)
+      : orgRows;
+    const dealerRows = selectedOffice
+      ? orgRows.filter((row) => row.salesOffice === selectedOffice)
+      : officeRows;
+    const options = {
+      acc: [...this.getQaAccOptions(), ...fromException('acc')],
+      conflictType: ['产品级', '字段级', '数据级'],
+      mainConflictType: ['产品级', '字段级', '数据级'],
+      headquarters: orgRows.map((row) => this.getHeadquarter(row)).filter(Boolean),
+      salesTeam: fromStandard('salesTeam'),
+      region: fromStandard('region'),
+      salesOffice: officeRows.map((row) => row.salesOffice).filter(Boolean),
+      dealer: dealerRows.map((row) => row.dealer).filter(Boolean),
+      workflowStatus: this.exceptionStatusOptions
+    };
+    return [...new Set(options[field] || [])];
+  },
+
+  renderEditableText(value, className = '', title = '') {
+    const safeValue = value || '-';
+    const titleAttr = title || safeValue;
+    return `<span class="qa-inline-display ${className}" title="${titleAttr}">${safeValue}</span>`;
+  },
+
+  escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  },
+
+  renderStorePreviewTrigger(scope, value, index = '', id = '') {
+    const safeValue = this.escapeHtml(value || '-');
+    if (scope === 'exception') {
+      return `<button type="button" class="qa-exception-preview-trigger max-w-full truncate text-brand hover:text-blue-700 hover:underline transition-colors text-left font-medium" data-id="${this.escapeHtml(id)}" title="预览 ${safeValue}">${safeValue}</button>`;
+    }
+    return `<button type="button" class="qa-standard-preview-trigger max-w-full truncate text-brand hover:text-blue-700 hover:underline transition-colors text-left font-medium" data-index="${this.escapeHtml(index)}" title="预览 ${safeValue}">${safeValue}</button>`;
+  },
+
+  renderQaActionButtons({ scope, index = '', id = '', row = null } = {}) {
+    const safeScope = this.escapeHtml(scope || '');
+    const safeIndex = this.escapeHtml(index);
+    const safeId = this.escapeHtml(id);
+    if (scope === 'exception') {
+      const actions = this.getExceptionActions(row || this.data.find((item) => item.id === id) || {});
+      return `
+        <div class="flex items-center gap-1">
+          <button type="button" class="qa-exception-preview-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-id="${safeId}" title="详情">
+            <i class="fa-solid fa-list-check"></i>
+          </button>
+          ${actions.canEdit ? `
+            <button type="button" class="qa-inline-edit-trigger px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50" data-scope="${safeScope}" data-id="${safeId}" title="编辑">
+              <i class="fa-regular fa-pen-to-square"></i>
+            </button>
+          ` : ''}
+          ${actions.buttons.map((button) => `
+            <button type="button" class="px-2 py-1 text-xs rounded action-btn ${button.className}" data-action="${button.action}" data-id="${safeId}" title="${button.title}" ${button.disabled ? 'disabled' : ''}>
+              <i class="${button.icon}"></i>
+            </button>
+          `).join('')}
+        </div>
+      `;
+    }
+    return `
+      <div class="flex items-center gap-1">
+        <button type="button" class="qa-standard-detail-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-index="${safeIndex}" title="详情">
+          <i class="fa-solid fa-list-check"></i>
+        </button>
+        <button type="button" class="qa-inline-edit-trigger px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50" data-scope="${safeScope}" data-index="${safeIndex}" title="编辑">
+          <i class="fa-regular fa-pen-to-square"></i>
+        </button>
+        <button type="button" class="px-2 py-1 text-xs rounded text-red-500 hover:bg-red-50" title="删除">
+          <i class="fa-regular fa-trash-can"></i>
+        </button>
+      </div>
+    `;
+  },
+
+  getInlineEditContext(row) {
+    const valueFor = (field) => {
+      const cell = row.querySelector(`[data-edit-field="${field}"]`);
+      return (cell?.dataset.editValue || cell?.textContent || '').replace(/^￥/, '').trim();
+    };
+    return {
+      headquarters: valueFor('headquarters'),
+      salesOffice: valueFor('salesOffice'),
+      dealer: valueFor('dealer')
+    };
+  },
+
+  renderInlineSelectOptions(options, value, placeholder = '') {
+    const items = placeholder
+      ? [`<option value="" ${value ? '' : 'selected'}>${placeholder}</option>`]
+      : [];
+    return items.concat(options.map(option => `<option value="${this.escapeHtml(option)}" ${option === value ? 'selected' : ''}>${this.escapeHtml(option)}</option>`)).join('');
+  },
+
+  renderQaEditableCell(field, value, className = '', title = '') {
+    const rawValue = value || '';
+    const displayValue = ['amount', 'cost', 'retailPrice'].includes(field) && rawValue && rawValue !== '-' && !String(rawValue).startsWith('￥')
+      ? `￥${rawValue}`
+      : rawValue;
+    return `<td class="${className}" data-edit-field="${field}" data-edit-value="${rawValue}">${this.renderEditableText(displayValue, '', title || displayValue)}</td>`;
+  },
+
+  enterQaInlineEdit(button) {
+    const row = button.closest('tr');
+    if (!row || row.dataset.editing === 'true') return;
+    row.dataset.editing = 'true';
+    const originalHtml = row.innerHTML;
+    const editableCells = Array.from(row.querySelectorAll('[data-edit-field]'));
+    const actionCell = button.closest('td');
+    const editContext = this.getInlineEditContext(row);
+
+    editableCells.forEach((cell) => {
+      const field = cell.dataset.editField;
+      const rawValue = (cell.dataset.editValue || cell.textContent || '').replace(/^￥/, '').trim();
+      const options = this.getInlineEditOptions(field, editContext);
+      if (options.length > 0) {
+        const placeholder = field === 'salesOffice' ? '请选择营业所' : field === 'dealer' ? '请选择经销商' : '';
+        cell.innerHTML = `
+          <select class="qa-inline-input w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-sm text-[#1d2129] outline-none focus:border-brand" data-field="${field}">
+            ${this.renderInlineSelectOptions(options, rawValue === '-' ? '' : rawValue, placeholder)}
+          </select>
+        `;
+      } else if (field === 'aiJudgment') {
+        cell.innerHTML = `<textarea rows="2" class="qa-inline-input w-full min-w-[220px] rounded-lg border border-blue-100 bg-white px-2 py-1 text-sm leading-5 text-[#1d2129] outline-none focus:border-brand resize-none" data-field="${field}">${rawValue === '-' ? '' : rawValue}</textarea>`;
+      } else if (field === 'yearMonth') {
+        cell.innerHTML = `<input type="month" class="qa-inline-input w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-sm text-[#1d2129] outline-none focus:border-brand" data-field="${field}" value="${rawValue === '-' ? '' : rawValue}">`;
+      } else if (['quantity', 'amount', 'cost', 'retailPrice', 'exceptionCount'].includes(field)) {
+        cell.innerHTML = `<input type="number" step="0.01" class="qa-inline-input w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-sm text-[#1d2129] outline-none focus:border-brand" data-field="${field}" value="${rawValue === '-' ? '' : rawValue}">`;
+      } else {
+        cell.innerHTML = `<input class="qa-inline-input w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-sm text-[#1d2129] outline-none focus:border-brand" data-field="${field}" value="${rawValue === '-' ? '' : rawValue}">`;
+      }
+    });
+
+    const refreshOrgSelect = (field, options, placeholder) => {
+      const select = row.querySelector(`.qa-inline-input[data-field="${field}"]`);
+      if (!select) return;
+      select.innerHTML = this.renderInlineSelectOptions(options, '', placeholder);
+    };
+    row.querySelector('.qa-inline-input[data-field="headquarters"]')?.addEventListener('change', (event) => {
+      refreshOrgSelect('salesOffice', this.getInlineEditOptions('salesOffice', { headquarters: event.target.value }), '请选择营业所');
+      refreshOrgSelect('dealer', [], '请选择经销商');
+    });
+    row.querySelector('.qa-inline-input[data-field="salesOffice"]')?.addEventListener('change', (event) => {
+      const headquarters = row.querySelector('.qa-inline-input[data-field="headquarters"]')?.value || editContext.headquarters;
+      refreshOrgSelect('dealer', this.getInlineEditOptions('dealer', { headquarters, salesOffice: event.target.value }), '请选择经销商');
+    });
+
+    if (actionCell) {
+      actionCell.innerHTML = `
+        <div class="flex items-center gap-1">
+          <button type="button" class="qa-inline-save px-2 py-1 text-xs rounded text-green-600 hover:bg-green-50" title="保存">
+            <i class="fa-solid fa-check"></i>
+          </button>
+          <button type="button" class="qa-inline-cancel px-2 py-1 text-xs rounded text-[#86909c] hover:bg-gray-50" title="取消">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      `;
+      actionCell.querySelector('.qa-inline-cancel')?.addEventListener('click', () => {
+        row.innerHTML = originalHtml;
+        row.dataset.editing = 'false';
+        this.bindStandardPreviewEvents();
+        this.bindExceptionEvents();
+        this.bindQaInlineEditEvents();
+      });
+      actionCell.querySelector('.qa-inline-save')?.addEventListener('click', () => {
+        const values = {};
+        row.querySelectorAll('.qa-inline-input').forEach(input => {
+          values[input.dataset.field] = input.value.trim();
+        });
+        if (values.headquarters !== undefined && !values.salesOffice) {
+          if (typeof Dialog !== 'undefined') Dialog.toast('请选择营业所', 'warning');
+          return;
+        }
+        if (values.salesOffice !== undefined && !values.dealer) {
+          if (typeof Dialog !== 'undefined') Dialog.toast('请选择经销商', 'warning');
+          return;
+        }
+        editableCells.forEach((cell) => {
+          const field = cell.dataset.editField;
+          const value = values[field] || '-';
+          cell.dataset.editValue = value;
+          const displayValue = ['amount', 'cost', 'retailPrice'].includes(field) && value !== '-' && !String(value).startsWith('￥') ? `￥${value}` : value;
+          cell.innerHTML = field === 'storeName'
+            ? this.renderStorePreviewTrigger(button.dataset.scope, value, button.dataset.index, button.dataset.id)
+            : this.renderEditableText(displayValue, 'qa-inline-display', displayValue);
+        });
+        if (button.dataset.scope === 'exception') {
+          const target = this.data.find(item => item.id === button.dataset.id);
+          if (target) {
+            const relatedRows = this.data.filter(item => item.id === target.id || (target.storeCode && item.storeCode === target.storeCode));
+            Object.entries(values).forEach(([field, value]) => {
+              relatedRows.forEach((item) => {
+                if (field === 'yearMonth') item.yearMonth = value;
+                else if (field === 'workflowStatus') item.workflowStatus = value;
+                else if (field === 'mainConflictType') item.conflictType = value;
+                else if (field === 'headquarters') {
+                  item.headquarters = value;
+                  item.salesTeam = this.normalizeHeadquarterToTeam(value);
+                  item.region = this.normalizeHeadquarterToRegion(value);
+                }
+                else item[field] = value;
+              });
+            });
+          }
+          row.dataset.editing = 'false';
+          if (typeof Dialog !== 'undefined') Dialog.toast('已保存当前行', 'success');
+          this.renderExceptionTable();
+          return;
+        } else if (button.dataset.scope === 'standard') {
+          const target = this.standardData[Number(button.dataset.index)];
+          if (target) {
+            ['acc', 'dealer', 'storeCode', 'storeName', 'headquarters', 'salesOffice'].forEach(field => {
+              if (values[field] !== undefined) target[field] = values[field];
+            });
+            if (values.headquarters !== undefined) {
+              target.salesTeam = this.normalizeHeadquarterToTeam(values.headquarters);
+              target.region = this.normalizeHeadquarterToRegion(values.headquarters);
+            }
+          }
+        }
+        row.dataset.editing = 'false';
+        if (actionCell) {
+          const targetRow = button.dataset.scope === 'exception' ? this.data.find(item => item.id === button.dataset.id) : null;
+          actionCell.innerHTML = this.renderQaActionButtons({
+            scope: button.dataset.scope || '',
+            index: button.dataset.index || '',
+            id: button.dataset.id || '',
+            row: targetRow
+          });
+        }
+        if (typeof Dialog !== 'undefined') Dialog.toast('已保存当前行', 'success');
+        this.bindStandardPreviewEvents();
+        this.bindExceptionEvents();
+        this.bindQaInlineEditEvents();
+      });
+    }
+  },
+
+  bindQaInlineEditEvents() {
+    document.querySelectorAll('.qa-inline-edit-trigger').forEach((button) => {
+      if (button.dataset.boundInlineEdit === 'true') return;
+      button.dataset.boundInlineEdit = 'true';
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.enterQaInlineEdit(button);
+      });
+    });
+  },
+
+  getQaSearchFieldOptions() {
+    return [
+      { value: 'all', label: '全部' },
+      { value: 'acc', label: 'ACC' },
+      { value: 'storeName', label: '门店名称（客户名称）' },
+      { value: 'storeCode', label: '门店编码（客户编码）' },
+      { value: 'dealer', label: '经销商' }
+    ];
+  },
+
+  getQaSearchFieldLabel(value = this.searchField) {
+    return this.getQaSearchFieldOptions().find(option => option.value === value)?.label || '全部';
+  },
+
+  getQaSearchValue(row = {}, field = this.searchField) {
+    const values = {
+      acc: this.getQaAccName(row),
+      storeName: row.storeName || '',
+      storeCode: row.storeCode || '',
+      dealer: row.dealer || ''
+    };
+    return values[field] || '';
+  },
+
+  matchesQaSearch(row = {}) {
+    const keyword = (this.searchKeyword || '').trim().toLowerCase();
+    if (!keyword) return true;
+    if (this.searchField === 'all') {
+      return ['acc', 'storeName', 'storeCode', 'dealer']
+        .some(field => String(this.getQaSearchValue(row, field)).toLowerCase().includes(keyword));
+    }
+    return String(this.getQaSearchValue(row, this.searchField)).toLowerCase().includes(keyword);
+  },
+
+  renderQaSearchFieldDropdown() {
+    const dropdown = document.getElementById('qa-search-field-dropdown');
+    if (!dropdown) return;
+    dropdown.innerHTML = this.getQaSearchFieldOptions().map(option => `
+      <button type="button" data-qa-search-field="${option.value}"
+        class="qa-search-field-option w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${this.searchField === option.value ? 'bg-blue-50 text-brand font-medium' : 'text-[#4e5969] hover:bg-gray-50'}"
+        title="${option.label}">
+        ${option.label}
+      </button>
+    `).join('');
+  },
+
+  syncQaSearchControlUI() {
+    const label = document.getElementById('qa-search-field-label');
+    const button = document.getElementById('qa-search-field-btn');
+    const input = document.getElementById('qa-filter-filename');
+    const fieldLabel = this.getQaSearchFieldLabel();
+    if (label) label.textContent = fieldLabel;
+    if (button) button.title = fieldLabel;
+    if (input) input.value = this.searchKeyword || '';
+    this.renderQaSearchFieldDropdown();
   },
 
   renderStandardTable() {
@@ -356,21 +748,26 @@ const QAView = {
         }))
       );
       container.innerHTML = `
-        <div class="${modeClass}">
-          <table class="w-full table-fixed min-w-[1500px] text-left text-sm text-[#4e5969]">
+        <div class="${modeClass} flex min-h-0 flex-1 flex-col">
+          <div class="min-h-0 flex-1 overflow-auto">
+          <table class="w-full table-fixed min-w-[1560px] text-left text-sm text-[#4e5969]">
             <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
               <tr>
-                <th class="px-4 py-3 w-24 rounded-tl-lg">年月</th>
+                <th class="px-4 py-3 w-12 rounded-tl-lg">
+                  <input type="checkbox" id="qa-standard-select-all" class="rounded border-gray-300 text-brand focus:ring-brand">
+                </th>
+                <th class="px-4 py-3 w-24">年月</th>
                 <th class="px-4 py-3 w-20">ACC</th>
-                <th class="px-4 py-3 w-36">经销商名称</th>
-                <th class="px-4 py-3 w-28">门店编码</th>
-                <th class="px-4 py-3 w-44">门店名称</th>
+                <th class="px-4 py-3 w-36">经销商</th>
+                <th class="px-4 py-3 w-36">门店编码（客户编码）</th>
+                <th class="px-4 py-3 w-52">门店名称（客户名称）</th>
                 <th class="px-4 py-3 w-36">69码</th>
                 <th class="px-4 py-3 w-56">产品名称</th>
                 <th class="px-4 py-3 w-24">销售数量</th>
                 <th class="px-4 py-3 w-24">销售金额</th>
                 <th class="px-4 py-3 w-24">销售成本</th>
                 <th class="px-4 py-3 w-20">零售价</th>
+                <th class="px-4 py-3 w-24">状态</th>
                 <th class="px-4 py-3 w-64">AI判断</th>
                 <th class="px-4 py-3 w-24 rounded-tr-lg">操作</th>
               </tr>
@@ -378,29 +775,36 @@ const QAView = {
             <tbody class="divide-y divide-gray-100">
               ${detailRows.length === 0 ? `
                 <tr>
-                  <td colspan="13" class="px-4 py-16 text-center text-[#86909c]">
+                  <td colspan="15" class="px-4 py-16 text-center text-[#86909c]">
                     <i class="fa-regular fa-folder-open text-3xl mb-3 block text-gray-300"></i>
                     暂无符合条件的明细数据
                   </td>
                 </tr>
               ` : detailRows.map((item) => `
                 <tr class="hover:bg-slate-50 transition-colors">
+                  <td class="px-4 py-3">
+                    <input type="checkbox" class="row-cb-qa-standard rounded border-gray-300 text-brand focus:ring-brand" value="${item.storeCode}">
+                  </td>
                   <td class="px-4 py-3 whitespace-nowrap">${item.month}</td>
-                  <td class="px-4 py-3">${item.acc}</td>
-                  <td class="px-4 py-3 max-w-[150px] truncate" title="${item.dealer}">${item.dealer}</td>
-                  <td class="px-4 py-3 font-mono text-xs text-[#1d2129]">${item.storeCode}</td>
-                  <td class="px-4 py-3 max-w-[180px] truncate" title="${item.storeName}">${item.storeName}</td>
-                  <td class="px-4 py-3 font-mono text-xs">${item.barcode}</td>
-                  <td class="px-4 py-3 max-w-[240px] truncate ${item.changedFields.productName ? 'text-green-600 font-semibold' : ''}" title="${item.productName}">${item.productName}</td>
-                  <td class="px-4 py-3 text-right ${item.changedFields.quantity ? 'text-green-600 font-semibold' : ''}">${item.quantity}</td>
-                  <td class="px-4 py-3 text-right">￥${item.amount}</td>
-                  <td class="px-4 py-3 text-right">￥${item.cost}</td>
-                  <td class="px-4 py-3 text-right">￥${item.retailPrice}</td>
+                  ${this.renderQaEditableCell('acc', item.acc, 'px-4 py-3')}
+                  ${this.renderQaEditableCell('dealer', item.dealer, 'px-4 py-3 max-w-[150px] truncate', item.dealer)}
+                  ${this.renderQaEditableCell('storeCode', item.storeCode, 'px-4 py-3 font-mono text-xs text-[#1d2129]')}
+                  <td class="px-4 py-3 max-w-[180px]" data-edit-field="storeName" data-edit-value="${item.storeName}">
+                    <button type="button" class="qa-standard-preview-trigger max-w-full truncate text-brand hover:text-blue-700 hover:underline transition-colors text-left font-medium" data-index="${item.sourceIndex}" title="预览 ${item.storeName}">
+                      ${item.storeName}
+                    </button>
+                  </td>
+                  ${this.renderQaEditableCell('barcode', item.barcode, 'px-4 py-3 font-mono text-xs')}
+                  ${this.renderQaEditableCell('productName', item.productName, `px-4 py-3 max-w-[240px] truncate ${item.changedFields.productName ? 'text-green-600 font-semibold' : ''}`, item.productName)}
+                  ${this.renderQaEditableCell('quantity', item.quantity, `px-4 py-3 text-right ${item.changedFields.quantity ? 'text-green-600 font-semibold' : ''}`)}
+                  ${this.renderQaEditableCell('amount', item.amount, 'px-4 py-3 text-right')}
+                  ${this.renderQaEditableCell('cost', item.cost, 'px-4 py-3 text-right')}
+                  ${this.renderQaEditableCell('retailPrice', item.retailPrice, 'px-4 py-3 text-right')}
+                  <td class="px-4 py-3">${this.renderStandardStatusBadge(rows.find(({ index }) => index === item.sourceIndex)?.row || {})}</td>
                   <td class="px-4 py-3 max-w-xs truncate text-[#1d2129]" title="${item.aiNote}">${item.aiNote}</td>
                   <td class="px-4 py-3">
                     <div class="flex items-center gap-1">
-                      <button type="button" class="qa-detail-compare-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-index="${item.sourceIndex}" title="对比"><i class="fa-solid fa-code-compare"></i></button>
-                      <button type="button" class="px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50" title="编辑"><i class="fa-regular fa-pen-to-square"></i></button>
+                      <button type="button" class="qa-inline-edit-trigger px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50" data-scope="standard" data-index="${item.sourceIndex}" title="编辑"><i class="fa-regular fa-pen-to-square"></i></button>
                       <button type="button" class="px-2 py-1 text-xs rounded text-red-500 hover:bg-red-50" title="删除"><i class="fa-regular fa-trash-can"></i></button>
                     </div>
                   </td>
@@ -408,10 +812,13 @@ const QAView = {
               `).join('')}
             </tbody>
           </table>
+          </div>
+          ${this.renderQaTableSummary(rows.length)}
         </div>
       `;
-      this.updateStandardBatchButtons();
+      this.bindStandardSelectionEvents();
       this.bindStandardPreviewEvents();
+      this.bindQaInlineEditEvents();
       return;
     }
 
@@ -423,63 +830,62 @@ const QAView = {
         : confidenceValue >= 70
         ? 'bg-green-50 text-green-700 border-green-100'
         : 'bg-orange-50 text-orange-700 border-orange-100';
+      const headquarter = this.getHeadquarter(row);
       return `
         <tr class="hover:bg-slate-50 transition-colors">
           <td class="px-4 py-3">
-            <input type="checkbox" class="row-cb-qa-standard rounded border-gray-300 text-brand focus:ring-brand" value="${index}">
+            <input type="checkbox" class="row-cb-qa-standard rounded border-gray-300 text-brand focus:ring-brand" value="${row.storeCode}">
           </td>
-          <td class="px-4 py-3">
+          <td class="px-4 py-3" data-edit-field="storeName" data-edit-value="${row.storeName}">
             <button type="button" class="qa-standard-preview-trigger font-medium text-brand flex items-center gap-2 hover:text-blue-700 hover:underline transition-colors" data-index="${index}" title="预览 ${row.storeName}">
               <i class="fa-solid fa-store text-brand"></i>
               <span class="truncate max-w-[176px]">${row.storeName}</span>
             </button>
           </td>
-          <td class="px-4 py-3 font-mono text-[#1d2129]">${row.storeCode}</td>
+          ${this.renderQaEditableCell('storeCode', row.storeCode, 'px-4 py-3 font-mono text-[#1d2129]')}
           <td class="px-4 py-3">
             <span class="px-2.5 py-1 rounded-full text-xs font-semibold border ${confidenceClass}">${confidenceLabel}</span>
           </td>
+          <td class="px-4 py-3">${this.renderStandardStatusBadge(row)}</td>
           <td class="px-4 py-3 min-w-64">
             <div class="max-w-sm truncate" title="${row.aiNote}">${row.aiNote}</div>
           </td>
-          <td class="px-4 py-3 max-w-[160px] truncate" title="${row.salesTeam}">${row.salesTeam}</td>
-          <td class="px-4 py-3 max-w-[120px] truncate" title="${row.region}">${row.region}</td>
-          <td class="px-4 py-3 max-w-[160px] truncate" title="${row.salesOffice}">${row.salesOffice}</td>
-          <td class="px-4 py-3 max-w-[180px] truncate" title="${row.dealer}">${row.dealer}</td>
+          ${this.renderQaEditableCell('acc', this.getQaAccName(row, index), 'px-4 py-3 max-w-[120px] truncate', this.getQaAccName(row, index))}
+          ${this.renderQaEditableCell('headquarters', headquarter, 'px-4 py-3 max-w-[160px] truncate', headquarter)}
+          ${this.renderQaEditableCell('salesOffice', row.salesOffice, 'px-4 py-3 max-w-[160px] truncate', row.salesOffice)}
+          ${this.renderQaEditableCell('dealer', row.dealer, 'px-4 py-3 max-w-[180px] truncate', row.dealer)}
           <td class="px-4 py-3">
-            <div class="flex items-center gap-1">
-              <button type="button" class="qa-standard-detail-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-index="${index}" title="单据详情">
-                <i class="fa-solid fa-list-check"></i>
-              </button>
-              <button class="px-2 py-1 text-xs rounded text-red-500 hover:bg-red-50" title="删除"><i class="fa-regular fa-trash-can"></i></button>
-            </div>
+            ${this.renderQaActionButtons({ scope: 'standard', index })}
           </td>
         </tr>
       `;
     }).join('');
 
     container.innerHTML = `
-      <div class="${modeClass}">
-        <table class="w-full table-fixed min-w-[1300px] text-left text-sm text-[#4e5969]">
+      <div class="${modeClass} flex min-h-0 flex-1 flex-col">
+        <div class="min-h-0 flex-1 overflow-auto">
+        <table class="w-full table-fixed min-w-[1360px] text-left text-sm text-[#4e5969]">
           <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
             <tr>
               <th class="px-4 py-3 w-12 rounded-tl-lg">
                 <input type="checkbox" id="qa-standard-select-all" class="rounded border-gray-300 text-brand focus:ring-brand">
               </th>
-              <th class="px-4 py-3 w-48">门店名称</th>
-              <th class="px-4 py-3 w-28">门店编码</th>
+              <th class="px-4 py-3 w-56">门店名称（客户名称）</th>
+              <th class="px-4 py-3 w-36">门店编码（客户编码）</th>
               <th class="px-4 py-3 w-20">置信度</th>
+              <th class="px-4 py-3 w-36">状态</th>
               <th class="px-4 py-3 w-64">AI判断</th>
-              <th class="px-4 py-3 w-36">所属营业Team</th>
-              <th class="px-4 py-3 w-28">所属区域</th>
-              <th class="px-4 py-3 w-36">所属营业所</th>
-              <th class="px-4 py-3 w-36">所属经销商</th>
+              <th class="px-4 py-3 w-28">ACC</th>
+              <th class="px-4 py-3 w-36">本部</th>
+              <th class="px-4 py-3 w-36">营业所</th>
+              <th class="px-4 py-3 w-36">经销商</th>
               <th class="px-4 py-3 w-24 rounded-tr-lg">操作</th>
             </tr>
           </thead>
           <tbody id="qa-standard-tbody" class="divide-y divide-gray-100">
             ${rows.length === 0 ? `
               <tr>
-                <td colspan="10" class="px-4 py-16 text-center text-[#86909c]">
+                <td colspan="11" class="px-4 py-16 text-center text-[#86909c]">
                   <i class="fa-regular fa-folder-open text-3xl mb-3 block text-gray-300"></i>
                   暂无符合条件的标准POS表数据
                 </td>
@@ -487,10 +893,13 @@ const QAView = {
             ` : tableRows}
           </tbody>
         </table>
+        </div>
+        ${this.renderQaTableSummary(rows.length)}
       </div>
     `;
     this.bindStandardSelectionEvents();
     this.bindStandardPreviewEvents();
+    this.bindQaInlineEditEvents();
   },
 
   getAiChangedFields(row) {
@@ -521,7 +930,6 @@ const QAView = {
           <td class="px-4 py-3 font-mono text-[#1d2129]">-</td>
           <td class="px-4 py-3 min-w-64"><div class="max-w-sm truncate" title="${fixedAiNote}">${fixedAiNote}</div></td>
           <td class="px-4 py-3 max-w-[160px] text-[#86909c]">-</td>
-          <td class="px-4 py-3 max-w-[120px] text-[#86909c]">-</td>
           <td class="px-4 py-3 max-w-[160px] text-[#86909c]">-</td>
           <td class="px-4 py-3 max-w-[180px] text-[#86909c]">-</td>
           <td class="px-4 py-3 text-[#d1d5db]">-</td>
@@ -531,24 +939,23 @@ const QAView = {
 
     container.innerHTML = `
       <div class="animate-[fadeIn_0.22s_ease-out]">
-        <table class="w-full table-fixed min-w-[1260px] text-left text-sm text-[#4e5969]">
+        <table class="w-full table-fixed min-w-[1160px] text-left text-sm text-[#4e5969]">
           <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
             <tr>
               <th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="qa-stash-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>
-              <th class="px-4 py-3 w-48">门店名称</th>
-              <th class="px-4 py-3 w-28">门店编码</th>
+              <th class="px-4 py-3 w-56">门店名称（客户名称）</th>
+              <th class="px-4 py-3 w-36">门店编码（客户编码）</th>
               <th class="px-4 py-3 w-64">AI判断</th>
-              <th class="px-4 py-3 w-36">所属营业Team</th>
-              <th class="px-4 py-3 w-28">所属区域</th>
-              <th class="px-4 py-3 w-36">所属营业所</th>
-              <th class="px-4 py-3 w-36">所属经销商</th>
+              <th class="px-4 py-3 w-36">本部</th>
+              <th class="px-4 py-3 w-36">营业所</th>
+              <th class="px-4 py-3 w-36">经销商</th>
               <th class="px-4 py-3 w-20 rounded-tr-lg">操作</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
             ${rows.length === 0 ? `
               <tr>
-                <td colspan="9" class="px-4 py-16 text-center text-[#86909c]">
+                <td colspan="8" class="px-4 py-16 text-center text-[#86909c]">
                   <i class="fa-regular fa-folder-open text-3xl mb-3 block text-gray-300"></i>
                   暂无暂存数据
                 </td>
@@ -590,6 +997,7 @@ const QAView = {
     return this.standardData
       .map((row, index) => ({ row, index }))
       .filter(({ row }) => {
+        if (!this.matchesQaSearch(row)) return false;
         if (this.hierarchyFilter.teams.length > 0 && !this.hierarchyFilter.teams.includes(row.salesTeam)) {
           return false;
         }
@@ -610,12 +1018,135 @@ const QAView = {
         if (this.confidenceFilter.preset === 'low') {
           return confidence < 70;
         }
+        if (this.standardStatusFilter && this.getStandardStatus(row) !== this.standardStatusFilter) {
+          return false;
+        }
         return true;
       });
   },
 
+  getStandardStatus(row = {}) {
+    return this.approvedStandardStoreCodes.has(row.storeCode) ? '已通过' : '待通过';
+  },
+
+  renderStandardStatusBadge(row = {}) {
+    const status = this.getStandardStatus(row);
+    const className = status === '已通过'
+      ? 'bg-green-50 text-green-700 border-green-100'
+      : 'bg-amber-50 text-amber-700 border-amber-100';
+    return `<span class="inline-flex h-6 min-w-[56px] items-center justify-center whitespace-nowrap rounded-full border px-2 text-xs font-semibold leading-none ${className}">${status}</span>`;
+  },
+
+  getCurrentQaActorType() {
+    const state = typeof Store !== 'undefined' ? Store.getState() : {};
+    const roleName = state.userRole || '';
+    const userName = state.userName || '';
+    const roleByName = typeof SettingsView !== 'undefined'
+      ? SettingsView.roles?.find((role) => role.name === roleName)
+      : null;
+    if (roleByName?.dataScope === '全部数据') return 'pos';
+    if (roleByName?.dataScope === '按组织范围') return 'sales';
+    if (/POS|系统管理员|管理员/.test(roleName)) return 'pos';
+    const matchedUser = typeof SettingsView !== 'undefined'
+      ? SettingsView.users?.find((user) => user.role === roleName || user.name === userName || user.name?.startsWith(userName))
+      : null;
+    const matchedRole = typeof SettingsView !== 'undefined'
+      ? SettingsView.roles?.find((role) => role.name === matchedUser?.role)
+      : null;
+    if (matchedRole?.dataScope === '全部数据') return 'pos';
+    if (matchedRole?.dataScope === '按组织范围') return 'sales';
+    return 'sales';
+  },
+
+  isPosActor() {
+    return this.getCurrentQaActorType() === 'pos';
+  },
+
   getExceptionStatus(row) {
-    return this.rejectedStoreCodes.has(row.storeCode) ? '已驳回' : '待处理';
+    if (row?.workflowStatus) return row.workflowStatus;
+    if (this.rejectedStoreCodes.has(row.storeCode)) return '营业担当处理中';
+    return '待处理';
+  },
+
+  getExceptionStatusBadge(status) {
+    const classMap = {
+      待处理: 'bg-orange-50 text-orange-600 border-orange-100',
+      营业担当处理中: 'bg-blue-50 text-brand border-blue-100',
+      POS担当待处理: 'bg-violet-50 text-violet-700 border-violet-100',
+      已通过: 'bg-green-50 text-green-700 border-green-100'
+    };
+    return `<span class="inline-flex h-6 min-w-[72px] items-center justify-center rounded-full border px-2 text-xs font-semibold whitespace-nowrap ${classMap[status] || classMap.待处理}">${status}</span>`;
+  },
+
+  getExceptionActions(row = {}) {
+    const status = this.getExceptionStatus(row);
+    const isPos = this.isPosActor();
+    if (status === '已通过') {
+      return { canEdit: false, buttons: [] };
+    }
+    if (isPos && status === '待处理') {
+      return {
+        canEdit: true,
+        buttons: [
+          { action: 'reject', title: '驳回给营业', icon: 'fa-solid fa-reply', className: 'text-red-500 hover:bg-red-50' },
+          { action: 'approve', title: '通过', icon: 'fa-solid fa-check', className: 'text-green-600 hover:bg-green-50' }
+        ]
+      };
+    }
+    if (isPos && status === '营业担当处理中') {
+      return {
+        canEdit: true,
+        buttons: [
+          { action: 'reject-disabled', title: '等待营业担当提交处理结果', icon: 'fa-solid fa-reply', className: 'text-gray-300 cursor-not-allowed', disabled: true }
+        ]
+      };
+    }
+    if (isPos && status === 'POS担当待处理') {
+      return {
+        canEdit: true,
+        buttons: [
+          { action: 'reject', title: '再次驳回给营业', icon: 'fa-solid fa-reply', className: 'text-red-500 hover:bg-red-50' },
+          { action: 'approve', title: '通过', icon: 'fa-solid fa-check', className: 'text-green-600 hover:bg-green-50' }
+        ]
+      };
+    }
+    if (!isPos && status === '营业担当处理中') {
+      return {
+        canEdit: true,
+        buttons: [
+          { action: 'submit-sales-result', title: '通过', icon: 'fa-solid fa-check', className: 'text-green-600 hover:bg-green-50' }
+        ]
+      };
+    }
+    return { canEdit: status !== '已通过', buttons: [] };
+  },
+
+  canSelectExceptionRow(row = {}) {
+    const status = this.getExceptionStatus(row);
+    const isPos = this.isPosActor();
+    if (isPos) return status === '待处理' || status === 'POS担当待处理';
+    return status === '营业担当处理中';
+  },
+
+  getExceptionSelectionReason(row = {}) {
+    const status = this.getExceptionStatus(row);
+    if (this.canSelectExceptionRow(row)) return '可选择后点击通过';
+    if (status === '营业担当处理中' && this.isPosActor()) return '等待营业担当处理';
+    if (status === '待处理' && !this.isPosActor()) return '等待POS担当处理';
+    if (status === 'POS担当待处理' && !this.isPosActor()) return '等待POS担当复核';
+    if (status === '已通过') return '已通过，仅可查看';
+    return '当前账号不可处理该状态';
+  },
+
+  updateExceptionStoreStatus(row, status, patch = {}) {
+    this.data.forEach((item) => {
+      const sameStore = row.storeCode
+        ? item.storeCode === row.storeCode
+        : item.id === row.id;
+      if (!sameStore) return;
+      item.workflowStatus = status;
+      Object.assign(item, patch);
+    });
   },
 
   getRejectTeam(row) {
@@ -623,10 +1154,7 @@ const QAView = {
     return matched?.salesTeam || `${row.acc || '营业'} Team`;
   },
 
-  renderExceptionTable() {
-    const tbody = document.getElementById('qa-tbody');
-    if (!tbody) return;
-    
+  getFilteredExceptionData() {
     let filteredData = this.exceptionTypeFilter
       ? this.data.filter(row => row.conflictType === this.exceptionTypeFilter)
       : this.data;
@@ -634,57 +1162,191 @@ const QAView = {
     if (this.statusFilter) {
       filteredData = filteredData.filter(row => this.getExceptionStatus(row) === this.statusFilter);
     }
-    
-    tbody.innerHTML = filteredData.map(row => {
+    filteredData = filteredData.filter(row => this.matchesQaSearch(row));
+    return filteredData;
+  },
+
+  getGroupedExceptionRows(rows = []) {
+    const groups = new Map();
+    rows.forEach((row) => {
+      const key = row.storeCode || row.storeName || row.id;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    });
+
+    return Array.from(groups.values()).map((items) => {
+      const first = items[0] || {};
+      const matched = this.standardData.find((item) => item.storeCode === first.storeCode || item.storeName === first.storeName) || {};
+      const typeCounts = items.reduce((acc, item) => {
+        const type = item.conflictType || '异常';
+        acc[type] = (acc[type] || 0) + 1;
+        return acc;
+      }, {});
+      const mainType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || first.conflictType || '-';
+      return {
+        ...first,
+        exceptionCount: items.length,
+        mainConflictType: mainType,
+        aiJudgment: first.aiJudgment || '-',
+        salesTeam: matched.salesTeam || this.getRejectTeam(first),
+        region: matched.region || `${first.acc || '所属'}区域`,
+        salesOffice: matched.salesOffice || '-',
+        dealer: matched.dealer || first.dealer || '-',
+        representativeId: first.id
+      };
+    });
+  },
+
+  renderExceptionDetailRows(filteredData) {
+    return filteredData.map(row => {
       const conflictType = row.conflictType || '';
       const aiJudgment = row.aiJudgment || '';
       const status = this.getExceptionStatus(row);
-      const isRejected = status === '已驳回';
+      const selectable = this.canSelectExceptionRow(row);
       return `
         <tr class="hover:bg-slate-50 transition-colors">
-          <td class="px-4 py-3"><input type="checkbox" class="row-cb-qa rounded border-gray-300 text-brand focus:ring-brand" value="${row.id}"></td>
-          <td class="px-4 py-3 whitespace-nowrap">${row.yearMonth || '-'}</td>
-          <td class="px-4 py-3 max-w-[80px] truncate" title="${row.acc || ''}">${row.acc || '-'}</td>
-          <td class="px-4 py-3 max-w-[140px] truncate" title="${row.dealer || ''}">${row.dealer || '-'}</td>
-          <td class="px-4 py-3 font-mono text-xs">${row.storeCode || '-'}</td>
-          <td class="px-4 py-3 max-w-[140px]">
+          <td class="px-4 py-3"><input type="checkbox" class="row-cb-qa rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" value="${row.id}" data-status="${status}" title="${this.getExceptionSelectionReason(row)}" ${selectable ? '' : 'disabled'}></td>
+          ${this.renderQaEditableCell('yearMonth', row.yearMonth || '-', 'px-4 py-3 whitespace-nowrap')}
+          ${this.renderQaEditableCell('acc', this.getQaAccName(row), 'px-4 py-3 max-w-[120px] truncate', this.getQaAccName(row))}
+          ${this.renderQaEditableCell('dealer', row.dealer || '-', 'px-4 py-3 max-w-[140px] truncate', row.dealer || '')}
+          ${this.renderQaEditableCell('storeCode', row.storeCode || '-', 'px-4 py-3 font-mono text-xs')}
+          <td class="px-4 py-3 max-w-[140px]" data-edit-field="storeName" data-edit-value="${row.storeName || ''}">
             <button type="button" class="qa-exception-preview-trigger max-w-full truncate text-brand hover:text-blue-700 hover:underline transition-colors text-left" data-id="${row.id}" title="预览 ${row.storeName || ''}">${row.storeName || '-'}</button>
           </td>
-          <td class="px-4 py-3 font-mono text-xs">${row.barcode || '-'}</td>
-          <td class="px-4 py-3 max-w-xs truncate" title="${row.productName || ''}">${row.productName || '-'}</td>
-          <td class="px-4 py-3 text-right">${row.quantity || '-'}</td>
-          <td class="px-4 py-3 text-right">${row.amount ? '￥' + Number(row.amount).toFixed(2) : '-'}</td>
-          <td class="px-4 py-3 text-right">${row.cost ? '￥' + Number(row.cost).toFixed(2) : '-'}</td>
-          <td class="px-4 py-3 text-right">${row.retailPrice ? '￥' + Number(row.retailPrice).toFixed(2) : '-'}</td>
-          <td class="px-4 py-3">
-            <span class="px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${isRejected ? 'bg-gray-100 text-[#86909c]' : 'bg-orange-50 text-orange-600'}">${status}</span>
+          ${this.renderQaEditableCell('barcode', row.barcode || '-', 'px-4 py-3 font-mono text-xs')}
+          ${this.renderQaEditableCell('productName', row.productName || '-', 'px-4 py-3 max-w-xs truncate', row.productName || '')}
+          ${this.renderQaEditableCell('quantity', row.quantity || '-', 'px-4 py-3 text-right')}
+          ${this.renderQaEditableCell('amount', row.amount ? Number(row.amount).toFixed(2) : '-', 'px-4 py-3 text-right')}
+          ${this.renderQaEditableCell('cost', row.cost ? Number(row.cost).toFixed(2) : '-', 'px-4 py-3 text-right')}
+          ${this.renderQaEditableCell('retailPrice', row.retailPrice ? Number(row.retailPrice).toFixed(2) : '-', 'px-4 py-3 text-right')}
+          <td class="px-4 py-3" data-edit-field="workflowStatus" data-edit-value="${status}">
+            ${this.getExceptionStatusBadge(status)}
           </td>
-          <td class="px-4 py-3">
+          <td class="px-4 py-3" data-edit-field="conflictType" data-edit-value="${conflictType}">
             <span class="px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-700 border border-red-200 whitespace-nowrap">${conflictType}</span>
           </td>
-          <td class="px-4 py-3 text-xs max-w-xs truncate" title="${aiJudgment}">${aiJudgment || '-'}</td>
+          <td class="px-4 py-3 text-xs max-w-xs truncate" data-edit-field="aiJudgment" data-edit-value="${aiJudgment}" title="${aiJudgment}">${aiJudgment || '-'}</td>
           <td class="px-4 py-3">
-            <div class="flex items-center gap-1">
-              <button class="px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 action-btn" data-action="edit" data-id="${row.id}" title="编辑">
-                <i class="fa-regular fa-pen-to-square"></i>
-              </button>
-              <button class="px-2 py-1 text-xs rounded action-btn ${isRejected ? 'text-gray-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-50'}" data-action="reject" data-id="${row.id}" title="${isRejected ? '已驳回' : '驳回'}" ${isRejected ? 'disabled' : ''}>
-                <i class="fa-solid fa-reply"></i>
-              </button>
-              <button class="px-2 py-1 text-xs rounded text-green-600 hover:bg-green-50 action-btn" data-action="approve" data-id="${row.id}" title="通过">
-                <i class="fa-solid fa-check"></i>
-              </button>
-              <button class="px-2 py-1 text-xs rounded text-[#86909c] hover:bg-gray-50 action-btn" data-action="delete" data-id="${row.id}" title="删除">
-                <i class="fa-regular fa-trash-can"></i>
-              </button>
-            </div>
+            ${this.renderQaActionButtons({ scope: 'exception', id: row.id, row })}
           </td>
         </tr>
       `;
     }).join('');
+  },
+
+  renderExceptionFileRows(groupedRows) {
+    return groupedRows.map((row) => {
+      const status = this.getExceptionStatus(row);
+      const headquarter = this.getHeadquarter(row);
+      const selectable = this.canSelectExceptionRow(row);
+      return `
+        <tr class="hover:bg-slate-50 transition-colors">
+          <td class="px-4 py-3"><input type="checkbox" class="row-cb-qa rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" value="${row.representativeId}" data-status="${status}" title="${this.getExceptionSelectionReason(row)}" ${selectable ? '' : 'disabled'}></td>
+          <td class="px-4 py-3" data-edit-field="storeName" data-edit-value="${row.storeName || ''}">
+            <button type="button" class="qa-exception-preview-trigger font-medium text-brand flex items-center gap-2 hover:text-blue-700 hover:underline transition-colors text-left" data-id="${row.representativeId}" title="预览 ${row.storeName || ''}">
+              <i class="fa-solid fa-store text-brand"></i>
+              <span class="truncate max-w-[176px]">${row.storeName || '-'}</span>
+            </button>
+          </td>
+          ${this.renderQaEditableCell('storeCode', row.storeCode || '-', 'px-4 py-3 font-mono text-xs text-[#1d2129]')}
+          <td class="px-4 py-3 text-center">
+            <span class="inline-flex h-6 min-w-[40px] items-center justify-center rounded-full bg-red-50 px-2 text-xs font-semibold text-red-600">${row.exceptionCount}</span>
+          </td>
+          <td class="px-4 py-3" data-edit-field="mainConflictType" data-edit-value="${row.mainConflictType || ''}">
+            <span class="px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-700 border border-red-200 whitespace-nowrap">${row.mainConflictType}</span>
+          </td>
+          <td class="px-4 py-3 min-w-64" data-edit-field="aiJudgment" data-edit-value="${row.aiJudgment || ''}">
+            <div class="max-w-sm truncate" title="${row.aiJudgment || ''}">${row.aiJudgment || '-'}</div>
+          </td>
+          ${this.renderQaEditableCell('acc', this.getQaAccName(row), 'px-4 py-3 max-w-[120px] truncate', this.getQaAccName(row))}
+          ${this.renderQaEditableCell('headquarters', headquarter, 'px-4 py-3 max-w-[160px] truncate', headquarter)}
+          ${this.renderQaEditableCell('salesOffice', row.salesOffice, 'px-4 py-3 max-w-[160px] truncate', row.salesOffice)}
+          ${this.renderQaEditableCell('dealer', row.dealer, 'px-4 py-3 max-w-[180px] truncate', row.dealer)}
+          <td class="px-4 py-3" data-edit-field="workflowStatus" data-edit-value="${status}">
+            ${this.getExceptionStatusBadge(status)}
+          </td>
+          <td class="px-4 py-3">
+            ${this.renderQaActionButtons({ scope: 'exception', id: row.representativeId, row })}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  },
+
+  renderExceptionTable() {
+    const container = document.getElementById('qa-exception-container');
+    if (!container) return;
+
+    const filteredData = this.getFilteredExceptionData();
+    const isDetailMode = this.exceptionDisplayMode === 'detail';
+    const groupedRows = this.getGroupedExceptionRows(filteredData);
+    const displayCount = isDetailMode ? filteredData.length : groupedRows.length;
+
+    container.innerHTML = isDetailMode ? `
+      <div class="flex-1 min-h-0 overflow-auto">
+        <table class="w-full table-fixed min-w-[1640px] text-left text-sm text-[#4e5969]">
+          <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
+            <tr>
+              <th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="qa-exception-select-all" class="rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40"></th>
+              <th class="px-4 py-3 w-24">年月</th>
+              <th class="px-4 py-3 w-20">ACC</th>
+              <th class="px-4 py-3 w-36">经销商</th>
+              <th class="px-4 py-3 w-36">门店编码（客户编码）</th>
+              <th class="px-4 py-3 w-52">门店名称（客户名称）</th>
+              <th class="px-4 py-3 w-32">69 码</th>
+              <th class="px-4 py-3 w-48">产品名称</th>
+              <th class="px-4 py-3 w-20">销售数量</th>
+              <th class="px-4 py-3 w-24">销售金额</th>
+              <th class="px-4 py-3 w-24">销售成本</th>
+              <th class="px-4 py-3 w-20">零售价</th>
+              <th class="px-4 py-3 w-36">状态</th>
+              <th class="px-4 py-3 w-24">异常类型</th>
+              <th class="px-4 py-3 w-64">AI判断</th>
+              <th class="px-4 py-3 w-40 rounded-tr-lg">操作</th>
+            </tr>
+          </thead>
+          <tbody id="qa-tbody" class="divide-y divide-gray-100">
+            ${filteredData.length === 0 ? `
+              <tr><td colspan="16" class="px-4 py-16 text-center text-[#86909c]"><i class="fa-regular fa-folder-open text-3xl mb-3 block text-gray-300"></i>暂无符合条件的异常数据</td></tr>
+            ` : this.renderExceptionDetailRows(filteredData)}
+          </tbody>
+        </table>
+      </div>
+      ${this.renderQaTableSummary(displayCount)}
+    ` : `
+      <div class="flex-1 min-h-0 overflow-auto">
+        <table class="w-full table-fixed min-w-[1500px] text-left text-sm text-[#4e5969]">
+          <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
+            <tr>
+              <th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="qa-exception-select-all" class="rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40"></th>
+              <th class="px-4 py-3 w-56">门店名称（客户名称）</th>
+              <th class="px-4 py-3 w-36">门店编码（客户编码）</th>
+              <th class="px-4 py-3 w-20">异常数</th>
+              <th class="px-4 py-3 w-28">主要异常类型</th>
+              <th class="px-4 py-3 w-64">AI判断</th>
+              <th class="px-4 py-3 w-28">ACC</th>
+              <th class="px-4 py-3 w-36">本部</th>
+              <th class="px-4 py-3 w-36">营业所</th>
+              <th class="px-4 py-3 w-36">经销商</th>
+              <th class="px-4 py-3 w-36">状态</th>
+              <th class="px-4 py-3 w-32 rounded-tr-lg">操作</th>
+            </tr>
+          </thead>
+          <tbody id="qa-tbody" class="divide-y divide-gray-100">
+            ${groupedRows.length === 0 ? `
+              <tr><td colspan="12" class="px-4 py-16 text-center text-[#86909c]"><i class="fa-regular fa-folder-open text-3xl mb-3 block text-gray-300"></i>暂无符合条件的异常文件数据</td></tr>
+            ` : this.renderExceptionFileRows(groupedRows)}
+          </tbody>
+        </table>
+      </div>
+      ${this.renderQaTableSummary(displayCount)}
+    `;
     
     this.bindTableEvents();
     this.bindExceptionEvents();
+    this.bindExceptionSelectionEvents();
+    this.bindQaInlineEditEvents();
+    this.updateExceptionDisplayToggle();
   },
   
   bindTableEvents() {
@@ -713,7 +1375,7 @@ const QAView = {
       const price = [1.8, 4.5, 3.9, 5.2, 6.8, 7.5, 6.2, 8.9][index % 8];
       return {
         month: '2026年05月',
-        acc: index === 0 ? '其他' : row.region.replace('区域', ''),
+        acc: this.getQaAccName(row, index),
         dealer: row.dealer,
         storeCode: row.storeCode,
         storeName: row.storeName,
@@ -746,12 +1408,40 @@ const QAView = {
     });
   },
 
+  getExceptionPreviewRows(exceptionRow) {
+    const matched = this.standardData.find((item) => item.storeCode === exceptionRow.storeCode || item.storeName === exceptionRow.storeName) || {
+      storeName: exceptionRow.storeName,
+      storeCode: exceptionRow.storeCode,
+      confidence: '98%',
+      dealer: exceptionRow.dealer,
+      salesTeam: this.getRejectTeam(exceptionRow),
+      region: `${exceptionRow.acc || '华北'}区域`,
+      salesOffice: '-'
+    };
+    const rows = this.getStandardPreviewRows(matched);
+    const conflictType = exceptionRow.conflictType || '异常';
+    const judgment = exceptionRow.aiJudgment || '异常数据待处理';
+    return rows.map((item, index) => {
+      if (index !== 0) return { ...item, remark: conflictType };
+      return {
+        ...item,
+        productName: exceptionRow.productName || item.productName,
+        barcode: exceptionRow.barcode || item.barcode,
+        quantity: exceptionRow.quantity || item.quantity,
+        amount: exceptionRow.amount || item.amount,
+        cost: exceptionRow.cost || item.cost,
+        retailPrice: exceptionRow.retailPrice || item.retailPrice,
+        remark: `${conflictType}：${judgment}`
+      };
+    });
+  },
+
   renderPreviewTable(headers, rows, editable = false) {
     return `
-      <table class="w-full min-w-[1180px] text-xs text-center border-collapse bg-white">
-        <thead class="sticky top-0 z-10">
+      <table class="w-full min-w-[1180px] text-xs text-center border-separate border-spacing-0 bg-white">
+        <thead>
           <tr>
-            ${headers.map((header) => `<th class="px-3 py-2 border border-gray-300 bg-[#f7f8fa] text-[#1d2129] font-semibold whitespace-nowrap">${header}</th>`).join('')}
+            ${headers.map((header) => `<th class="sticky top-0 z-20 px-3 py-2 border-b border-r border-gray-300 bg-[#f7f8fa] text-[#1d2129] font-semibold whitespace-nowrap shadow-[0_1px_0_rgba(148,163,184,0.35)] first:border-l">${header}</th>`).join('')}
           </tr>
         </thead>
         <tbody>
@@ -781,11 +1471,95 @@ const QAView = {
     const baseClass = `px-3 py-2 border border-gray-200 bg-white min-w-24 ${extraClass}`;
     const displayValue = value || '<span class="text-red-500">空</span>';
     if (!editable) return `<td class="${baseClass}">${displayValue}</td>`;
-    return `<td contenteditable="true" class="${baseClass} focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand">${value}</td>`;
+    return `<td data-preview-editable="true" class="${baseClass}">${value || ''}</td>`;
   },
 
   renderEditablePreviewCell(value, extraClass = '') {
-    return `<td contenteditable="true" class="px-3 py-2 border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand min-w-28 ${extraClass}">${value}</td>`;
+    return `<td data-preview-editable="true" class="px-3 py-2 border border-gray-200 bg-white min-w-28 ${extraClass}">${value || ''}</td>`;
+  },
+
+  bindQaPreviewEditControls(overlay, options = {}) {
+    const editBtn = overlay.querySelector('#qa-standard-preview-edit');
+    const editableCells = Array.from(overlay.querySelectorAll('[data-preview-editable="true"]'));
+    let isEditing = false;
+    let savedSnapshot = JSON.stringify(editableCells.map(cell => (cell.textContent || '').trim()));
+
+    const syncDirty = () => {
+      const current = JSON.stringify(editableCells.map(cell => (cell.textContent || '').trim()));
+      overlay.dataset.previewDirty = current === savedSnapshot ? 'false' : 'true';
+    };
+
+    const setEditing = (nextEditing) => {
+      isEditing = nextEditing;
+      if (editBtn) {
+        editBtn.title = isEditing ? '保存' : '编辑';
+        editBtn.classList.toggle('bg-blue-50', isEditing);
+        const icon = editBtn.querySelector('i');
+        if (icon) icon.className = isEditing ? 'fa-solid fa-check' : 'fa-solid fa-pen-to-square';
+      }
+      editableCells.forEach(cell => {
+        cell.contentEditable = isEditing ? 'true' : 'false';
+        cell.classList.toggle('qa-preview-cell-editing', isEditing);
+      });
+      if (isEditing) editableCells[0]?.focus();
+    };
+
+    const saveEdits = () => {
+      setEditing(false);
+      savedSnapshot = JSON.stringify(editableCells.map(cell => (cell.textContent || '').trim()));
+      overlay.dataset.previewDirty = 'false';
+      options.onSave?.();
+      if (typeof Dialog !== 'undefined') Dialog.toast(options.successMessage || '预览数据已保存', 'success');
+    };
+
+    editBtn?.addEventListener('click', () => {
+      if (!isEditing) {
+        setEditing(true);
+        return;
+      }
+      saveEdits();
+    });
+
+    editableCells.forEach(cell => {
+      cell.addEventListener('input', syncDirty);
+      cell.addEventListener('blur', syncDirty);
+    });
+
+    const showUnsavedConfirm = (onDiscard) => {
+      const existing = document.querySelector('.qa-preview-unsaved-confirm');
+      if (existing) existing.remove();
+      const confirm = document.createElement('div');
+      confirm.className = 'qa-preview-unsaved-confirm fixed inset-0 z-[10002] flex items-center justify-center bg-slate-900/35 backdrop-blur-sm px-6';
+      confirm.innerHTML = `
+        <div class="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl">
+          <div class="px-6 py-4 border-b border-gray-100"><h3 class="text-base font-bold text-[#1d2129]">存在未保存修改</h3></div>
+          <div class="px-6 py-5 text-sm leading-6 text-[#4e5969]">当前预览数据已修改但尚未保存，是否放弃修改并关闭？</div>
+          <div class="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+            <button type="button" class="qa-preview-keep px-4 py-2 rounded-lg text-sm text-[#4e5969] bg-white border border-gray-200 hover:bg-gray-50 transition-colors">继续编辑</button>
+            <button type="button" class="qa-preview-discard px-4 py-2 rounded-lg text-sm text-white bg-red-500 hover:bg-red-600 transition-colors shadow-sm">放弃修改</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(confirm);
+      confirm.querySelector('.qa-preview-keep')?.addEventListener('click', () => confirm.remove());
+      confirm.querySelector('.qa-preview-discard')?.addEventListener('click', () => {
+        confirm.remove();
+        overlay.dataset.previewDirty = 'false';
+        onDiscard();
+      });
+    };
+
+    return {
+      save: saveEdits,
+      requestClose: (closePreview) => {
+        syncDirty();
+        if (overlay.dataset.previewDirty === 'true') {
+          showUnsavedConfirm(closePreview);
+          return;
+        }
+        closePreview();
+      }
+    };
   },
 
   openStandardPreview(index) {
@@ -794,7 +1568,7 @@ const QAView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
 
-    const headers = ['年月', 'ACC', '经销商名称', '门店编码', '门店名称', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
+    const headers = ['年月', 'ACC', '经销商', '门店编码（客户编码）', '门店名称（客户名称）', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
     const rows = this.getStandardPreviewRows(row);
     overlay.innerHTML = `
       <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6 py-8">
@@ -802,9 +1576,12 @@ const QAView = {
           <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white shrink-0">
             <div>
               <h3 class="font-bold text-[#1d2129] text-base">标准POS表预览</h3>
-              <p class="text-xs text-[#86909c] mt-1">${row.storeName} · ${row.storeCode} · 可直接编辑单元格</p>
+              <p class="text-xs text-[#86909c] mt-1">${row.storeName} · ${row.storeCode} · 点击编辑后可修改单元格</p>
             </div>
             <div class="flex items-center gap-2">
+              <button type="button" id="qa-standard-preview-edit" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-blue-50 hover:text-brand transition-colors" title="编辑">
+                <i class="fa-solid fa-pen-to-square"></i>
+              </button>
               <button type="button" id="qa-standard-preview-fullscreen" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="全屏">
                 <i class="fa-solid fa-expand"></i>
               </button>
@@ -813,11 +1590,12 @@ const QAView = {
               </button>
             </div>
           </div>
-          <div class="p-6 overflow-auto bg-[#f7f9fc] flex-1 min-h-0">
-            <table class="w-full min-w-[1380px] text-sm text-center border-collapse bg-white shadow-sm">
-              <thead class="sticky top-0 z-10">
+          <div class="p-6 bg-[#f7f9fc] flex-1 min-h-0">
+            <div class="qa-preview-table-scroll h-full">
+            <table class="w-full min-w-[1380px] text-sm text-center border-separate border-spacing-0 bg-white">
+              <thead>
                 <tr>
-                  ${headers.map((header) => `<th class="px-3 py-2 border border-gray-300 bg-[#f7f8fa] text-[#1d2129] font-semibold whitespace-nowrap">${header}</th>`).join('')}
+                  ${headers.map((header) => `<th class="sticky top-0 z-20 px-3 py-2 border-b border-r border-gray-300 bg-[#f7f8fa] text-[#1d2129] font-semibold whitespace-nowrap shadow-[0_1px_0_rgba(148,163,184,0.35)] first:border-l">${header}</th>`).join('')}
                 </tr>
               </thead>
               <tbody>
@@ -840,15 +1618,12 @@ const QAView = {
                 `).join('')}
               </tbody>
             </table>
+            </div>
           </div>
           <div class="px-6 py-4 border-t border-gray-100 bg-white flex items-center justify-between gap-3 shrink-0">
             <button type="button" id="qa-original-compare-open" class="px-4 py-2 rounded-lg text-sm text-brand bg-blue-50 hover:bg-blue-100 border border-blue-100 transition-colors">
               <i class="fa-solid fa-code-compare mr-1"></i>原始门店数据对比
             </button>
-            <div class="flex items-center justify-end gap-3">
-              <button type="button" id="qa-standard-preview-cancel" class="px-4 py-2 rounded-lg text-sm text-[#4e5969] bg-gray-100 hover:bg-gray-200 transition-colors">关闭</button>
-              <button type="button" id="qa-standard-preview-save" class="px-4 py-2 rounded-lg text-sm text-white bg-brand hover:bg-blue-700 transition-colors shadow-sm">保存编辑</button>
-            </div>
           </div>
           <div data-preview-resize="right" class="absolute right-0 top-0 h-full w-2 cursor-ew-resize hover:bg-brand/10"></div>
           <div data-preview-resize="bottom" class="absolute bottom-0 left-0 w-full h-2 cursor-ns-resize hover:bg-brand/10"></div>
@@ -862,16 +1637,11 @@ const QAView = {
     const closePreview = () => {
       overlay.innerHTML = '';
     };
-    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', closePreview);
-    overlay.querySelector('#qa-standard-preview-cancel')?.addEventListener('click', closePreview);
+    const previewEditor = this.bindQaPreviewEditControls(overlay);
+    const requestClose = () => previewEditor.requestClose(closePreview);
+    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', requestClose);
     overlay.querySelector('#qa-original-compare-open')?.addEventListener('click', () => {
       this.openOriginalComparison(index);
-    });
-    overlay.querySelector('#qa-standard-preview-save')?.addEventListener('click', () => {
-      closePreview();
-      if (typeof Dialog !== 'undefined') {
-        Dialog.toast('预览数据已保存', 'success');
-      }
     });
     this.bindStandardPreviewWindowControls(overlay);
   },
@@ -882,7 +1652,7 @@ const QAView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
 
-    const headers = ['年月', 'ACC', '经销商名称', '门店编码', '门店名称', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
+    const headers = ['年月', 'ACC', '经销商', '门店编码（客户编码）', '门店名称（客户名称）', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
     const originalRows = this.getOriginalPreviewRows(row);
     const standardRows = this.getStandardPreviewRows(row);
     overlay.innerHTML = `
@@ -894,6 +1664,9 @@ const QAView = {
               <p class="text-xs text-[#86909c] mt-1">${row.storeName} · ${row.storeCode} · 左侧原始门店数据，右侧当前标准门店数据</p>
             </div>
             <div class="flex items-center gap-2">
+              <button type="button" id="qa-standard-preview-edit" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-blue-50 hover:text-brand transition-colors" title="编辑">
+                <i class="fa-solid fa-pen-to-square"></i>
+              </button>
               <button type="button" id="qa-standard-preview-fullscreen" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="全屏">
                 <i class="fa-solid fa-expand"></i>
               </button>
@@ -908,8 +1681,10 @@ const QAView = {
                 <h4 class="text-sm font-bold text-[#1d2129]">原始门店数据</h4>
                 <p class="text-xs text-[#86909c] mt-1">来自门店原始附件，保留缺失、字段异常等原始状态</p>
               </div>
-              <div id="qa-compare-original-scroll" class="overflow-auto flex-1 p-3">
-                ${this.renderPreviewTable(headers, originalRows, false)}
+              <div class="p-3 flex-1 min-h-0">
+                <div id="qa-compare-original-scroll" class="qa-preview-table-scroll h-full">
+                  ${this.renderPreviewTable(headers, originalRows, false)}
+                </div>
               </div>
             </section>
             <section class="min-w-0 rounded-xl border border-blue-100 bg-white overflow-hidden flex flex-col">
@@ -917,14 +1692,12 @@ const QAView = {
                 <h4 class="text-sm font-bold text-[#1d2129]">当前标准门店数据</h4>
                 <p class="text-xs text-[#86909c] mt-1">AI标准化后的结果，可直接作为标准POS表校验依据</p>
               </div>
-              <div id="qa-compare-standard-scroll" class="overflow-auto flex-1 p-3">
-                ${this.renderPreviewTable(headers, standardRows, true)}
+              <div class="p-3 flex-1 min-h-0">
+                <div id="qa-compare-standard-scroll" class="qa-preview-table-scroll h-full">
+                  ${this.renderPreviewTable(headers, standardRows, true)}
+                </div>
               </div>
             </section>
-          </div>
-          <div class="px-6 py-4 border-t border-gray-100 bg-white flex items-center justify-end gap-3 shrink-0">
-            <button type="button" id="qa-standard-preview-cancel" class="px-4 py-2 rounded-lg text-sm text-[#4e5969] bg-gray-100 hover:bg-gray-200 transition-colors">关闭</button>
-            <button type="button" id="qa-standard-preview-save" class="px-4 py-2 rounded-lg text-sm text-white bg-brand hover:bg-blue-700 transition-colors shadow-sm">保存标准数据</button>
           </div>
           <div data-preview-resize="right" class="absolute right-0 top-0 h-full w-2 cursor-ew-resize hover:bg-brand/10"></div>
           <div data-preview-resize="bottom" class="absolute bottom-0 left-0 w-full h-2 cursor-ns-resize hover:bg-brand/10"></div>
@@ -938,14 +1711,9 @@ const QAView = {
     const closePreview = () => {
       overlay.innerHTML = '';
     };
-    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', closePreview);
-    overlay.querySelector('#qa-standard-preview-cancel')?.addEventListener('click', closePreview);
-    overlay.querySelector('#qa-standard-preview-save')?.addEventListener('click', () => {
-      closePreview();
-      if (typeof Dialog !== 'undefined') {
-        Dialog.toast('标准门店数据已保存', 'success');
-      }
-    });
+    const previewEditor = this.bindQaPreviewEditControls(overlay, { successMessage: '标准门店数据已保存' });
+    const requestClose = () => previewEditor.requestClose(closePreview);
+    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', requestClose);
     this.bindStandardPreviewWindowControls(overlay);
     this.bindComparisonScrollSync(overlay);
   },
@@ -963,7 +1731,7 @@ const QAView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
 
-    const headers = ['年月', 'ACC', '经销商名称', '门店编码', '门店名称', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
+    const headers = ['年月', 'ACC', '经销商', '门店编码（客户编码）', '门店名称（客户名称）', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
     const originalRows = this.getOriginalPreviewRows(matched);
     overlay.innerHTML = `
       <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6 py-8">
@@ -974,6 +1742,9 @@ const QAView = {
               <p class="text-xs text-[#86909c] mt-1">${matched.storeName || '-'} · ${matched.storeCode || '-'} · 仅展示原始门店数据</p>
             </div>
             <div class="flex items-center gap-2">
+              <button type="button" id="qa-standard-preview-edit" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-blue-50 hover:text-brand transition-colors" title="编辑">
+                <i class="fa-solid fa-pen-to-square"></i>
+              </button>
               <button type="button" id="qa-standard-preview-fullscreen" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="全屏">
                 <i class="fa-solid fa-expand"></i>
               </button>
@@ -982,11 +1753,15 @@ const QAView = {
               </button>
             </div>
           </div>
-          <div class="p-6 overflow-auto bg-[#f7f9fc] flex-1 min-h-0">
-            ${this.renderPreviewTable(headers, originalRows, false)}
+          <div class="p-6 bg-[#f7f9fc] flex-1 min-h-0">
+            <div class="qa-preview-table-scroll h-full">
+              ${this.renderPreviewTable(headers, originalRows, true)}
+            </div>
           </div>
-          <div class="px-6 py-4 border-t border-gray-100 bg-white flex items-center justify-end gap-3 shrink-0">
-            <button type="button" id="qa-standard-preview-cancel" class="px-4 py-2 rounded-lg text-sm text-[#4e5969] bg-gray-100 hover:bg-gray-200 transition-colors">关闭</button>
+          <div class="px-6 py-4 border-t border-gray-100 bg-white flex items-center justify-between gap-3 shrink-0">
+            <button type="button" id="qa-exception-compare-open" class="px-4 py-2 rounded-lg text-sm text-brand bg-blue-50 hover:bg-blue-100 border border-blue-100 transition-colors">
+              <i class="fa-solid fa-code-compare mr-1"></i>原始数据对比
+            </button>
           </div>
           <div data-preview-resize="right" class="absolute right-0 top-0 h-full w-2 cursor-ew-resize hover:bg-brand/10"></div>
           <div data-preview-resize="bottom" class="absolute bottom-0 left-0 w-full h-2 cursor-ns-resize hover:bg-brand/10"></div>
@@ -1000,9 +1775,92 @@ const QAView = {
     const closePreview = () => {
       overlay.innerHTML = '';
     };
-    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', closePreview);
-    overlay.querySelector('#qa-standard-preview-cancel')?.addEventListener('click', closePreview);
+    const previewEditor = this.bindQaPreviewEditControls(overlay, { successMessage: '异常数据已保存' });
+    const requestClose = () => previewEditor.requestClose(closePreview);
+    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', requestClose);
+    overlay.querySelector('#qa-exception-compare-open')?.addEventListener('click', () => {
+      this.openExceptionComparison(exceptionRow);
+    });
     this.bindStandardPreviewWindowControls(overlay);
+  },
+
+  openExceptionComparison(exceptionRow) {
+    const matched = this.standardData.find((item) => item.storeCode === exceptionRow.storeCode || item.storeName === exceptionRow.storeName) || {
+      storeName: exceptionRow.storeName,
+      storeCode: exceptionRow.storeCode,
+      confidence: '98%',
+      dealer: exceptionRow.dealer,
+      salesTeam: this.getRejectTeam(exceptionRow),
+      region: `${exceptionRow.acc || '华北'}区域`,
+      salesOffice: '-'
+    };
+    const overlay = document.getElementById('overlay-container');
+    if (!overlay) return;
+
+    const headers = ['年月', 'ACC', '经销商', '门店编码（客户编码）', '门店名称（客户名称）', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
+    const originalRows = this.getOriginalPreviewRows(matched);
+    const exceptionRows = this.getExceptionPreviewRows(exceptionRow);
+    overlay.innerHTML = `
+      <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6 py-8">
+        <div id="qa-standard-preview-modal" class="relative bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col" style="width: min(1700px, calc(100vw - 48px)); height: min(760px, calc(100vh - 64px)); min-width: 980px; min-height: 520px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px);">
+          <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white shrink-0">
+            <div>
+              <h3 class="font-bold text-[#1d2129] text-base">原始数据对比</h3>
+              <p class="text-xs text-[#86909c] mt-1">${matched.storeName || '-'} · ${matched.storeCode || '-'} · 左侧原始数据，右侧异常数据</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" id="qa-standard-preview-edit" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-blue-50 hover:text-brand transition-colors" title="编辑">
+                <i class="fa-solid fa-pen-to-square"></i>
+              </button>
+              <button type="button" id="qa-standard-preview-fullscreen" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="全屏">
+                <i class="fa-solid fa-expand"></i>
+              </button>
+              <button type="button" id="qa-standard-preview-close" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="关闭">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4 p-5 overflow-hidden bg-[#f7f9fc] flex-1 min-h-0">
+            <section class="min-w-0 rounded-xl border border-orange-100 bg-white overflow-hidden flex flex-col">
+              <div class="px-4 py-3 border-b border-orange-100 bg-orange-50/70">
+                <h4 class="text-sm font-bold text-[#1d2129]">原始门店数据</h4>
+                <p class="text-xs text-[#86909c] mt-1">来自门店原始附件，保留缺失、字段异常等原始状态</p>
+              </div>
+              <div class="p-3 flex-1 min-h-0">
+                <div id="qa-compare-original-scroll" class="qa-preview-table-scroll h-full">
+                  ${this.renderPreviewTable(headers, originalRows, false)}
+                </div>
+              </div>
+            </section>
+            <section class="min-w-0 rounded-xl border border-red-100 bg-white overflow-hidden flex flex-col">
+              <div class="px-4 py-3 border-b border-red-100 bg-red-50/70">
+                <h4 class="text-sm font-bold text-[#1d2129]">异常数据</h4>
+                <p class="text-xs text-[#86909c] mt-1">当前异常数据，保留异常类型和 AI 判断说明</p>
+              </div>
+              <div class="p-3 flex-1 min-h-0">
+                <div id="qa-compare-standard-scroll" class="qa-preview-table-scroll h-full">
+                  ${this.renderPreviewTable(headers, exceptionRows, true)}
+                </div>
+              </div>
+            </section>
+          </div>
+          <div data-preview-resize="right" class="absolute right-0 top-0 h-full w-2 cursor-ew-resize hover:bg-brand/10"></div>
+          <div data-preview-resize="bottom" class="absolute bottom-0 left-0 w-full h-2 cursor-ns-resize hover:bg-brand/10"></div>
+          <div data-preview-resize="corner" class="absolute right-0 bottom-0 w-5 h-5 cursor-nwse-resize">
+            <div class="absolute right-1 bottom-1 w-3 h-3 border-r-2 border-b-2 border-brand/50"></div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const closePreview = () => {
+      overlay.innerHTML = '';
+    };
+    const previewEditor = this.bindQaPreviewEditControls(overlay, { successMessage: '异常数据已保存' });
+    const requestClose = () => previewEditor.requestClose(closePreview);
+    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', requestClose);
+    this.bindStandardPreviewWindowControls(overlay);
+    this.bindComparisonScrollSync(overlay);
   },
 
   bindComparisonScrollSync(overlay) {
@@ -1100,31 +1958,25 @@ const QAView = {
       trigger.addEventListener('click', (event) => {
         event.stopPropagation();
         const index = Number(trigger.dataset.index);
-        const row = this.getFilteredStandardData()[index]?.row || this.standardData[index];
+        const row = this.standardData[index];
         if (!row || typeof IngestionView === 'undefined' || typeof IngestionView.openDocumentDetail !== 'function') return;
         IngestionView.openDocumentDetail({
           moduleName: '质量检查 - 标准POS表',
           currentNode: '标准POS表',
           title: row.storeName,
-          nameLabel: '门店名称',
+          nameLabel: '门店名称（客户名称）',
           statusText: 'AI质检通过',
           row,
           moduleFields: [
-            { label: '门店编码', value: row.storeCode || '-' },
+            { label: '门店编码（客户编码）', value: row.storeCode || '-' },
             { label: '置信度', value: row.confidence || '-' },
             { label: 'AI判断', value: row.aiNote || '-' },
-            { label: '所属营业Team', value: row.salesTeam || '-' },
-            { label: '所属区域', value: row.region || '-' },
-            { label: '所属营业所', value: row.salesOffice || '-' },
-            { label: '所属经销商', value: row.dealer || '-' }
+            { label: 'ACC', value: this.getQaAccName(row, index) },
+            { label: '本部', value: this.getHeadquarter(row) || '-' },
+            { label: '营业所', value: row.salesOffice || '-' },
+            { label: '经销商', value: row.dealer || '-' }
           ]
         });
-      });
-    });
-    document.querySelectorAll('.qa-detail-compare-trigger').forEach((trigger) => {
-      trigger.addEventListener('click', (event) => {
-        event.stopPropagation();
-        this.openOriginalComparison(Number(trigger.dataset.index));
       });
     });
   },
@@ -1149,6 +2001,10 @@ const QAView = {
           this.openExceptionRejectConfirm(row);
           return;
         }
+        if (action === 'submit-sales-result') {
+          this.openExceptionSalesSubmitDialog(row);
+          return;
+        }
         if (action === 'stash') {
           if (typeof Dialog !== 'undefined') {
             Dialog.toast(`${row.storeName || row.storeCode} 已暂存`, 'success');
@@ -1156,7 +2012,12 @@ const QAView = {
           return;
         }
         if (action === 'approve' && typeof Dialog !== 'undefined') {
-          Dialog.toast(`${row.storeName || row.storeCode} 已通过`, 'success');
+          this.updateExceptionStoreStatus(row, '已通过', {
+            approvedBy: Store.getState().userName || 'POS担当',
+            approvedAt: new Date().toLocaleString()
+          });
+          this.renderExceptionTable();
+          Dialog.toast(`${row.storeName || row.storeCode} 已通过，并同步到标准POS表`, 'success');
         }
       });
     });
@@ -1166,12 +2027,13 @@ const QAView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
     const team = this.getRejectTeam(row);
+    const isAgain = this.getExceptionStatus(row) === 'POS担当待处理';
     overlay.innerHTML = `
       <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6">
         <div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden animate-[fadeIn_0.18s_ease-out]">
           <div class="px-6 py-5 border-b border-gray-100 flex items-start justify-between gap-4">
             <div>
-              <h3 class="text-lg font-bold text-[#1d2129]">确认驳回异常数据</h3>
+              <h3 class="text-lg font-bold text-[#1d2129]">${isAgain ? '确认再次驳回异常数据' : '确认驳回异常数据'}</h3>
               <p class="mt-1 text-sm text-[#86909c]">${row.storeName || '-'} · ${row.storeCode || '-'}</p>
             </div>
             <button type="button" id="qa-reject-confirm-close" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors">
@@ -1184,7 +2046,7 @@ const QAView = {
               <div class="text-sm leading-6 text-[#1d2129]">${row.aiJudgment || '-'}</div>
             </div>
             <div class="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 flex items-center justify-between">
-              <span class="text-sm text-[#4e5969]">驳回至营业 Team</span>
+              <span class="text-sm text-[#4e5969]">${isAgain ? '再次驳回至营业 Team' : '驳回至营业 Team'}</span>
               <span class="text-sm font-bold text-brand">${team}</span>
             </div>
             <div>
@@ -1193,11 +2055,11 @@ const QAView = {
                 class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm leading-6 text-[#1d2129] resize-none focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
                 placeholder="请输入补充说明或处理建议">${row.rejectNote || ''}</textarea>
             </div>
-            <p class="text-xs text-[#86909c] leading-5"><span class="font-semibold text-[#4e5969]">说明：</span>驳回操作需针对门店级的完整 POS 表执行，而非单条数据。确认驳回后，该门店对应的所有状态将统一更新为「已驳回」</p>
+            <p class="text-xs text-[#86909c] leading-5"><span class="font-semibold text-[#4e5969]">说明：</span>驳回操作需针对门店级的完整 POS 表执行，而非单条数据。确认驳回后，该门店对应的所有状态将统一更新为「营业担当处理中」</p>
           </div>
           <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
             <button type="button" id="qa-reject-confirm-cancel" class="px-4 py-2 rounded-lg text-sm text-[#4e5969] bg-gray-100 hover:bg-gray-200 transition-colors">取消</button>
-            <button type="button" id="qa-reject-confirm-submit" class="px-4 py-2 rounded-lg text-sm text-white bg-red-500 hover:bg-red-600 transition-colors shadow-sm">确认驳回</button>
+            <button type="button" id="qa-reject-confirm-submit" class="px-4 py-2 rounded-lg text-sm text-white bg-red-500 hover:bg-red-600 transition-colors shadow-sm">${isAgain ? '确认再次驳回' : '确认驳回'}</button>
           </div>
         </div>
       </div>
@@ -1208,12 +2070,72 @@ const QAView = {
     overlay.querySelector('#qa-reject-confirm-close')?.addEventListener('click', close);
     overlay.querySelector('#qa-reject-confirm-cancel')?.addEventListener('click', close);
     overlay.querySelector('#qa-reject-confirm-submit')?.addEventListener('click', () => {
-      row.rejectNote = overlay.querySelector('#qa-reject-manual-note')?.value?.trim() || '';
+      const rejectNote = overlay.querySelector('#qa-reject-manual-note')?.value?.trim() || '';
       this.rejectedStoreCodes.add(row.storeCode);
+      this.updateExceptionStoreStatus(row, '营业担当处理中', {
+        rejectNote,
+        rejectedBy: Store.getState().userName || 'POS担当',
+        rejectedAt: new Date().toLocaleString()
+      });
       close();
       this.renderExceptionTable();
       if (typeof Dialog !== 'undefined') {
-        Dialog.toast(`${row.storeName || row.storeCode} 已驳回至 ${team}`, 'success');
+        Dialog.toast(`${row.storeName || row.storeCode} 已${isAgain ? '再次' : ''}驳回至 ${team}`, 'success');
+      }
+    });
+  },
+
+  openExceptionSalesSubmitDialog(row) {
+    const overlay = document.getElementById('overlay-container');
+    if (!overlay) return;
+    overlay.innerHTML = `
+      <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6">
+        <div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden animate-[fadeIn_0.18s_ease-out]">
+          <div class="px-6 py-5 border-b border-gray-100 flex items-start justify-between gap-4">
+            <div>
+              <h3 class="text-lg font-bold text-[#1d2129]">通过异常数据</h3>
+              <p class="mt-1 text-sm text-[#86909c]">${row.storeName || '-'} · ${row.storeCode || '-'}</p>
+            </div>
+            <button type="button" id="qa-sales-submit-close" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <div class="px-6 py-5 space-y-4">
+            <div class="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3">
+              <div class="text-xs font-semibold text-brand mb-1">当前责任方</div>
+              <div class="text-sm leading-6 text-[#1d2129]">${this.getRejectTeam(row)} 处理完成后提交 POS担当复核</div>
+            </div>
+            <div>
+              <label for="qa-sales-submit-note" class="block mb-2 text-xs font-semibold text-[#4e5969]">处理说明</label>
+              <textarea id="qa-sales-submit-note" rows="4"
+                class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm leading-6 text-[#1d2129] resize-none focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+                placeholder="请输入补充、修正或回传说明">${row.salesSubmitNote || ''}</textarea>
+            </div>
+            <p class="text-xs text-[#86909c] leading-5"><span class="font-semibold text-[#4e5969]">说明：</span>提交后，该门店对应异常状态将变为「POS担当待处理」，等待 POS担当复核。</p>
+          </div>
+          <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
+            <button type="button" id="qa-sales-submit-cancel" class="px-4 py-2 rounded-lg text-sm text-[#4e5969] bg-gray-100 hover:bg-gray-200 transition-colors">取消</button>
+            <button type="button" id="qa-sales-submit-confirm" class="px-4 py-2 rounded-lg text-sm text-white bg-brand hover:bg-blue-700 transition-colors shadow-sm">通过</button>
+          </div>
+        </div>
+      </div>
+    `;
+    const close = () => {
+      overlay.innerHTML = '';
+    };
+    overlay.querySelector('#qa-sales-submit-close')?.addEventListener('click', close);
+    overlay.querySelector('#qa-sales-submit-cancel')?.addEventListener('click', close);
+    overlay.querySelector('#qa-sales-submit-confirm')?.addEventListener('click', () => {
+      const salesSubmitNote = overlay.querySelector('#qa-sales-submit-note')?.value?.trim() || '';
+      this.updateExceptionStoreStatus(row, 'POS担当待处理', {
+        salesSubmitNote,
+        salesSubmittedBy: Store.getState().userName || '营业担当',
+        salesSubmittedAt: new Date().toLocaleString()
+      });
+      close();
+      this.renderExceptionTable();
+      if (typeof Dialog !== 'undefined') {
+        Dialog.toast(`${row.storeName || row.storeCode} 已提交 POS担当复核`, 'success');
       }
     });
   },
@@ -1260,15 +2182,86 @@ const QAView = {
     });
 
     if (approveBtn) approveBtn.onclick = () => {
-      const selected = document.querySelectorAll('.row-cb-qa-standard:checked').length;
+      const selectedCheckboxes = Array.from(document.querySelectorAll('.row-cb-qa-standard:checked'));
+      const selected = selectedCheckboxes.length;
       if (selected === 0) return;
+      selectedCheckboxes.forEach((checkbox) => {
+        if (checkbox.value) this.approvedStandardStoreCodes.add(checkbox.value);
+      });
       if (typeof Dialog !== 'undefined') {
         Dialog.toast(`已通过 ${selected} 条标准POS表数据`, 'success');
       }
-      rowCheckboxes.forEach((checkbox) => {
-        checkbox.checked = false;
+      this.renderStandardTable();
+    };
+
+    syncSelection();
+  },
+
+  bindExceptionSelectionEvents() {
+    const selectAll = document.getElementById('qa-exception-select-all');
+    const rowCheckboxes = Array.from(document.querySelectorAll('.row-cb-qa'));
+    const selectableCheckboxes = rowCheckboxes.filter((checkbox) => !checkbox.disabled);
+    const approveBtn = document.getElementById('qa-btn-batch-approve');
+
+    const syncSelection = () => {
+      const checked = selectableCheckboxes.filter((checkbox) => checkbox.checked);
+      if (selectAll) {
+        selectAll.disabled = selectableCheckboxes.length === 0;
+        selectAll.checked = checked.length > 0 && checked.length === selectableCheckboxes.length;
+        selectAll.indeterminate = checked.length > 0 && checked.length < selectableCheckboxes.length;
+        selectAll.title = selectableCheckboxes.length === 0 ? '当前页面没有可处理数据' : '选择当前页面可处理数据';
+      }
+      if (this.activeQaTab === 'exception' && approveBtn) {
+        approveBtn.disabled = checked.length === 0;
+        approveBtn.className = checked.length > 0
+          ? 'px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:bg-blue-700 hover:shadow-brand/30 hover:-translate-y-0.5'
+          : 'px-4 py-2 bg-[#86909c] text-white rounded-lg text-sm font-medium transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed';
+      }
+    };
+
+    selectAll?.addEventListener('change', (event) => {
+      selectableCheckboxes.forEach((checkbox) => {
+        checkbox.checked = event.target.checked;
       });
       syncSelection();
+    });
+
+    rowCheckboxes.forEach((checkbox) => {
+      checkbox.addEventListener('change', () => {
+        if (checkbox.disabled) checkbox.checked = false;
+        syncSelection();
+      });
+    });
+
+    if (approveBtn) approveBtn.onclick = () => {
+      if (this.activeQaTab !== 'exception') return;
+      const selectedIds = selectableCheckboxes
+        .filter((checkbox) => checkbox.checked)
+        .map((checkbox) => checkbox.value);
+      if (selectedIds.length === 0) return;
+      const selectedRows = selectedIds
+        .map((id) => this.data.find((row) => row.id === id))
+        .filter(Boolean);
+      if (selectedRows.length === 0) return;
+
+      if (this.isPosActor()) {
+        selectedRows.forEach((row) => this.updateExceptionStoreStatus(row, '已通过', {
+          approvedBy: Store.getState().userName || 'POS担当',
+          approvedAt: new Date().toLocaleString()
+        }));
+        if (typeof Dialog !== 'undefined') {
+          Dialog.toast(`已通过 ${selectedRows.length} 条异常数据，并同步到标准POS表`, 'success');
+        }
+      } else {
+        selectedRows.forEach((row) => this.updateExceptionStoreStatus(row, 'POS担当待处理', {
+          salesSubmittedBy: Store.getState().userName || '营业担当',
+          salesSubmittedAt: new Date().toLocaleString()
+        }));
+        if (typeof Dialog !== 'undefined') {
+          Dialog.toast(`已通过 ${selectedRows.length} 条异常数据，提交至POS担当复核`, 'success');
+        }
+      }
+      this.renderExceptionTable();
     };
 
     syncSelection();
@@ -1279,8 +2272,6 @@ const QAView = {
   },
 
   getStatusFilterLabel(status) {
-    if (status === '已驳回') return '驳回';
-    if (status === '已通过') return '通过';
     return status;
   },
 
@@ -1292,6 +2283,16 @@ const QAView = {
     button.title = isTableMode ? '表格' : '明细数据';
     button.setAttribute('aria-label', isTableMode ? '当前为表格展示，点击切换为明细数据' : '当前为明细数据展示，点击切换为表格');
     icon.className = `fa-solid ${isTableMode ? 'fa-table-cells-large' : 'fa-list-ul'}`;
+  },
+
+  updateExceptionDisplayToggle() {
+    const button = document.getElementById('qa-exception-display-toggle');
+    const icon = document.getElementById('qa-exception-display-toggle-icon');
+    if (!button || !icon) return;
+    const isDetailMode = this.exceptionDisplayMode === 'detail';
+    button.title = isDetailMode ? '明细数据' : '文件数据';
+    button.setAttribute('aria-label', isDetailMode ? '当前为明细数据展示，点击切换为文件数据' : '当前为文件数据展示，点击切换为明细数据');
+    icon.className = `fa-solid ${isDetailMode ? 'fa-list-ul' : 'fa-table-cells-large'}`;
   },
   
   bindEvents() {
@@ -1312,12 +2313,18 @@ const QAView = {
       exceptionContainer?.classList.toggle('hidden', !showException);
       document.getElementById('qa-confidence-label-group')?.classList.toggle('hidden', showException);
       document.getElementById('qa-confidence-select-wrapper')?.classList.toggle('hidden', showException);
+      document.getElementById('qa-standard-status-label-group')?.classList.toggle('hidden', showException);
+      document.getElementById('qa-standard-status-select-wrapper')?.classList.toggle('hidden', showException);
       document.getElementById('qa-exception-type-label-group')?.classList.toggle('hidden', !showException);
       document.getElementById('qa-exception-type-select-wrapper')?.classList.toggle('hidden', !showException);
       document.getElementById('qa-status-label-group')?.classList.toggle('hidden', !showException);
       document.getElementById('qa-status-select-wrapper')?.classList.toggle('hidden', !showException);
       document.getElementById('qa-standard-display-toggle')?.classList.toggle('hidden', !showStandard);
+      document.getElementById('qa-exception-display-toggle')?.classList.toggle('hidden', !showException);
+      this.searchField = 'all';
+      this.syncQaSearchControlUI();
       this.updateStandardDisplayToggle();
+      this.updateExceptionDisplayToggle();
     };
 
     tabStandard?.addEventListener('click', () => switchTab('standard'));
@@ -1331,7 +2338,7 @@ const QAView = {
       const dropdown = document.getElementById(dropdownId);
       button?.addEventListener('click', (event) => {
         event.stopPropagation();
-        document.querySelectorAll('#qa-team-dropdown, #qa-status-dropdown, #qa-confidence-dropdown, #qa-exception-type-dropdown').forEach((el) => {
+        document.querySelectorAll('#qa-team-dropdown, #qa-status-dropdown, #qa-confidence-dropdown, #qa-standard-status-dropdown, #qa-exception-type-dropdown, #qa-search-field-dropdown').forEach((el) => {
           if (el !== dropdown) el.classList.add('hidden');
         });
         dropdown?.classList.toggle('hidden');
@@ -1342,8 +2349,26 @@ const QAView = {
     toggleDropdown('qa-team-select-btn', 'qa-team-dropdown');
     toggleDropdown('qa-status-select-btn', 'qa-status-dropdown');
     toggleDropdown('qa-confidence-select-btn', 'qa-confidence-dropdown');
+    toggleDropdown('qa-standard-status-select-btn', 'qa-standard-status-dropdown');
     toggleDropdown('qa-exception-type-select-btn', 'qa-exception-type-dropdown');
-    toggleDropdown('qa-status-select-btn', 'qa-status-dropdown');
+    toggleDropdown('qa-search-field-btn', 'qa-search-field-dropdown');
+    this.syncQaSearchControlUI();
+
+    document.getElementById('qa-search-field-dropdown')?.addEventListener('click', (event) => {
+      const option = event.target.closest('[data-qa-search-field]');
+      if (!option) return;
+      this.searchField = option.dataset.qaSearchField || 'all';
+      this.syncQaSearchControlUI();
+      document.getElementById('qa-search-field-dropdown')?.classList.add('hidden');
+      this.renderStandardTable();
+      this.renderExceptionTable();
+    });
+
+    document.getElementById('qa-filter-filename')?.addEventListener('input', (event) => {
+      this.searchKeyword = event.target.value || '';
+      this.renderStandardTable();
+      this.renderExceptionTable();
+    });
 
     document.getElementById('qa-standard-display-toggle')?.addEventListener('click', () => {
       if (this.activeQaTab !== 'standard') return;
@@ -1351,7 +2376,14 @@ const QAView = {
       this.updateStandardDisplayToggle();
       this.renderStandardTable();
     });
+    document.getElementById('qa-exception-display-toggle')?.addEventListener('click', () => {
+      if (this.activeQaTab !== 'exception') return;
+      this.exceptionDisplayMode = this.exceptionDisplayMode === 'detail' ? 'file' : 'detail';
+      this.updateExceptionDisplayToggle();
+      this.renderExceptionTable();
+    });
     this.updateStandardDisplayToggle();
+    this.updateExceptionDisplayToggle();
 
     const updateLabel = (selector, labelId, defaultText) => {
       const checked = Array.from(document.querySelectorAll(`${selector}:checked`)).map((item) => item.value);
@@ -1455,6 +2487,17 @@ const QAView = {
       });
     });
 
+    document.querySelectorAll('.qa-standard-status-option').forEach((option) => {
+      option.addEventListener('click', () => {
+        this.standardStatusFilter = option.dataset.value || '';
+        const label = document.getElementById('qa-standard-status-select-label');
+        if (label) label.textContent = option.textContent.trim() || '全部';
+        document.getElementById('qa-standard-status-dropdown')?.classList.add('hidden');
+        this.renderStandardTable();
+        this.renderStashTable();
+      });
+    });
+
     document.querySelectorAll('.qa-exception-type-option').forEach((option) => {
       option.addEventListener('click', () => {
         this.exceptionTypeFilter = option.dataset.value || '';
@@ -1476,17 +2519,23 @@ const QAView = {
     });
 
     document.getElementById('qa-btn-search')?.addEventListener('click', () => {
+      this.searchKeyword = document.getElementById('qa-filter-filename')?.value || '';
       this.renderStandardTable();
       this.renderStashTable();
       this.renderExceptionTable();
     });
 
     document.getElementById('qa-btn-reset-filter')?.addEventListener('click', () => {
+      this.searchField = 'all';
+      this.searchKeyword = '';
       document.getElementById('qa-filter-filename').value = '';
+      this.syncQaSearchControlUI();
       this.confidenceFilter = { preset: '' };
+      this.standardStatusFilter = '';
       this.hierarchyFilter = { teams: [], offices: [], dealers: [] };
       this.hierarchyHover = { team: '', office: '' };
       document.getElementById('qa-confidence-select-label').textContent = '高/中/低';
+      document.getElementById('qa-standard-status-select-label').textContent = '全部';
       this.exceptionTypeFilter = '';
       document.getElementById('qa-exception-type-select-label').textContent = '全部';
       this.statusFilter = '';
@@ -1506,7 +2555,7 @@ const QAView = {
     });
 
     document.addEventListener('click', () => {
-      document.querySelectorAll('#qa-team-dropdown, #qa-status-dropdown, #qa-confidence-dropdown, #qa-exception-type-dropdown').forEach((el) => el.classList.add('hidden'));
+      document.querySelectorAll('#qa-team-dropdown, #qa-status-dropdown, #qa-confidence-dropdown, #qa-standard-status-dropdown, #qa-exception-type-dropdown, #qa-search-field-dropdown').forEach((el) => el.classList.add('hidden'));
     });
   }
 };

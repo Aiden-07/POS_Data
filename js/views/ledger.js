@@ -3,6 +3,7 @@ const LedgerView = {
     year: '2026',
     month: '06',
     keyword: '',
+    keywordField: 'all',
     org: {
       region: '',
       office: '',
@@ -32,7 +33,18 @@ const LedgerView = {
   groupBy: '',
   collapsedGroups: new Set(),
   closePanelsBound: false,
+  searchDropdownCloseBound: false,
   advancedFiltersExpanded: false,
+  keywordFieldOptions: [
+    { value: 'all', label: '全部' },
+    { value: 'acc', label: 'ACC' },
+    { value: 'storeName', label: '门店名称' },
+    { value: 'storeCode', label: '门店编码' },
+    { value: 'dealer', label: '经销商' },
+    { value: 'productName', label: '产品名称' },
+    { value: 'productCode', label: '产品A码' },
+    { value: 'barcode', label: '产品69码' }
+  ],
 
   tableColumns: [
     { key: 'month', label: '年月', width: 'w-24', order: 10, value: (item) => item.month },
@@ -42,7 +54,7 @@ const LedgerView = {
     { key: 'dealerName', label: '经销商名称', width: 'w-36', truncate: true, value: (item) => item.dealer },
     { key: 'storeCode', label: '门店编码', width: 'w-28', mono: true, value: (item) => item.storeCode },
     { key: 'storeName', label: '门店名称', width: 'w-44', truncate: true, value: (item) => item.storeName },
-    { key: 'barcode', label: '产品编码', width: 'w-36', mono: true, value: (item) => item.barcode },
+    { key: 'barcode', label: '产品A码', width: 'w-36', mono: true, value: (item) => item.productCode || item.barcode },
     { key: 'productName', label: '产品名称', width: 'w-56', truncate: true, value: (item) => item.productName },
     { key: 'quantity', label: '销售数量', width: 'w-24', align: 'right', value: (item) => item.quantity },
     { key: 'amount', label: '销售金额', width: 'w-24', align: 'right', value: (item) => `￥${item.amount}` },
@@ -150,7 +162,8 @@ const LedgerView = {
       { value: '', label: '不分组' },
       { value: 'region', label: '区域' },
       { value: 'salesOffice', label: '营业所' },
-      { value: 'dealer', label: '经销商' }
+      { value: 'dealer', label: '经销商' },
+      { value: 'acc', label: 'ACC' }
     ];
     return options.map((option) => `
       <label class="ledger-group-option">
@@ -199,7 +212,17 @@ const LedgerView = {
         <div class="ledger-filter-line ledger-filter-main">
           <div class="ledger-filter-label">关键字</div>
           <div class="ledger-filter-content ledger-keyword-controls">
-            <input id="ledger-filter-keyword" type="text" class="ledger-inline-input wide" placeholder="经销商、门店名称/编码、产品名称/编码">
+            <div id="ledger-search-combo-wrapper" class="ledger-search-combo">
+              <button type="button" id="ledger-search-field-btn" class="ledger-search-field-button" title="${this.getKeywordFieldLabel()}">
+                <span id="ledger-search-field-label">${this.getKeywordFieldLabel()}</span>
+                <i class="fa-solid fa-chevron-down"></i>
+              </button>
+              <label class="ledger-search-input-wrap">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input id="ledger-filter-keyword" type="text" placeholder="${this.getKeywordPlaceholder()}">
+              </label>
+              <div id="ledger-search-field-dropdown" class="ledger-search-field-dropdown hidden"></div>
+            </div>
             <button id="ledger-filter-submit" class="ledger-filter-primary" type="button">
               <i class="fa-solid fa-magnifying-glass"></i>
               <span>查询</span>
@@ -239,6 +262,38 @@ const LedgerView = {
         </div>
       </div>
     `;
+  },
+
+  getKeywordFieldLabel(value = this.filters.keywordField) {
+    return this.keywordFieldOptions.find((option) => option.value === value)?.label || '全部';
+  },
+
+  getKeywordPlaceholder(value = this.filters.keywordField) {
+    return '请输入关键字';
+  },
+
+  renderKeywordFieldDropdown() {
+    const dropdown = document.getElementById('ledger-search-field-dropdown');
+    if (!dropdown) return;
+    dropdown.innerHTML = this.keywordFieldOptions.map((option) => `
+      <button type="button" data-ledger-search-field="${option.value}" class="ledger-search-field-option ${this.filters.keywordField === option.value ? 'active' : ''}" title="${option.label}">
+        ${option.label}
+      </button>
+    `).join('');
+  },
+
+  syncKeywordSearchControl() {
+    const label = document.getElementById('ledger-search-field-label');
+    const button = document.getElementById('ledger-search-field-btn');
+    const input = document.getElementById('ledger-filter-keyword');
+    const fieldLabel = this.getKeywordFieldLabel();
+    if (label) label.textContent = fieldLabel;
+    if (button) button.title = fieldLabel;
+    if (input) {
+      input.value = this.filters.keyword || '';
+      input.placeholder = this.getKeywordPlaceholder();
+    }
+    this.renderKeywordFieldDropdown();
   },
 
   getAdvancedFilterCount() {
@@ -346,19 +401,21 @@ const LedgerView = {
       '好丽友薯愿蜂蜜黄油味104g',
       '好丽友好多鱼番茄味33g'
     ];
+    const accNames = ['其它', '北京物美', '怀化佳惠', '南阳万德隆', '新玛特'];
     return Array.from({ length: 24 }, (_, index) => {
       const productName = productNames[index % productNames.length];
       const quantity = [3, 6, 4, 8, 5, 9, 7, 12][index % 8];
       const price = [1.8, 4.5, 3.9, 5.2, 6.8, 7.5, 6.2, 8.9][index % 8];
       return {
         month: '2026年06月',
-        acc: index === 0 ? '其他' : row.region.replace('区域', ''),
+        acc: accNames[index % accNames.length],
         dealer: row.dealer,
         region: row.region.replace('区域', ''),
         fullRegion: row.region,
         salesOffice: row.salesOffice,
         storeCode: row.storeCode,
         storeName: row.storeName,
+        productCode: `A${String(6678011 + index * 137).padStart(7, '0')}`,
         productName,
         barcode: `69209${String(7871409 + index * 137).padStart(8, '0')}`,
         quantity,
@@ -378,13 +435,31 @@ const LedgerView = {
     const filters = this.filters;
     const normalize = (value) => String(value || '').trim().toLowerCase();
     const contains = (value, keyword) => !normalize(keyword) || normalize(value).includes(normalize(keyword));
+    const searchableValues = (item) => ({
+      acc: item.acc,
+      storeName: item.storeName,
+      storeCode: item.storeCode,
+      dealer: item.dealer,
+      productName: item.productName,
+      productCode: item.productCode,
+      barcode: item.barcode
+    });
+    const matchesKeyword = (item) => {
+      const keyword = filters.keyword;
+      if (!normalize(keyword)) return true;
+      const values = searchableValues(item);
+      if (filters.keywordField && filters.keywordField !== 'all') {
+        return contains(values[filters.keywordField], keyword);
+      }
+      return Object.values(values).some((value) => contains(value, keyword));
+    };
 
     return this.getAllRows().filter((item) => {
       const monthMatch = item.month === `${filters.year}年${filters.month}月`;
       const regionMatch = !filters.org.region || item.fullRegion === filters.org.region;
       const officeMatch = !filters.org.office || item.salesOffice === filters.org.office;
       const orgDealerMatch = !filters.org.dealer || item.dealer === filters.org.dealer;
-      const keywordMatch = contains(`${item.dealer} ${item.storeName} ${item.storeCode} ${item.productName} ${item.barcode}`, filters.keyword);
+      const keywordMatch = matchesKeyword(item);
       return monthMatch && regionMatch && officeMatch && orgDealerMatch && keywordMatch;
     });
   },
@@ -429,7 +504,7 @@ const LedgerView = {
     return [
       item.month,
       item.storeCode,
-      item.barcode || item.productCode,
+      item.productCode || item.barcode,
       item.productName
     ].join('|');
   },
@@ -458,6 +533,7 @@ const LedgerView = {
     if (this.groupBy === 'region') return item.fullRegion;
     if (this.groupBy === 'salesOffice') return item.salesOffice;
     if (this.groupBy === 'dealer') return item.dealer;
+    if (this.groupBy === 'acc') return item.acc;
     return '';
   },
 
@@ -530,6 +606,7 @@ const LedgerView = {
     setValue('ledger-filter-year', this.filters.year);
     setValue('ledger-filter-month', this.filters.month);
     setValue('ledger-filter-keyword', this.filters.keyword);
+    this.syncKeywordSearchControl();
   },
 
   readFilters() {
@@ -538,6 +615,7 @@ const LedgerView = {
       year: getValue('ledger-filter-year') || '2026',
       month: getValue('ledger-filter-month') || '06',
       keyword: getValue('ledger-filter-keyword'),
+      keywordField: this.filters.keywordField || 'all',
       org: {
         region: this.orgNavigator.region,
         office: this.orgNavigator.office,
@@ -552,6 +630,7 @@ const LedgerView = {
       year: '2026',
       month: '06',
       keyword: '',
+      keywordField: 'all',
       org: {
         region: '',
         office: '',
@@ -685,6 +764,19 @@ const LedgerView = {
       if (orgButton) this.handleOrgAction(orgButton);
     });
 
+    document.getElementById('ledger-search-field-btn')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      document.getElementById('ledger-search-field-dropdown')?.classList.toggle('hidden');
+    });
+
+    document.getElementById('ledger-search-field-dropdown')?.addEventListener('click', (event) => {
+      const option = event.target.closest('[data-ledger-search-field]');
+      if (!option) return;
+      this.filters.keywordField = option.dataset.ledgerSearchField || 'all';
+      this.syncKeywordSearchControl();
+      document.getElementById('ledger-search-field-dropdown')?.classList.add('hidden');
+    });
+
     document.getElementById('ledger-filter-submit')?.addEventListener('click', () => {
       this.readFilters();
       this.loadDataMock();
@@ -695,6 +787,16 @@ const LedgerView = {
       this.readFilters();
       this.loadDataMock();
     });
+
+    if (!this.searchDropdownCloseBound) {
+      document.addEventListener('click', (event) => {
+        const wrapper = document.getElementById('ledger-search-combo-wrapper');
+        if (wrapper && !wrapper.contains(event.target)) {
+          document.getElementById('ledger-search-field-dropdown')?.classList.add('hidden');
+        }
+      });
+      this.searchDropdownCloseBound = true;
+    }
 
     document.getElementById('ledger-filter-expand')?.addEventListener('click', () => {
       this.toggleAdvancedFilters();
@@ -725,7 +827,7 @@ const LedgerView = {
               { label: 'ACC', value: row.acc || '-' },
               { label: '经销商名称', value: row.dealer || '-' },
               { label: '门店编码', value: row.storeCode || '-' },
-              { label: '产品编码', value: row.barcode || '-' },
+              { label: '产品A码', value: row.productCode || row.barcode || '-' },
               { label: '产品名称', value: row.productName || '-' },
               { label: '销售数量', value: String(row.quantity || '-') },
               { label: '销售金额', value: `￥${row.amount || '-'}` },

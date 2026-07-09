@@ -72,6 +72,123 @@ const DashboardView = {
     `;
   },
 
+  getFileStoreDetails() {
+    return [
+      { acc: 'ACC-100', storeName: '保定聚昊门店', storeCode: 'C9001001', region: '华北区域', office: '石家庄营业所', dealerStore: '河北聚昊商贸', status: '正常' },
+      { acc: 'ACC-100', storeName: '北京朝阳便利店', storeCode: 'C9001002', region: '华北区域', office: '北京营业所', dealerStore: '河北聚昊商贸', status: '异常' },
+      { acc: 'ACC-101', storeName: '沈阳商场店', storeCode: 'C9001003', region: '东北区域', office: '沈阳营业所', dealerStore: '沈阳欧亚商贸', status: '正常' },
+      { acc: 'ACC-101', storeName: '长春欧亚超市', storeCode: 'C9001004', region: '东北区域', office: '长春营业所', dealerStore: '沈阳欧亚商贸', status: '异常' },
+      { acc: 'ACC-102', storeName: '上海虹桥店', storeCode: 'C9001005', region: '华东区域', office: '上海营业所', dealerStore: '上海煊超供应链', status: '正常' },
+      { acc: 'ACC-102', storeName: '南京新街口店', storeCode: 'C9001006', region: '华东区域', office: '南京营业所', dealerStore: '上海煊超供应链', status: '正常' },
+      { acc: 'ACC-103', storeName: '武汉汉街店', storeCode: 'C9001007', region: '华中区域', office: '武汉营业所', dealerStore: '武汉多客隆商贸', status: '正常' },
+      { acc: 'ACC-103', storeName: '郑州万达店', storeCode: 'C9001008', region: '华中区域', office: '郑州营业所', dealerStore: '武汉多客隆商贸', status: '异常' },
+      { acc: 'ACC-104', storeName: '广州天河店', storeCode: 'C9001009', region: '华南区域', office: '广州营业所', dealerStore: '广州利好商贸', status: '正常' },
+      { acc: 'ACC-104', storeName: '深圳南山店', storeCode: 'C9001010', region: '华南区域', office: '深圳营业所', dealerStore: '广州利好商贸', status: '正常' },
+      { acc: 'ACC-105', storeName: '西安高新店', storeCode: 'C9001011', region: '西北区域', office: '西安营业所', dealerStore: '西安家乐惠商贸', status: '正常' },
+      { acc: 'ACC-105', storeName: '兰州中心店', storeCode: 'C9001012', region: '西北区域', office: '兰州营业所', dealerStore: '西安家乐惠商贸', status: '异常' }
+    ];
+  },
+
+  getQaStoreDetails() {
+    return [
+      { acc: 'ACC-100', storeName: '保定聚昊门店', storeCode: 'C9001001', region: '华北区域', office: '石家庄营业所', dealerStore: '河北聚昊商贸', status: '通过' },
+      { acc: 'ACC-100', storeName: '北京朝阳便利店', storeCode: 'C9001002', region: '华北区域', office: '北京营业所', dealerStore: '河北聚昊商贸', status: '异常' },
+      { acc: 'ACC-101', storeName: '沈阳商场店', storeCode: 'C9001003', region: '东北区域', office: '沈阳营业所', dealerStore: '沈阳欧亚商贸', status: '通过' },
+      { acc: 'ACC-101', storeName: '长春欧亚超市', storeCode: 'C9001004', region: '东北区域', office: '长春营业所', dealerStore: '沈阳欧亚商贸', status: '异常' },
+      { acc: 'ACC-102', storeName: '上海虹桥店', storeCode: 'C9001005', region: '华东区域', office: '上海营业所', dealerStore: '上海煊超供应链', status: '通过' },
+      { acc: 'ACC-102', storeName: '南京新街口店', storeCode: 'C9001006', region: '华东区域', office: '南京营业所', dealerStore: '上海煊超供应链', status: '通过' },
+      { acc: 'ACC-103', storeName: '武汉汉街店', storeCode: 'C9001007', region: '华中区域', office: '武汉营业所', dealerStore: '武汉多客隆商贸', status: '通过' },
+      { acc: 'ACC-103', storeName: '郑州万达店', storeCode: 'C9001008', region: '华中区域', office: '郑州营业所', dealerStore: '武汉多客隆商贸', status: '异常' },
+      { acc: 'ACC-104', storeName: '广州天河店', storeCode: 'C9001009', region: '华南区域', office: '广州营业所', dealerStore: '广州利好商贸', status: '通过' },
+      { acc: 'ACC-104', storeName: '深圳南山店', storeCode: 'C9001010', region: '华南区域', office: '深圳营业所', dealerStore: '广州利好商贸', status: '通过' },
+      { acc: 'ACC-105', storeName: '西安高新店', storeCode: 'C9001011', region: '西北区域', office: '西安营业所', dealerStore: '西安家乐惠商贸', status: '通过' },
+      { acc: 'ACC-105', storeName: '兰州中心店', storeCode: 'C9001012', region: '西北区域', office: '兰州营业所', dealerStore: '西安家乐惠商贸', status: '异常' }
+    ];
+  },
+
+  openStoreDetailPreview({ title, subtitle, statusTitle, rows, normalStatus }) {
+    const overlay = document.getElementById('overlay-container');
+    if (!overlay) return;
+
+    overlay.innerHTML = `
+      <div id="dashboard-store-detail-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-6 backdrop-blur-sm">
+        <div class="flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="dashboard-store-detail-title">
+          <div class="flex items-start justify-between gap-4 border-b border-gray-100 px-6 py-5">
+            <div>
+              <h3 id="dashboard-store-detail-title" class="text-lg font-black text-[#1d2129]">${title}</h3>
+              <p class="mt-1 text-sm text-[#86909c]">${subtitle}</p>
+            </div>
+            <button type="button" id="dashboard-store-detail-close" class="flex h-8 w-8 items-center justify-center rounded-lg text-[#86909c] transition-colors hover:bg-gray-100 hover:text-[#1d2129]" aria-label="关闭">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <div class="min-h-0 flex-1 overflow-auto px-6 py-5">
+            <table class="w-full min-w-[980px] table-fixed text-left text-sm text-[#4e5969]">
+              <thead class="sticky top-0 z-10 bg-[#f7f8fa] font-semibold text-[#1d2129]">
+                <tr>
+                  <th class="w-28 rounded-tl-lg px-4 py-3">ACC</th>
+                  <th class="w-44 px-4 py-3">门店名称</th>
+                  <th class="w-36 px-4 py-3">门店编码</th>
+                  <th class="w-36 px-4 py-3">本部（区域）</th>
+                  <th class="w-36 px-4 py-3">营业所</th>
+                  <th class="w-44 px-4 py-3">经销商门店</th>
+                  <th class="w-24 rounded-tr-lg px-4 py-3">${statusTitle}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                ${rows.map((row) => {
+                  const normal = row.status === normalStatus;
+                  return `
+                    <tr class="hover:bg-slate-50">
+                      <td class="px-4 py-3 font-semibold text-[#1d2129]">${row.acc}</td>
+                      <td class="px-4 py-3">${row.storeName}</td>
+                      <td class="px-4 py-3 font-mono text-xs">${row.storeCode}</td>
+                      <td class="px-4 py-3">${row.region}</td>
+                      <td class="px-4 py-3">${row.office}</td>
+                      <td class="px-4 py-3">${row.dealerStore}</td>
+                      <td class="px-4 py-3">
+                        <span class="inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${normal ? 'border-green-100 bg-green-50 text-green-700' : 'border-red-100 bg-red-50 text-red-600'}">${row.status}</span>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="flex justify-end border-t border-gray-100 bg-white px-6 py-3 text-xs text-[#86909c]">
+            共 ${rows.length} 条门店数据
+          </div>
+        </div>
+      </div>
+    `;
+
+    const close = () => { overlay.innerHTML = ''; };
+    overlay.querySelector('#dashboard-store-detail-close')?.addEventListener('click', close);
+    overlay.querySelector('#dashboard-store-detail-overlay')?.addEventListener('click', (event) => {
+      if (event.target.id === 'dashboard-store-detail-overlay') close();
+    });
+  },
+
+  openFileDetailPreview() {
+    this.openStoreDetailPreview({
+      title: '区域文件收取明细',
+      subtitle: '展示各区域门店 POS 文件收取与异常状态',
+      statusTitle: '状态',
+      rows: this.getFileStoreDetails(),
+      normalStatus: '正常'
+    });
+  },
+
+  openQaDetailPreview() {
+    this.openStoreDetailPreview({
+      title: '区域门店质检明细',
+      subtitle: '展示各区域门店 POS 数据校验通过与异常状态',
+      statusTitle: '质检状态',
+      rows: this.getQaStoreDetails(),
+      normalStatus: '通过'
+    });
+  },
+
   renderSectionHeader(title, desc, buttonText, buttonId) {
     return `
       <div class="flex items-center justify-between gap-4 mb-5">
@@ -157,7 +274,13 @@ const DashboardView = {
             ${this.renderMetricCard({ icon: 'fa-solid fa-percent', title: '文件收取率', value: '95.7%', desc: '已收文件 / 应收文件', tone: 'blue' })}
           </div>
           <div class="rounded-xl border border-gray-100 bg-white p-5">
-            <h3 class="text-base font-black text-[#1d2129] mb-4">各区域文件收取情况</h3>
+            <div class="mb-4 flex items-center justify-between gap-3">
+              <h3 class="text-base font-black text-[#1d2129]">各区域文件收取情况</h3>
+              <button type="button" id="dashboard-file-detail-preview" class="inline-flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-bold text-brand transition-colors hover:bg-blue-100">
+                <i class="fa-solid fa-table-list"></i>
+                <span>明细预览</span>
+              </button>
+            </div>
             ${this.renderProgressRegions(fileRegions, 'file')}
           </div>
         </section>
@@ -171,7 +294,13 @@ const DashboardView = {
             ${this.renderMetricCard({ icon: 'fa-solid fa-shield-check', title: '质检通过率', value: '90%', desc: '通过门店 / 应检门店', tone: 'blue' })}
           </div>
           <div class="rounded-xl border border-gray-100 bg-white p-5">
-            <h3 class="text-base font-black text-[#1d2129] mb-4">各区域门店数据校验量</h3>
+            <div class="mb-4 flex items-center justify-between gap-3">
+              <h3 class="text-base font-black text-[#1d2129]">各区域门店数据校验量</h3>
+              <button type="button" id="dashboard-qa-detail-preview" class="inline-flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-bold text-brand transition-colors hover:bg-blue-100">
+                <i class="fa-solid fa-table-list"></i>
+                <span>明细预览</span>
+              </button>
+            </div>
             ${this.renderProgressRegions(qaRegions, 'qa')}
           </div>
         </section>
@@ -192,5 +321,15 @@ const DashboardView = {
     go('dashboard-go-ledger', '#ledger');
     go('dashboard-go-ingestion', '#ingestion');
     go('dashboard-go-qa', '#qa');
+    document.getElementById('dashboard-file-detail-preview')?.addEventListener('click', () => {
+      this.openFileDetailPreview();
+    });
+    document.getElementById('dashboard-qa-detail-preview')?.addEventListener('click', () => {
+      this.openQaDetailPreview();
+    });
+  },
+
+  bindEvents() {
+    this.mount();
   }
 };

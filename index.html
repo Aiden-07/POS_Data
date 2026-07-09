@@ -9,7 +9,7 @@
   <!-- FontAwesome via CDN -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Custom Style -->
-  <link rel="stylesheet" href="style.css?v=20260706-org-cascader">
+  <link rel="stylesheet" href="style.css?v=20260708-ledger-search-combo-v1">
   <!-- Tailwind Config -->
   <script>
     tailwind.config = {
@@ -60,10 +60,6 @@
           <i class="fa-solid fa-table-list"></i>
           <span data-i18n="nav_ledger">台账与汇总</span>
         </a>
-        <a href="#analytics" class="nav-item">
-          <i class="fa-solid fa-chart-pie"></i>
-          <span>数据分析</span>
-        </a>
         <div class="nav-group" id="settings-nav-group">
           <button id="settings-nav-toggle" class="nav-item nav-parent" type="button" aria-expanded="false">
             <i class="fa-solid fa-gear"></i>
@@ -72,7 +68,7 @@
           </button>
           <div class="subnav hidden" id="settings-subnav">
             <a href="#settings-users" class="subnav-item">用户管理</a>
-            <a href="#settings-roles" class="subnav-item">角色管理</a>
+            <a href="#settings-roles" class="subnav-item">角色权限</a>
             <a href="#settings-logs" class="subnav-item">系统日志</a>
           </div>
         </div>
@@ -115,6 +111,10 @@
               <button id="change-password-btn" class="user-menu-item" type="button">
                 <i class="fa-solid fa-key"></i>
                 <span>修改密码</span>
+              </button>
+              <button id="account-binding-btn" class="user-menu-item" type="button">
+                <i class="fa-solid fa-link"></i>
+                <span>账号绑定</span>
               </button>
               <button id="logout-btn" class="user-menu-item danger" type="button">
                 <i class="fa-solid fa-right-from-bracket"></i>
@@ -204,23 +204,23 @@
   <div id="overlay-container"></div>
 
   <!-- Scripts -->
-  <script src="js/core/store.js?v=20260624-user-menu"></script>
+  <script src="js/core/store.js?v=20260707-account-binding"></script>
   <script src="js/core/global-period.js?v=20260611-global-period"></script>
   <script src="js/core/i18n.js?v=20260630-inbox-status"></script>
   <script src="js/components/dialog.js?v=20260611-merge"></script>
   <script src="js/components/drawer.js?v=20260611-merge"></script>
   <script src="js/components/ai-assistant.js?v=20260626-ai-fab-drag"></script>
   <script src="js/views/login.js?v=20260630-password-toggle"></script>
-  <script src="js/views/dashboard.js?v=20260624-remove-dashboard-action"></script>
-  <script src="js/views/ingestion.js?v=20260704-upload-period"></script>
-  <script src="js/views/qa.js?v=20260701-global-document-detail"></script>
-  <script src="js/views/ledger.js?v=20260701-global-document-detail"></script>
-  <script src="js/views/settings.js?v=20260706-org-cascader-fix"></script>
-  <script src="js/core/app.js?v=20260629-settings-fields"></script>
+  <script src="js/views/dashboard.js?v=20260707-qa-detail-preview"></script>
+  <script src="js/views/ingestion.js?v=20260709-original-files-detail-v1"></script>
+  <script src="js/views/qa.js?v=20260709-qa-search-all-acc-v1"></script>
+  <script src="js/views/ledger.js?v=20260708-ledger-placeholder-v1"></script>
+  <script src="js/views/settings.js?v=20260708-user-delete-confirm"></script>
+  <script src="js/core/app.js?v=20260707-remove-analytics"></script>
 <script>
 (function () {
-  const STATUS_OPTIONS = ['全部状态', '正常', '驳回', '覆盖'];
-  const REMOVED_CHILD_ACTIONS = new Set(['覆盖', '忽略', '归档', '暂存', '移动到归档', '移动到暂存']);
+  const STATUS_OPTIONS = ['全部状态', '正常', '驳回', '待处理'];
+  const REMOVED_CHILD_ACTIONS = new Set(['归档', '暂存', '移动到归档', '移动到暂存']);
 
   function isFileBoxActive() {
     const tab = document.getElementById('tab-original');
@@ -241,26 +241,11 @@
     });
   }
 
-  function normalizeDuplicateStatus(row) {
-    const text = row.textContent || '';
-    const isDuplicate = text.includes('原始门店数据列表中有重复') || text.includes('重复');
-    if (!isDuplicate) return;
-
-    row.querySelectorAll('td, span').forEach((node) => {
-      if (node.textContent.trim() === '待处理') {
-        node.textContent = '重复';
-        node.classList.remove('text-amber-600', 'bg-amber-50', 'border-amber-100');
-        node.classList.add('text-orange-600', 'bg-orange-50', 'border-orange-100');
-      }
-    });
-  }
-
   function removeChildOnlyActions(table) {
     table.querySelectorAll('.inbox-att-reject-btn').forEach((button) => button.remove());
     table.querySelectorAll('button, a').forEach((node) => {
       if (REMOVED_CHILD_ACTIONS.has(node.textContent.trim())) node.remove();
     });
-    table.querySelectorAll('tr').forEach(normalizeDuplicateStatus);
   }
 
   function normalizeStatusButton() {
@@ -278,8 +263,9 @@
   }
 
   function normalizeStatusDropdown() {
-    const labelsToRemove = new Set(['待处理', '已处理', '重复']);
+    const labelsToRemove = new Set(['已处理', '重复', '覆盖']);
     document.querySelectorAll('button, [role="option"], [role="menuitem"]').forEach((node) => {
+      if (node.classList.contains('inbox-att-resolve-btn')) return;
       const label = node.textContent.trim();
       if (labelsToRemove.has(label)) node.remove();
     });
