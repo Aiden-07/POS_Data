@@ -1833,6 +1833,118 @@ const IngestionView = {
     };
   },
 
+  getSingleStoreExcelName(name = '', storeName = '') {
+    const baseName = String(name || storeName || '单门店销售明细')
+      .replace(/\.(zip|xlsx|xls|csv)$/i, '')
+      .replace(/销售明细包$/i, '销售明细')
+      .replace(/数据压缩包$/i, '销售明细');
+    return /\.xlsx$/i.test(baseName) ? baseName : `${baseName}.xlsx`;
+  },
+
+  getMatchedRowSourceAttIndex(row = {}, inboxItem = {}) {
+    if (typeof row.sourceAttIdx === 'number') return row.sourceAttIdx;
+    const sourceAttachments = inboxItem.attachments || [];
+    if (!sourceAttachments.length) return 0;
+    const numericId = Number.parseInt(String(row.id || '').replace(/\D/g, ''), 10);
+    return Number.isFinite(numericId) ? Math.max(0, (numericId - 1) % sourceAttachments.length) : 0;
+  },
+
+  buildAttachmentStoreSplitRows(context = {}) {
+    const inboxItem = context.inboxItem;
+    const attachment = context.attachment;
+    const attachmentIndex = typeof context.attachmentIndex === 'number' ? context.attachmentIndex : 0;
+    if (!inboxItem || !attachment) return [];
+
+    const matchedRows = this.data
+      .filter(row => String(row.sourceEmailId || row.id) === String(inboxItem.id))
+      .filter(row => this.getMatchedRowSourceAttIndex(row, inboxItem) === attachmentIndex)
+      .filter(row => !String(row.status || '').includes('已归档'))
+      .slice(0, 4)
+      .map((row, index) => {
+        const storeName = this.getLocalizedText(row.storeName || row.rawStoreName || row.fileName || attachment.name);
+        return {
+          fileName: this.getSingleStoreExcelName(row.rawStoreName || row.fileName || attachment.name, storeName),
+          storeName,
+          status: '已匹配',
+          tone: 'success',
+          previewKind: 'matched',
+          rowId: row.id,
+          sort: index
+        };
+      });
+
+    const stashRows = this.getStashSourceRows()
+      .filter(item => String(item.row?.sourceEmailId || '') === String(inboxItem.id))
+      .filter(item => Number(item.row?.sourceAttIdx) === attachmentIndex)
+      .slice(0, 4)
+      .map((item, index) => {
+        const storeName = item.row?.storeName || attachment.name;
+        return {
+          fileName: this.getSingleStoreExcelName(storeName, storeName),
+          storeName,
+          status: '未匹配',
+          tone: 'warning',
+          previewKind: 'stash',
+          stashKey: item.key,
+          sort: matchedRows.length + index
+        };
+      });
+
+    const rows = [...matchedRows, ...stashRows];
+    if (rows.length) return rows;
+
+    const fallbackStore = this.getLocalizedText(context.row?.storeName || attachment.name || inboxItem.emailSubject || '单门店数据');
+    const isZip = /\.zip$/i.test(attachment.name || '');
+    return [{
+      fileName: isZip ? this.getZipAttachmentFiles(inboxItem, attachment)[0]?.name || '门店销售明细.xlsx' : this.getSingleStoreExcelName(attachment.name, fallbackStore),
+      storeName: fallbackStore,
+      status: '已匹配',
+      tone: 'success',
+      previewKind: 'source',
+      emailId: inboxItem.id,
+      attachmentIndex,
+      zipIndex: 0,
+      sort: 0
+    }];
+  },
+
+  renderStoreSplitRows(rows = []) {
+    if (!rows.length) return '';
+    return `
+      <div class="mt-3 rounded-lg border border-blue-100 bg-white overflow-hidden">
+        <div class="flex items-center justify-between bg-blue-50/70 px-3 py-2">
+          <span class="text-xs font-bold text-[#1d2129]">拆分结果</span>
+          <span class="text-[11px] font-medium text-[#86909c]">单门店单 Excel</span>
+        </div>
+        <div class="divide-y divide-gray-100">
+          ${rows.map(row => {
+            const statusClass = row.tone === 'warning'
+              ? 'bg-amber-50 text-amber-700 border-amber-100'
+              : 'bg-green-50 text-green-700 border-green-100';
+            return `
+              <div class="grid grid-cols-[minmax(0,1.5fr)_minmax(0,0.9fr)_72px] items-center gap-3 px-3 py-2.5 text-xs">
+                <button type="button"
+                  class="store-split-preview-btn min-w-0 flex items-center gap-2 text-left text-brand hover:text-blue-700 hover:underline"
+                  data-preview-kind="${this.escapeHtml(row.previewKind || '')}"
+                  data-row-id="${this.escapeHtml(row.rowId || '')}"
+                  data-stash-key="${this.escapeHtml(row.stashKey || '')}"
+                  data-email-id="${this.escapeHtml(row.emailId || '')}"
+                  data-att-idx="${typeof row.attachmentIndex === 'number' ? row.attachmentIndex : ''}"
+                  data-zip-index="${typeof row.zipIndex === 'number' ? row.zipIndex : ''}"
+                  title="${this.escapeHtml(row.fileName)}">
+                  <i class="fa-solid fa-file-excel shrink-0 text-green-600"></i>
+                  <span class="truncate">${this.escapeHtml(row.fileName)}</span>
+                </button>
+                <div class="truncate font-medium text-[#4e5969]" title="${this.escapeHtml(row.storeName)}">${this.escapeHtml(row.storeName)}</div>
+                <span class="justify-self-end rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClass}">${this.escapeHtml(row.status)}</span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  },
+
   getFileCheckLogStatus(statusText = '') {
     const text = String(statusText || '');
     if (/校验中|检验中/.test(text)) return '校验中';
@@ -1967,7 +2079,15 @@ const IngestionView = {
       addFileReceived();
       addFileCheck(fileStatus);
       if (fileStatus === '正常') {
-        logs.push(this.createLifecycleLog('门店匹配', '待处理', '文件校验完成，等待生成门店匹配结果', updateTime, 'info'));
+        const storeMatchLog = this.createLifecycleLog('门店匹配', '已处理', '文件匹配完成，已同步至已/未匹配列表中', updateTime, 'success');
+        storeMatchLog.splitRows = this.buildAttachmentStoreSplitRows({
+          ...context,
+          inboxItem,
+          attachment,
+          attachmentIndex: context.attachmentIndex,
+          row
+        });
+        logs.push(storeMatchLog);
       }
       return logs;
     }
@@ -2088,6 +2208,7 @@ const IngestionView = {
                   </div>
                   <div class="mt-1 text-sm leading-6 text-[#4e5969]">${this.escapeHtml(log.action)}</div>
                   <div class="mt-1 text-xs text-[#86909c]">${this.escapeHtml(log.time)}</div>
+                  ${log.splitRows ? this.renderStoreSplitRows(log.splitRows) : ''}
                 </div>
               </div>
             `).join('')}
@@ -2116,6 +2237,31 @@ const IngestionView = {
           return;
         }
         this.showInboxAttachmentPreview(item, attachment, zipIndex);
+      });
+    });
+
+    overlay.querySelectorAll('.store-split-preview-btn').forEach(btn => {
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const previewKind = btn.dataset.previewKind;
+        if (previewKind === 'matched') {
+          const rowId = btn.dataset.rowId;
+          const targetRow = this.data.find(item => String(item.id) === String(rowId));
+          if (targetRow) this.showStoreDataPreviewModal(targetRow);
+          return;
+        }
+        if (previewKind === 'stash') {
+          const stashKey = btn.dataset.stashKey;
+          const targetItem = this.getStashSourceRows().find(item => item.key === stashKey);
+          if (targetItem) this.showStashStorePreview(targetItem);
+          return;
+        }
+        const emailId = btn.dataset.emailId || inboxItem?.id;
+        const attIdx = btn.dataset.attIdx !== '' ? Number(btn.dataset.attIdx) : sourceAttachmentIndex;
+        const zipIndex = btn.dataset.zipIndex !== '' ? Number(btn.dataset.zipIndex) : 0;
+        const item = this.getInboxData().find(row => String(row.id) === String(emailId));
+        const attachment = item?.attachments?.[attIdx];
+        if (item && attachment) this.showInboxAttachmentPreview(item, attachment, zipIndex);
       });
     });
   },
