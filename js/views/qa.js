@@ -45,6 +45,39 @@ const QAView = {
     { storeName: '益尚客（太阳城）', storeCode: 'S0328228', confidence: '96.9%', aiNote: '缺少“产品名称”，通过产品编码反检产品编码，已修改', dealer: '益尚客商贸', salesTeam: '华北 Team', region: '华北区域', salesOffice: '天津营业所' },
     { storeName: '每日惠北塔', storeCode: 'S0489019', confidence: '100%', aiNote: 'POS表数据完整，校验合规，AI未发现异常', dealer: '每日惠商贸', salesTeam: '东北 Team', region: '东北区域', salesOffice: '沈阳营业所' }
   ],
+
+  getStandardSourceFileName(index, row = {}) {
+    const sourceFiles = [
+      '保定市聚昊商贸有限公司-S0091005.xlsx',
+      '多客隆购物中心(会盟大街)-S0219489-12月.XLS',
+      '邯郸市格耀商贸有限公司-F0807952.xls',
+      '韩百 (韩百商场)S1018566.xlsx',
+      '家得乐 (新民友谊商城)S0210780.xls',
+      '其他-12月 POS.xls',
+      '其他-F0514986-家家乐超市（大市场）12月 POS.xls',
+      '其他-F0714211-利好果蔬生活广场（鞍山腾鳌店）12月 POS.xlsx',
+      '其他-F0775134-台安家得乐超市 12月 POS.XLS',
+      '其他-F0872160-利好生活广场（太和）12月 POS.xlsx',
+      '其他-F0888730-中心城大卖场（金鼎）12月 POS.xls',
+      'F0515524 欧亚长青城（浑南中路）.xls.xls',
+      'F0528553 维多利（赤峰松山万达）-12月.xlsx',
+      'F0582802-煊超市邻里中心店（乐桃路）.xlsx',
+      'F0696540-好乐福超市（177县道）(2).xls',
+      'F0779616-家乐惠超市（宁县早胜店）.xlsx',
+      'S0074170 四海一家生活超市(南方花园).xls',
+      'S0280536-新世纪商厦（崇信县）.xls',
+      'S0282108 旺鲜生八佰伴店 12月.xlsx',
+      'S0328228-益尚客（太阳城）-12月 POS.xlsx'
+    ];
+    return sourceFiles[index] || `${row.storeName || '原始门店'}-${row.storeCode || index + 1}.xlsx`;
+  },
+
+  getStandardSourceTime(index) {
+    const totalMinutes = 22 * 60 + 15 + (Number(index) || 0) * 3;
+    const hour = String(Math.floor(totalMinutes / 60) % 24).padStart(2, '0');
+    const minute = String(totalMinutes % 60).padStart(2, '0');
+    return `2026-05-20 ${hour}:${minute}:00`;
+  },
   
   async loadData() {
     try {
@@ -460,7 +493,7 @@ const QAView = {
     return `<button type="button" class="qa-standard-preview-trigger max-w-full truncate text-brand hover:text-blue-700 hover:underline transition-colors text-left font-medium" data-index="${this.escapeHtml(index)}" title="预览 ${safeValue}">${safeValue}</button>`;
   },
 
-  renderQaActionButtons({ scope, index = '', id = '', row = null } = {}) {
+  renderQaActionButtons({ scope, index = '', id = '', row = null, hideDetail = false } = {}) {
     const safeScope = this.escapeHtml(scope || '');
     const safeIndex = this.escapeHtml(index);
     const safeId = this.escapeHtml(id);
@@ -468,9 +501,11 @@ const QAView = {
       const actions = this.getExceptionActions(row || this.data.find((item) => item.id === id) || {});
       return `
         <div class="flex items-center gap-1">
-          <button type="button" class="qa-exception-preview-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-id="${safeId}" title="详情">
-            <i class="fa-solid fa-list-check"></i>
-          </button>
+          ${hideDetail ? '' : `
+            <button type="button" class="qa-exception-document-detail-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-id="${safeId}" title="单据详情">
+              <i class="fa-solid fa-list-check"></i>
+            </button>
+          `}
           ${actions.canEdit ? `
             <button type="button" class="qa-inline-edit-trigger px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50" data-scope="${safeScope}" data-id="${safeId}" title="编辑">
               <i class="fa-regular fa-pen-to-square"></i>
@@ -531,7 +566,9 @@ const QAView = {
     if (!row || row.dataset.editing === 'true') return;
     row.dataset.editing = 'true';
     const originalHtml = row.innerHTML;
-    const editableCells = Array.from(row.querySelectorAll('[data-edit-field]'));
+    const allowedDocumentFields = new Set(['storeName', 'storeCode', 'dealer']);
+    const editableCells = Array.from(row.querySelectorAll('[data-edit-field]'))
+      .filter(cell => allowedDocumentFields.has(cell.dataset.editField));
     const actionCell = button.closest('td');
     const editContext = this.getInlineEditContext(row);
 
@@ -652,7 +689,8 @@ const QAView = {
             scope: button.dataset.scope || '',
             index: button.dataset.index || '',
             id: button.dataset.id || '',
-            row: targetRow
+            row: targetRow,
+            hideDetail: button.dataset.scope === 'exception' && this.exceptionDisplayMode === 'detail'
           });
         }
         if (typeof Dialog !== 'undefined') Dialog.toast('已保存当前行', 'success');
@@ -678,8 +716,8 @@ const QAView = {
     return [
       { value: 'all', label: '全部' },
       { value: 'acc', label: 'ACC' },
-      { value: 'storeName', label: '门店名称（客户名称）' },
-      { value: 'storeCode', label: '门店编码（客户编码）' },
+      { value: 'storeName', label: '门店名称' },
+      { value: 'storeCode', label: '门店编码' },
       { value: 'dealer', label: '经销商' }
     ];
   },
@@ -759,8 +797,8 @@ const QAView = {
                 <th class="px-4 py-3 w-24">年月</th>
                 <th class="px-4 py-3 w-20">ACC</th>
                 <th class="px-4 py-3 w-36">经销商</th>
-                <th class="px-4 py-3 w-36">门店编码（客户编码）</th>
-                <th class="px-4 py-3 w-52">门店名称（客户名称）</th>
+                <th class="px-4 py-3 w-36">门店编码</th>
+                <th class="px-4 py-3 w-52">门店名称</th>
                 <th class="px-4 py-3 w-36">69码</th>
                 <th class="px-4 py-3 w-56">产品名称</th>
                 <th class="px-4 py-3 w-24">销售数量</th>
@@ -870,8 +908,8 @@ const QAView = {
               <th class="px-4 py-3 w-12 rounded-tl-lg">
                 <input type="checkbox" id="qa-standard-select-all" class="rounded border-gray-300 text-brand focus:ring-brand">
               </th>
-              <th class="px-4 py-3 w-56">门店名称（客户名称）</th>
-              <th class="px-4 py-3 w-36">门店编码（客户编码）</th>
+              <th class="px-4 py-3 w-56">门店名称</th>
+              <th class="px-4 py-3 w-36">门店编码</th>
               <th class="px-4 py-3 w-20">置信度</th>
               <th class="px-4 py-3 w-36">状态</th>
               <th class="px-4 py-3 w-64">AI判断</th>
@@ -943,8 +981,8 @@ const QAView = {
           <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
             <tr>
               <th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="qa-stash-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>
-              <th class="px-4 py-3 w-56">门店名称（客户名称）</th>
-              <th class="px-4 py-3 w-36">门店编码（客户编码）</th>
+              <th class="px-4 py-3 w-56">门店名称</th>
+              <th class="px-4 py-3 w-36">门店编码</th>
               <th class="px-4 py-3 w-64">AI判断</th>
               <th class="px-4 py-3 w-36">本部</th>
               <th class="px-4 py-3 w-36">营业所</th>
@@ -1227,7 +1265,7 @@ const QAView = {
           </td>
           <td class="px-4 py-3 text-xs max-w-xs truncate" data-edit-field="aiJudgment" data-edit-value="${aiJudgment}" title="${aiJudgment}">${aiJudgment || '-'}</td>
           <td class="px-4 py-3">
-            ${this.renderQaActionButtons({ scope: 'exception', id: row.id, row })}
+            ${this.renderQaActionButtons({ scope: 'exception', id: row.id, row, hideDetail: true })}
           </td>
         </tr>
       `;
@@ -1291,8 +1329,8 @@ const QAView = {
               <th class="px-4 py-3 w-24">年月</th>
               <th class="px-4 py-3 w-20">ACC</th>
               <th class="px-4 py-3 w-36">经销商</th>
-              <th class="px-4 py-3 w-36">门店编码（客户编码）</th>
-              <th class="px-4 py-3 w-52">门店名称（客户名称）</th>
+              <th class="px-4 py-3 w-36">门店编码</th>
+              <th class="px-4 py-3 w-52">门店名称</th>
               <th class="px-4 py-3 w-32">69 码</th>
               <th class="px-4 py-3 w-48">产品名称</th>
               <th class="px-4 py-3 w-20">销售数量</th>
@@ -1319,8 +1357,8 @@ const QAView = {
           <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
             <tr>
               <th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="qa-exception-select-all" class="rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40"></th>
-              <th class="px-4 py-3 w-56">门店名称（客户名称）</th>
-              <th class="px-4 py-3 w-36">门店编码（客户编码）</th>
+              <th class="px-4 py-3 w-56">门店名称</th>
+              <th class="px-4 py-3 w-36">门店编码</th>
               <th class="px-4 py-3 w-20">异常数</th>
               <th class="px-4 py-3 w-28">主要异常类型</th>
               <th class="px-4 py-3 w-64">AI判断</th>
@@ -1568,7 +1606,7 @@ const QAView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
 
-    const headers = ['年月', 'ACC', '经销商', '门店编码（客户编码）', '门店名称（客户名称）', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
+    const headers = ['年月', 'ACC', '经销商', '门店编码', '门店名称', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
     const rows = this.getStandardPreviewRows(row);
     overlay.innerHTML = `
       <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6 py-8">
@@ -1652,7 +1690,7 @@ const QAView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
 
-    const headers = ['年月', 'ACC', '经销商', '门店编码（客户编码）', '门店名称（客户名称）', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
+    const headers = ['年月', 'ACC', '经销商', '门店编码', '门店名称', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
     const originalRows = this.getOriginalPreviewRows(row);
     const standardRows = this.getStandardPreviewRows(row);
     overlay.innerHTML = `
@@ -1731,7 +1769,7 @@ const QAView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
 
-    const headers = ['年月', 'ACC', '经销商', '门店编码（客户编码）', '门店名称（客户名称）', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
+    const headers = ['年月', 'ACC', '经销商', '门店编码', '门店名称', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
     const originalRows = this.getOriginalPreviewRows(matched);
     overlay.innerHTML = `
       <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6 py-8">
@@ -1797,7 +1835,7 @@ const QAView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
 
-    const headers = ['年月', 'ACC', '经销商', '门店编码（客户编码）', '门店名称（客户名称）', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
+    const headers = ['年月', 'ACC', '经销商', '门店编码', '门店名称', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
     const originalRows = this.getOriginalPreviewRows(matched);
     const exceptionRows = this.getExceptionPreviewRows(exceptionRow);
     overlay.innerHTML = `
@@ -1964,11 +2002,16 @@ const QAView = {
           moduleName: '质量检查 - 标准POS表',
           currentNode: '标准POS表',
           title: row.storeName,
-          nameLabel: '门店名称（客户名称）',
+          nameLabel: '门店名称',
           statusText: 'AI质检通过',
-          row,
+          sourceFileName: this.getStandardSourceFileName(index, row),
+          row: {
+            ...row,
+            sourceFileName: this.getStandardSourceFileName(index, row),
+            updatedAt: row.updatedAt || this.getStandardSourceTime(index)
+          },
           moduleFields: [
-            { label: '门店编码（客户编码）', value: row.storeCode || '-' },
+            { label: '门店编码', value: row.storeCode || '-' },
             { label: '置信度', value: row.confidence || '-' },
             { label: 'AI判断', value: row.aiNote || '-' },
             { label: 'ACC', value: this.getQaAccName(row, index) },
@@ -1982,6 +2025,39 @@ const QAView = {
   },
 
   bindExceptionEvents() {
+    document.querySelectorAll('.qa-exception-document-detail-trigger').forEach((trigger) => {
+      trigger.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const row = this.data.find((item) => item.id === trigger.dataset.id);
+        if (!row || typeof IngestionView === 'undefined' || typeof IngestionView.openDocumentDetail !== 'function') return;
+        const standardIndex = this.standardData.findIndex((item) => item.storeCode === row.storeCode || item.storeName === row.storeName);
+        const sourceIndex = standardIndex >= 0 ? standardIndex : 0;
+        const sourceFileName = this.getStandardSourceFileName(sourceIndex, row);
+        IngestionView.openDocumentDetail({
+          moduleName: '质量检查 - 异常数据',
+          currentNode: '异常数据',
+          title: row.storeName || row.storeCode || '异常单据',
+          nameLabel: '门店名称',
+          statusText: this.getExceptionStatus(row),
+          sourceFileName,
+          row: {
+            ...row,
+            sourceFileName,
+            updatedAt: row.updatedAt || this.getStandardSourceTime(sourceIndex)
+          },
+          moduleFields: [
+            { label: '门店编码', value: row.storeCode || '-' },
+            { label: '异常类型', value: row.conflictType || '-' },
+            { label: 'AI判断', value: row.aiJudgment || '-' },
+            { label: 'ACC', value: this.getQaAccName(row) },
+            { label: '本部', value: this.getHeadquarter(row) || '-' },
+            { label: '营业所', value: row.salesOffice || '-' },
+            { label: '经销商', value: row.dealer || '-' }
+          ]
+        });
+      });
+    });
+
     document.querySelectorAll('.qa-exception-preview-trigger').forEach((trigger) => {
       trigger.addEventListener('click', (event) => {
         event.stopPropagation();

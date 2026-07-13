@@ -32,6 +32,7 @@ const IngestionView = {
   },
 
   isDuplicateAttachment(attachment) {
+    if (attachment?.repeatMultiStoreFlow) return true;
     const reason = attachment?.rejectReason || '';
     return reason.includes('重复') || reason.includes('覆盖/忽略');
   },
@@ -281,7 +282,7 @@ const IngestionView = {
   
   async loadData() {
     try {
-      const res = await fetch('data/files_mock.json?v=20260610-attachment-audit-columns');
+      const res = await fetch('data/files_mock.json?v=20260710-exception-table-route');
       this.data = await res.json();
       this.migrateOriginalStatusToPending();
       this.loadApprovedOriginalIds();
@@ -610,8 +611,8 @@ const IngestionView = {
         { value: 'all', label: '全部' },
         { value: 'rawStoreName', label: '原始门店名称' },
         { value: 'rawStoreCode', label: '原始门店编码' },
-        { value: 'storeName', label: '门店名称（客户名称）' },
-        { value: 'storeCode', label: '门店编码（客户编码）' },
+        { value: 'storeName', label: '门店名称' },
+        { value: 'storeCode', label: '门店编码' },
         { value: 'dealer', label: '经销商' },
         { value: 'acc', label: 'ACC名称' }
       ];
@@ -1019,10 +1020,46 @@ const IngestionView = {
           rejectReason = '系统正在解析并校验该附件';
         }
         
+        const isMultiStoreAttachment = (idx === 1 || idx === 2 || idx === 4) && i === 0;
+        if (idx === 2 && i === 0) {
+          status = '待处理';
+          rejectReason = '无门店名称/门店编码';
+        }
+        if (idx === 4 && i === 0) {
+          rejectReason = '无门店名称/门店编码';
+        }
         attachments.push({
           name: (isZip && i === 0) || (idx === 2 && i === 0)
             ? `${storeNameCN}-销售明细包.zip`
             : `${storeNameCN}${i > 0 ? '-' + (i + 1) : ''}-销售明细.xlsx`,
+          isMultiStore: isMultiStoreAttachment,
+          splitStores: idx === 1 && i === 0
+            ? [
+                { storeName: '多客隆会盟大街', status: '已匹配' },
+                { storeName: '多客隆沁河路', status: '已匹配' },
+                { storeName: '多客隆黄河大道', status: '未匹配' }
+              ]
+            : idx === 2 && i === 0
+              ? [
+                  { storeName: '邯郸格耀人民路', status: '重复' },
+                  { storeName: '邯郸格耀滏东店', status: '重复' },
+                  { storeName: '邯郸格耀中华店', status: '已匹配' }
+                ]
+            : idx === 4 && i === 0
+              ? [
+                  { storeName: '新民友谊商城', status: '已匹配' },
+                  { storeName: '新民友谊商城东店', status: '已匹配' },
+                  { storeName: '', fileName: '待识别门店-销售明细.xlsx', status: '驳回', reason: '无门店名称/门店编码' }
+                ]
+              : [],
+          initialSplitStores: idx === 2 && i === 0
+            ? [
+                { storeName: '邯郸格耀人民路', status: '已匹配' },
+                { storeName: '邯郸格耀滏东店', status: '已匹配' },
+                { storeName: '', fileName: '待识别门店-销售明细.xlsx', status: '驳回', reason: '无门店名称/门店编码' }
+              ]
+            : [],
+          repeatMultiStoreFlow: idx === 2 && i === 0,
           status,
           rejectReason,
           sourceMethod: sourceMethods[(idx + i) % sourceMethods.length]
@@ -1060,8 +1097,18 @@ const IngestionView = {
       return inboxItem;
     });
     
-    this.inboxDataCache = inboxItems;
-    return inboxItems;
+    const deletionState = this.getInboxDeletionState();
+    this.inboxDataCache = inboxItems
+      .filter(item => !deletionState.parents.includes(String(item.id)))
+      .map(item => {
+        const deletedNames = deletionState.attachments[String(item.id)] || [];
+        item.attachments = item.attachments.filter(attachment => !deletedNames.includes(attachment.name));
+        item.attachmentCount = item.attachments.length;
+        this.recalcInboxItemStatus(item);
+        return item;
+      })
+      .filter(item => item.attachments.length > 0);
+    return this.inboxDataCache;
   },
   
   renderInbox() {
@@ -1081,6 +1128,9 @@ const IngestionView = {
         item.attachments.some(attachment => this.inboxStatusFilter.includes(attachment.status))
       );
     }
+    filteredInboxData.forEach((item, index) => {
+      item.index = index + 1;
+    });
     
     if (filteredInboxData.length === 0) {
       if (loading) loading.classList.add('hidden');
@@ -1107,6 +1157,7 @@ const IngestionView = {
             <th class="px-4 py-3 w-24 text-center">${cn ? '附件数' : '첨부 수'}</th>
             <th class="px-4 py-3 w-44">${cn ? '材料提供人' : '제공자'}</th>
             <th class="px-4 py-3 w-32">${cn ? '材料提供时间' : '제공 시간'}</th>
+            <th class="px-3 py-3 w-20 text-center">${cn ? '操作' : '조작'}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100" id="inbox-tbody">
@@ -1190,6 +1241,11 @@ const IngestionView = {
         <td class="px-4 py-3">
           <span class="text-sm text-[#4e5969]">${item.provideTime}</span>
         </td>
+        <td class="px-3 py-3 text-center">
+          <button type="button" class="inbox-parent-delete-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors" data-email-id="${item.id}" title="${this.getCurrentLang() === 'cn' ? '删除单据' : '문서 삭제'}">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        </td>
       </tr>
     `;
   },
@@ -1198,7 +1254,7 @@ const IngestionView = {
     const cn = this.getCurrentLang() === 'cn';
     return `
       <tr class="inbox-detail-row hidden" data-parent-id="${item.id}">
-        <td colspan="8" class="p-0 bg-[#f7faff]">
+        <td colspan="9" class="p-0 bg-[#f7faff]">
           <div class="px-0 py-4 border-t border-blue-100">
             <table class="w-full table-fixed text-left text-xs text-[#4e5969] border border-gray-100 rounded-lg overflow-hidden">
               <thead class="bg-[#eef2fb] text-[#1d2129] font-semibold">
@@ -1229,7 +1285,7 @@ const IngestionView = {
     return `
       <tr class="hover:bg-slate-50 transition-colors" data-email-id="${emailId}" data-att-idx="${index}">
         <td class="px-4 py-2.5 w-[34%] max-w-0">
-          <span class="inbox-att-name-text cursor-pointer text-brand hover:text-blue-700 hover:underline transition-colors truncate block" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '点击预览' : '클릭하여 미리보기'}">${this.escapeHtml(att.name)}</span>
+          <span class="inbox-att-name-text cursor-pointer text-brand hover:text-blue-700 hover:underline transition-colors truncate block" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '点击预览' : '클릭하여 미리보기'}">${this.escapeHtml(this.getAttachmentDisplayName(att))}</span>
         </td>
         <td class="px-4 py-2.5 w-[120px] text-center">
           <span class="px-2 py-0.5 rounded-full text-xs font-semibold border ${isRejected ? 'bg-red-50 text-red-600 border-red-100' : isPending ? 'bg-amber-50 text-amber-700 border-amber-100' : isCovered ? 'bg-blue-50 text-brand border-blue-100' : isArchived ? 'bg-slate-50 text-slate-500 border-slate-100' : isStashed ? 'bg-blue-50 text-brand border-blue-100' : 'bg-green-50 text-green-700 border-green-100'}">
@@ -1248,6 +1304,9 @@ const IngestionView = {
               <button type="button" class="inbox-att-resolve-btn rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-medium text-brand hover:bg-blue-100 transition-colors" data-action="cover" data-email-id="${emailId}" data-att-idx="${index}">覆盖</button>
               <button type="button" class="inbox-att-resolve-btn rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-[#4e5969] hover:bg-slate-50 transition-colors" data-action="ignore" data-email-id="${emailId}" data-att-idx="${index}">忽略</button>
             ` : ''}
+            <button type="button" class="inbox-att-delete-btn rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '删除附件' : '첨부 파일 삭제'}">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
           </div>
         </td>
       </tr>
@@ -1269,6 +1328,143 @@ const IngestionView = {
     this.recalcInboxItemStatus(inboxItem);
     this.renderInbox();
     Dialog.toast(resolvedText, 'success');
+  },
+
+  getInboxDeletionState() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('pos-inbox-deletions') || '{}');
+      return {
+        parents: Array.isArray(saved.parents) ? saved.parents : [],
+        attachments: saved.attachments && typeof saved.attachments === 'object' ? saved.attachments : {}
+      };
+    } catch (error) {
+      return { parents: [], attachments: {} };
+    }
+  },
+
+  saveInboxDeletionState(state) {
+    try {
+      localStorage.setItem('pos-inbox-deletions', JSON.stringify(state));
+    } catch (error) {
+      // 本地存储不可用时，删除仍在当前会话内生效。
+    }
+  },
+
+  rememberInboxDeletion(emailId, attachmentName = '') {
+    const state = this.getInboxDeletionState();
+    if (!attachmentName) {
+      if (!state.parents.includes(String(emailId))) state.parents.push(String(emailId));
+      delete state.attachments[String(emailId)];
+    } else {
+      const names = state.attachments[String(emailId)] || [];
+      if (!names.includes(attachmentName)) names.push(attachmentName);
+      state.attachments[String(emailId)] = names;
+    }
+    this.saveInboxDeletionState(state);
+  },
+
+  forgetInboxDeletion(emailId, attachmentName = '') {
+    const state = this.getInboxDeletionState();
+    if (!attachmentName) {
+      state.parents = state.parents.filter(id => id !== String(emailId));
+    } else {
+      state.attachments[String(emailId)] = (state.attachments[String(emailId)] || []).filter(name => name !== attachmentName);
+      if (!state.attachments[String(emailId)].length) delete state.attachments[String(emailId)];
+    }
+    this.saveInboxDeletionState(state);
+  },
+
+  showInboxDeleteUndo(message, onUndo) {
+    const toast = document.createElement('div');
+    toast.className = 'fixed top-6 left-1/2 -translate-x-1/2 z-[10001] flex items-center gap-4 rounded-lg bg-slate-800 px-5 py-3 text-white shadow-xl';
+    toast.innerHTML = `<span class="text-sm font-medium">${this.escapeHtml(message)}</span><button type="button" class="font-semibold text-blue-200 hover:text-white">撤销</button>`;
+    document.body.appendChild(toast);
+    let settled = false;
+    const timer = setTimeout(() => {
+      settled = true;
+      toast.remove();
+    }, 5000);
+    toast.querySelector('button')?.addEventListener('click', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      toast.remove();
+      onUndo?.();
+    });
+  },
+
+  removeInboxParent(emailId, allowUndo = true) {
+    const items = this.getInboxData();
+    const itemIndex = items.findIndex(item => String(item.id) === String(emailId));
+    if (itemIndex < 0) return;
+    const removedItem = items[itemIndex];
+    const removedRows = this.data.filter(row => String(row.sourceEmailId || row.id) === String(emailId));
+    items.splice(itemIndex, 1);
+    this.data = this.data.filter(row => String(row.sourceEmailId || row.id) !== String(emailId));
+    this.rememberInboxDeletion(emailId);
+    this.renderInbox();
+    this.updateStats?.();
+    if (allowUndo) {
+      this.showInboxDeleteUndo('父级单据及关联附件已删除', () => {
+        items.splice(itemIndex, 0, removedItem);
+        this.data.push(...removedRows);
+        this.forgetInboxDeletion(emailId);
+        this.renderInbox();
+        this.updateStats?.();
+      });
+    }
+  },
+
+  removeInboxAttachment(emailId, attachmentIndex) {
+    const item = this.getInboxData().find(row => String(row.id) === String(emailId));
+    const attachment = item?.attachments?.[attachmentIndex];
+    if (!item || !attachment) return;
+    if (item.attachments.length === 1) {
+      this.removeInboxParent(emailId, true);
+      return;
+    }
+    const removedRows = this.data.filter(row => String(row.sourceEmailId) === String(emailId) && Number(row.sourceAttIdx) === attachmentIndex);
+    item.attachments.splice(attachmentIndex, 1);
+    item.attachmentCount = item.attachments.length;
+    this.data = this.data.filter(row => !(String(row.sourceEmailId) === String(emailId) && Number(row.sourceAttIdx) === attachmentIndex));
+    this.recalcInboxItemStatus(item);
+    this.rememberInboxDeletion(emailId, attachment.name);
+    this.renderInbox();
+    this.updateStats?.();
+    this.showInboxDeleteUndo('附件及关联数据已删除', () => {
+      item.attachments.splice(attachmentIndex, 0, attachment);
+      item.attachmentCount = item.attachments.length;
+      this.data.push(...removedRows);
+      this.recalcInboxItemStatus(item);
+      this.forgetInboxDeletion(emailId, attachment.name);
+      this.renderInbox();
+      this.updateStats?.();
+    });
+  },
+
+  confirmDeleteInboxParent(emailId) {
+    const item = this.getInboxData().find(row => String(row.id) === String(emailId));
+    if (!item) return;
+    const linkedCount = this.data.filter(row => String(row.sourceEmailId || row.id) === String(emailId)).length;
+    Dialog.show({
+      title: '删除父级单据',
+      content: `<div class="space-y-3"><p>确认删除“${this.escapeHtml(item.emailSubject)}”吗？</p><div class="rounded-lg border border-red-100 bg-red-50 p-3 text-red-700">将同时删除 ${item.attachments.length} 个附件及 ${linkedCount} 条关联数据。</div></div>`,
+      confirmText: '确认删除',
+      onConfirm: () => this.removeInboxParent(emailId, true)
+    });
+  },
+
+  confirmDeleteInboxAttachment(emailId, attachmentIndex) {
+    const item = this.getInboxData().find(row => String(row.id) === String(emailId));
+    const attachment = item?.attachments?.[attachmentIndex];
+    if (!item || !attachment) return;
+    const lastAttachment = item.attachments.length === 1;
+    Dialog.show({
+      title: lastAttachment ? '删除最后一个附件' : '删除附件',
+      content: `<div class="space-y-3"><p>确认删除“${this.escapeHtml(this.getAttachmentDisplayName(attachment))}”吗？</p>${lastAttachment ? '<div class="rounded-lg border border-red-100 bg-red-50 p-3 text-red-700">这是最后一个附件，父级单据也将一并删除。</div>' : '<p class="text-slate-500">该附件产生的关联数据也会删除。</p>'}</div>`,
+      confirmText: '确认删除',
+      onConfirm: () => this.removeInboxAttachment(emailId, attachmentIndex)
+    });
   },
 
   openInboxAttachmentRejectConfirm(emailId, attachmentIndex) {
@@ -1488,9 +1684,16 @@ const IngestionView = {
     tbody.querySelectorAll('.inbox-master-row').forEach(row => {
       row.addEventListener('click', (e) => {
         // 不拦截已有的事件
-        if (e.target.closest('.inbox-expand-btn')) return;
+        if (e.target.closest('.inbox-expand-btn, .inbox-parent-delete-btn')) return;
         const btn = row.querySelector('.inbox-expand-btn');
         if (btn) btn.click();
+      });
+    });
+
+    tbody.querySelectorAll('.inbox-parent-delete-btn').forEach(btn => {
+      btn.addEventListener('click', event => {
+        event.stopPropagation();
+        self.confirmDeleteInboxParent(btn.dataset.emailId);
       });
     });
     
@@ -1627,6 +1830,15 @@ const IngestionView = {
         self.resolveDuplicateAttachment(emailId, attIdx, action);
       });
     });
+
+    detailRow.querySelectorAll('.inbox-att-delete-btn').forEach(btn => {
+      btn.addEventListener('click', event => {
+        event.stopPropagation();
+        const emailId = btn.getAttribute('data-email-id');
+        const attIdx = Number(btn.getAttribute('data-att-idx') || 0);
+        self.confirmDeleteInboxAttachment(emailId, attIdx);
+      });
+    });
     
     // 附件名称点击预览
     detailRow.querySelectorAll('.inbox-att-name-text').forEach(nameEl => {
@@ -1641,6 +1853,28 @@ const IngestionView = {
 
   getZipAttachmentFiles(inboxItem, attachment) {
     const cn = this.getCurrentLang() === 'cn';
+    if (attachment?.repeatMultiStoreFlow) {
+      return [
+        {
+          name: cn ? '邯郸格耀人民路-销售明细.xlsx' : '한단 거야오 인민로-판매 상세.xlsx',
+          type: 'XLSX',
+          status: cn ? '重复' : '중복',
+          note: cn ? '与原始门店数据重复' : '기존 매장 데이터와 중복'
+        },
+        {
+          name: cn ? '邯郸格耀滏东店-销售明细.xlsx' : '한단 거야오 푸둥점-판매 상세.xlsx',
+          type: 'XLSX',
+          status: cn ? '重复' : '중복',
+          note: cn ? '与原始门店数据重复' : '기존 매장 데이터와 중복'
+        },
+        {
+          name: cn ? '邯郸格耀中华店-销售明细.xlsx' : '한단 거야오 중화점-판매 상세.xlsx',
+          type: 'XLSX',
+          status: cn ? '正常' : '정상',
+          note: cn ? '已识别并匹配门店' : '매장 식별 및 매칭 완료'
+        }
+      ];
+    }
     return [
       {
         name: cn ? '门店销售明细.xlsx' : '매장 판매 상세.xlsx',
@@ -1661,6 +1895,12 @@ const IngestionView = {
         note: cn ? 'A门店、B门店 与原始门店数据列表重复' : 'A/B 매장이 원본 매장 데이터 목록과 중복'
       }
     ];
+  },
+
+  getAttachmentDisplayName(attachment = {}) {
+    const name = String(attachment.name || '');
+    if (!attachment.isMultiStore) return name;
+    return `${name}${this.getCurrentLang() === 'cn' ? '（多门店）' : '（다중 매장）'}`;
   },
 
   getAttachmentStatusClass(status) {
@@ -1763,7 +2003,7 @@ const IngestionView = {
               <i class="fa-solid ${iconClass} text-base"></i>
             </span>
             <div class="min-w-0 flex-1">
-              <div class="text-sm font-semibold text-brand truncate hover:underline" title="${this.escapeHtml(attachment.name)}">${this.escapeHtml(attachment.name)}</div>
+              <div class="text-sm font-semibold text-brand truncate hover:underline" title="${this.escapeHtml(this.getAttachmentDisplayName(attachment))}">${this.escapeHtml(this.getAttachmentDisplayName(attachment))}</div>
               <div class="mt-0.5 text-xs font-medium text-[#86909c]">${typeText}</div>
             </div>
             <i class="fa-solid fa-eye shrink-0 text-xs text-[#b0b7c3]"></i>
@@ -1786,6 +2026,24 @@ const IngestionView = {
         </div>
       `;
     }).join('');
+  },
+
+  renderFallbackSourceFile(fileName = '') {
+    const displayName = String(fileName || '').trim();
+    if (!displayName) return '';
+    const extension = displayName.match(/\.([^.]+)$/)?.[1]?.toUpperCase() || 'FILE';
+    return `
+      <button type="button" class="doc-fallback-source-trigger w-full rounded-lg border border-gray-100 bg-white px-4 py-3 flex items-center gap-3 text-left hover:bg-blue-50/50 transition-colors">
+        <span class="h-9 w-9 shrink-0 rounded-lg bg-slate-50 flex items-center justify-center">
+          <i class="fa-solid fa-file-excel text-green-600"></i>
+        </span>
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-sm font-semibold text-brand hover:underline" title="${this.escapeHtml(displayName)}">${this.escapeHtml(displayName)}</span>
+          <span class="mt-0.5 block text-xs font-medium text-[#86909c]">${this.escapeHtml(extension)}</span>
+        </span>
+        <i class="fa-solid fa-eye shrink-0 text-xs text-[#b0b7c3]"></i>
+      </button>
+    `;
   },
 
   findDocumentSource(row = {}) {
@@ -1855,6 +2113,26 @@ const IngestionView = {
     const attachmentIndex = typeof context.attachmentIndex === 'number' ? context.attachmentIndex : 0;
     if (!inboxItem || !attachment) return [];
 
+    const configuredSplitStores = context.splitStores || attachment.splitStores;
+    if (attachment.isMultiStore && Array.isArray(configuredSplitStores) && configuredSplitStores.length) {
+      return configuredSplitStores.map((store, index) => {
+        const split = typeof store === 'string' ? { storeName: store, status: '已匹配' } : store;
+        const status = split.status || '已匹配';
+        return {
+          fileName: split.fileName || this.getSingleStoreExcelName(`${split.storeName}-销售明细.xlsx`, split.storeName),
+          storeName: split.storeName || '—',
+          status,
+          tone: status === '驳回' ? 'danger' : /未匹配|重复/.test(status) ? 'warning' : 'success',
+          reason: split.reason || '',
+          previewKind: 'source',
+          emailId: inboxItem.id,
+          attachmentIndex,
+          zipIndex: 0,
+          sort: index
+        };
+      });
+    }
+
     const matchedRows = this.data
       .filter(row => String(row.sourceEmailId || row.id) === String(inboxItem.id))
       .filter(row => this.getMatchedRowSourceAttIndex(row, inboxItem) === attachmentIndex)
@@ -1918,9 +2196,11 @@ const IngestionView = {
         </div>
         <div class="divide-y divide-gray-100">
           ${rows.map(row => {
-            const statusClass = row.tone === 'warning'
-              ? 'bg-amber-50 text-amber-700 border-amber-100'
-              : 'bg-green-50 text-green-700 border-green-100';
+            const statusClass = row.tone === 'danger'
+              ? 'bg-red-50 text-red-600 border-red-100'
+              : row.tone === 'warning'
+                ? 'bg-amber-50 text-amber-700 border-amber-100'
+                : 'bg-green-50 text-green-700 border-green-100';
             return `
               <div class="grid grid-cols-[minmax(0,1.5fr)_minmax(0,0.9fr)_72px] items-center gap-3 px-3 py-2.5 text-xs">
                 <button type="button"
@@ -2044,28 +2324,118 @@ const IngestionView = {
     }
 
     if (/异常数据/.test(moduleName || currentNode)) {
-      addStoreMatch('已匹配');
-      addQualityCheck('发现异常');
       logs.push(this.createLifecycleLog('异常处理', statusText, context.logAction || '等待处理人确认并提交处理结果', updateTime));
       return logs;
     }
 
     if (/质量检查|标准POS/.test(moduleName || currentNode)) {
-      addStoreMatch('已匹配');
-      addQualityCheck('已完成');
-      logs.push(this.createLifecycleLog('标准POS', '已生成', row.aiNote || '已生成标准POS单据', updateTime));
+      logs.push(this.createLifecycleLog(
+        '标准POS',
+        '已生成',
+        row.aiNote || 'POS表数据完整，校验合规，AI未发现异常',
+        updateTime,
+        'success'
+      ));
       return logs;
     }
 
     if (/暂存|未匹配/.test(moduleName || currentNode)) {
-      if (inboxItem) addFileReceived();
-      addFileCheck(fileStatus === '正常' ? '正常' : fileStatus);
-      addStoreMatch('未匹配', row.aiNote || row.reason || '门店编码或组织信息未完整匹配');
-      logs.push(this.createLifecycleLog('修复处理', /驳回/.test(statusText) ? '已驳回' : '待处理', context.logAction || '等待补全门店匹配信息', updateTime));
+      const rawStoreCode = row.rawStoreCode || row.storeCode || '-';
+      const initialFailureReason = rawStoreCode === '-'
+        ? '原始门店编码缺失，未找到对应客户门店'
+        : '原始门店信息未匹配到客户门店主数据';
+      const latestFailureReason = row.rejectNote
+        || row.aiNote
+        || row.reason
+        || '门店组织关系仍不完整，缺少客户门店编码、本部或营业所信息';
+
+      logs.push(this.createLifecycleLog(
+        '门店匹配',
+        '未匹配',
+        '原始门店未匹配到客户门店',
+        updateTime,
+        'warning'
+      ));
+      logs.push(this.createLifecycleLog(
+        '门店校验',
+        '失败',
+        initialFailureReason,
+        updateTime,
+        'danger'
+      ));
+      logs.push(this.createLifecycleLog(
+        '门店校验',
+        '失败',
+        latestFailureReason,
+        updateTime,
+        'danger'
+      ));
       return logs;
     }
 
     if (/文件收取|收件箱/.test(moduleName || currentNode) && attachment) {
+      if (attachment.repeatMultiStoreFlow) {
+        addFileReceived();
+        logs.push(this.createLifecycleLog(
+          '文件校验',
+          '驳回',
+          '文件中存在无门店名称/门店编码的数据',
+          provideTime,
+          'danger'
+        ));
+
+        const initialMatchLog = this.createLifecycleLog(
+          '门店匹配',
+          '部分异常',
+          '识别到 3 个门店，2 个已匹配、1 个驳回',
+          provideTime,
+          'warning'
+        );
+        initialMatchLog.splitRows = this.buildAttachmentStoreSplitRows({
+          ...context,
+          inboxItem,
+          attachment,
+          attachmentIndex: context.attachmentIndex,
+          row,
+          splitStores: attachment.initialSplitStores
+        });
+        logs.push(initialMatchLog);
+
+        logs.push(this.createLifecycleLog(
+          '文件收取',
+          '已接收',
+          '已收到修正后的门店数据文件',
+          updateTime,
+          'info'
+        ));
+
+        const repeatMatchLog = this.createLifecycleLog(
+          '门店匹配',
+          '重复',
+          '修正后的门店可以识别，其中 2 个门店与原始门店数据重复，1 个门店已匹配',
+          updateTime,
+          'warning'
+        );
+        repeatMatchLog.splitRows = this.buildAttachmentStoreSplitRows({
+          ...context,
+          inboxItem,
+          attachment,
+          attachmentIndex: context.attachmentIndex,
+          row,
+          splitStores: attachment.splitStores
+        });
+        logs.push(repeatMatchLog);
+
+        logs.push(this.createLifecycleLog(
+          '重复处理',
+          '待处理',
+          '检测到 2 个重复门店，请确认覆盖或忽略',
+          updateTime,
+          'warning'
+        ));
+        return logs;
+      }
+
       if (this.isDuplicatePendingLog(context)) {
         const reason = attachment.rejectReason || row.reason || row.aiNote || '重新校验发现门店数据与历史记录重复';
         addFileReceived();
@@ -2073,6 +2443,33 @@ const IngestionView = {
         logs.push(this.createLifecycleLog('文件上传', '已上传', '已重新上传修正后的文件', updateTime, 'info'));
         logs.push(this.createLifecycleLog('文件校验', '重复', reason, updateTime, 'warning'));
         logs.push(this.createLifecycleLog('重复处理', '待处理', '请确认覆盖或忽略重复门店数据', updateTime, 'warning'));
+        return logs;
+      }
+
+      if (attachment.isMultiStore && attachment.splitStores?.some(store => store.status === '驳回')) {
+        addFileReceived();
+        logs.push(this.createLifecycleLog(
+          '文件校验',
+          '部分异常',
+          '识别到 3 个门店，其中 1 个门店无门店名称/门店编码',
+          updateTime,
+          'warning'
+        ));
+        const storeMatchLog = this.createLifecycleLog(
+          '门店匹配',
+          '部分完成',
+          '文件已拆分为 3 个单门店 Excel，2 个已匹配、1 个驳回',
+          updateTime,
+          'warning'
+        );
+        storeMatchLog.splitRows = this.buildAttachmentStoreSplitRows({
+          ...context,
+          inboxItem,
+          attachment,
+          attachmentIndex: context.attachmentIndex,
+          row
+        });
+        logs.push(storeMatchLog);
         return logs;
       }
 
@@ -2093,6 +2490,52 @@ const IngestionView = {
     }
 
     if (/文件收取|原始门店|已匹配|归档/.test(moduleName || currentNode)) {
+      const isMatchedDataModule = /原始门店|已匹配/.test(moduleName || currentNode) && !/归档/.test(moduleName || currentNode);
+      if (isMatchedDataModule) {
+        const fromUnmatched = row.matchSource === 'from-unmatched' || String(row.id || '').startsWith('stash-promoted-');
+        if (fromUnmatched) {
+          logs.push(this.createLifecycleLog(
+            '门店匹配',
+            '未匹配',
+            '原始门店未匹配到客户门店',
+            updateTime,
+            'warning'
+          ));
+          logs.push(this.createLifecycleLog(
+            '门店校验',
+            '通过',
+            '门店信息已补全并通过校验',
+            updateTime,
+            'success'
+          ));
+        } else {
+          logs.push(this.createLifecycleLog(
+            '门店匹配',
+            '已匹配',
+            '原始门店已匹配到客户门店',
+            updateTime,
+            'success'
+          ));
+        }
+
+        if (/质检中|质量校验中/.test(statusText)) {
+          addQualityCheck('质检中');
+        } else if (/已同步|已通过|正常/.test(statusText)) {
+          addQualityCheck('已完成');
+          const logRoute = row.logRoute || row.qualityRoute || this.getQualityRoute(row);
+          logs.push(this.createLifecycleLog(
+            logRoute,
+            '已同步',
+            logRoute === '异常表' ? '已同步至异常表中' : `已同步至${logRoute}`,
+            updateTime,
+            'success'
+          ));
+        } else {
+          addQualityCheck('待质检', '等待进入质量检查');
+        }
+        return logs;
+      }
+
       if (inboxItem) addFileReceived();
       addFileCheck(/归档/.test(moduleName || currentNode) ? '已归档' : '正常');
       if (!/归档/.test(moduleName || currentNode)) {
@@ -2188,7 +2631,11 @@ const IngestionView = {
             <h4 class="text-sm font-extrabold text-[#1d2129]">${cn ? '原始文件' : '원본 파일'}</h4>
           </div>
           <div class="space-y-2.5">
-            ${inboxItem ? this.renderInboxSourceAttachments(inboxItem, { attachment: sourceAttachment, attachmentIndex: sourceAttachmentIndex }) : `<div class="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-[#86909c]">${cn ? '暂无原始文件' : '원본 파일 없음'}</div>`}
+            ${context.sourceFileName || row.sourceFileName
+              ? this.renderFallbackSourceFile(context.sourceFileName || row.sourceFileName)
+              : inboxItem
+                ? this.renderInboxSourceAttachments(inboxItem, { attachment: sourceAttachment, attachmentIndex: sourceAttachmentIndex })
+                : `<div class="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-[#86909c]">${cn ? '暂无原始文件' : '원본 파일 없음'}</div>`}
           </div>
         </section>
 
@@ -2238,6 +2685,11 @@ const IngestionView = {
         }
         this.showInboxAttachmentPreview(item, attachment, zipIndex);
       });
+    });
+
+    overlay.querySelector('.doc-fallback-source-trigger')?.addEventListener('click', event => {
+      event.stopPropagation();
+      if (row && Object.keys(row).length) this.showStoreDataPreviewModal(row);
     });
 
     overlay.querySelectorAll('.store-split-preview-btn').forEach(btn => {
@@ -3241,8 +3693,8 @@ const IngestionView = {
       ? `
         ${commonStart}
         <th class="px-5 py-4 min-w-36">${cn ? '原始门店编码' : '원본 매장 코드'}</th>
-        <th class="px-5 py-4 min-w-48">${cn ? '门店名称（客户名称）' : '매장명(고객명)'}</th>
-        <th class="px-5 py-4 min-w-40">${cn ? '门店编码（客户编码）' : '매장 코드(고객 코드)'}</th>
+        <th class="px-5 py-4 min-w-48">${cn ? '门店名称' : '매장명'}</th>
+        <th class="px-5 py-4 min-w-40">${cn ? '门店编码' : '매장 코드'}</th>
         <th class="px-5 py-4 min-w-36">${cn ? '经销商' : '대리점'}</th>
         <th class="px-5 py-4 min-w-28">ACC名称</th>
         <th class="px-5 py-4 min-w-32">${cn ? '本部' : '본부'}</th>
@@ -3264,8 +3716,8 @@ const IngestionView = {
       : `
         ${commonStart}
         <th class="px-5 py-4 min-w-36">${cn ? '原始门店编码' : '원본 매장 코드'}</th>
-        <th class="px-5 py-4 min-w-48">${cn ? '门店名称（客户名称）' : '매장명(고객명)'}</th>
-        <th class="px-5 py-4 min-w-40">${cn ? '门店编码（客户编码）' : '매장 코드(고객 코드)'}</th>
+        <th class="px-5 py-4 min-w-48">${cn ? '门店名称' : '매장명'}</th>
+        <th class="px-5 py-4 min-w-40">${cn ? '门店编码' : '매장 코드'}</th>
         <th class="px-5 py-4 min-w-36">${cn ? '经销商' : '대리점'}</th>
         <th class="px-5 py-4 min-w-28">ACC名称</th>
         <th class="px-5 py-4 min-w-32">${cn ? '本部' : '본부'}</th>
@@ -3389,10 +3841,7 @@ const IngestionView = {
             <input type="checkbox" class="row-cb rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" value="${row.id}" ${isActionLocked ? 'disabled' : ''}>
           </td>
           <td class="px-4 py-3 w-[176px] min-w-[176px] text-[#4e5969] sticky left-[60px] z-10 bg-white group-hover:bg-slate-50">
-            <span class="row-edit-display">${this.escapeHtml(this.getDisplayMonth(row))}</span>
-            <div class="row-period-editor hidden items-center gap-1">
-              ${this.renderPeriodEditor(this.getDisplayMonth(row))}
-            </div>
+            <span>${this.escapeHtml(this.getDisplayMonth(row))}</span>
           </td>
           <td class="px-3 py-3 w-56 min-w-56 sticky left-[236px] z-10 bg-white group-hover:bg-slate-50 shadow-[6px_0_10px_-10px_rgba(15,23,42,0.45)]">
             <div class="font-medium flex items-center gap-2" title="${this.escapeHtml(row.fileName)}">
@@ -3418,20 +3867,13 @@ const IngestionView = {
             <input type="text" class="row-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm text-slate-800 focus:outline-none focus:border-brand" data-edit-field="dealer" value="${this.escapeHtml(dealer)}">
           </td>
           <td class="px-5 py-3 text-[#4e5969] font-medium">
-            <span class="row-edit-display">${this.escapeHtml(acc)}</span>
-            <input type="text" class="row-edit-input hidden w-24 px-2 py-1 border border-gray-200 rounded text-sm font-medium text-slate-800 focus:outline-none focus:border-brand" data-edit-field="acc" value="${this.escapeHtml(acc)}">
+            <span>${this.escapeHtml(acc)}</span>
           </td>
           <td class="px-5 py-3 text-[#4e5969]">
-            <span class="row-edit-display">${this.escapeHtml(headquarters)}</span>
-            <select class="row-edit-input row-headquarters-select hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm text-slate-800 bg-white focus:outline-none focus:border-brand" data-edit-field="headquarters">
-              ${this.renderSelectOptions(this.getHeadquartersOptions(), headquarters)}
-            </select>
+            <span>${this.escapeHtml(headquarters)}</span>
           </td>
           <td class="px-5 py-3 text-[#4e5969]">
-            <span class="row-edit-display">${this.escapeHtml(salesOffice)}</span>
-            <select class="row-edit-input row-sales-office-select hidden w-40 px-2 py-1 border border-gray-200 rounded text-sm text-slate-800 bg-white focus:outline-none focus:border-brand" data-edit-field="salesOffice">
-              ${this.renderSelectOptions(this.getSalesOfficeOptions(headquarters), salesOffice, '请选择营业所')}
-            </select>
+            <span>${this.escapeHtml(salesOffice)}</span>
           </td>
           <td class="px-5 py-3">
             <span class="${row.handler ? '' : 'text-[#d1d5db]'}" title="${this.getLocalizedText(row.handler) || '-'}">
@@ -3568,8 +4010,7 @@ const IngestionView = {
       <tr class="group bg-white hover:bg-slate-50 transition-colors ${isRejected ? 'bg-red-50/30' : ''}" data-stash-key="${this.escapeHtml(key)}">
         <td class="px-4 py-3 w-[60px] sticky left-0 z-10 bg-white group-hover:bg-slate-50"><input type="checkbox" class="row-cb-ingestion-stash rounded border-gray-300 text-brand focus:ring-brand" data-stash-key="${this.escapeHtml(key)}"></td>
         <td class="px-4 py-3 w-[176px] text-[#4e5969] sticky left-[60px] z-10 bg-white group-hover:bg-slate-50">
-          <span class="stash-edit-display">${this.escapeHtml(displayMonth)}</span>
-          <div class="stash-period-editor hidden items-center gap-1">${this.renderPeriodEditor(displayMonth, 'stash-period-input')}</div>
+          <span>${this.escapeHtml(displayMonth)}</span>
         </td>
         <td class="px-3 py-3 w-56 sticky left-[236px] z-10 bg-white group-hover:bg-slate-50 shadow-[6px_0_10px_-10px_rgba(15,23,42,0.45)]">
           <button type="button" class="stash-edit-display ingestion-stash-preview-trigger font-medium text-brand flex items-center gap-2 hover:text-blue-700 hover:underline transition-colors" data-index="${index}" data-email-id="${row.sourceEmailId || ''}" data-att-idx="${typeof row.sourceAttIdx === 'number' ? row.sourceAttIdx : ''}" title="预览 ${this.escapeHtml(row.storeName)}">
@@ -3582,12 +4023,11 @@ const IngestionView = {
         <td class="px-5 py-3"><span class="stash-edit-display ${customerStoreName === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(customerStoreName)}</span><input type="text" class="stash-edit-input hidden w-40 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="customerStoreName" value="${customerStoreName === '-' ? '' : this.escapeHtml(customerStoreName)}"></td>
         <td class="px-5 py-3"><span class="stash-edit-display ${customerStoreCode === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(customerStoreCode)}</span><input type="text" class="stash-edit-input hidden w-32 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="customerStoreCode" value="${customerStoreCode === '-' ? '' : this.escapeHtml(customerStoreCode)}"></td>
         <td class="px-5 py-3"><span class="stash-edit-display ${dealer === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(dealer)}</span><input type="text" class="stash-edit-input hidden w-32 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="customerDealer" value="${dealer === '-' ? '' : this.escapeHtml(dealer)}"></td>
-        <td class="px-5 py-3"><span class="stash-edit-display ${acc === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(acc)}</span><input type="text" class="stash-edit-input hidden w-24 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="customerAcc" value="${acc === '-' ? '' : this.escapeHtml(acc)}"></td>
-        <td class="px-5 py-3"><span class="stash-edit-display ${headquarters === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(headquarters)}</span><select class="stash-edit-input stash-headquarters-select hidden w-32 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="customerHeadquarters">${this.renderSelectOptions(this.getHeadquartersOptions(), headquarters, '请选择本部')}</select></td>
-        <td class="px-5 py-3"><span class="stash-edit-display ${salesOffice === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(salesOffice)}</span><select class="stash-edit-input stash-sales-office-select hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="customerSalesOffice">${this.renderSelectOptions(this.getSalesOfficeOptions(headquarters), salesOffice, '请选择营业所')}</select></td>
+        <td class="px-5 py-3"><span class="${acc === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(acc)}</span></td>
+        <td class="px-5 py-3"><span class="${headquarters === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(headquarters)}</span></td>
+        <td class="px-5 py-3"><span class="${salesOffice === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(salesOffice)}</span></td>
         <td class="px-5 py-3 text-amber-700">
-          <div class="stash-edit-display truncate max-w-[220px]" title="${this.escapeHtml(abnormalReason)}">${this.escapeHtml(abnormalReason)}</div>
-          <input type="text" class="stash-edit-input hidden w-52 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="aiNote" value="${this.escapeHtml(abnormalReason)}">
+          <div class="truncate max-w-[220px]" title="${this.escapeHtml(abnormalReason)}">${this.escapeHtml(abnormalReason)}</div>
         </td>
         <td class="px-5 py-3 text-[#4e5969]"><span title="${this.escapeHtml(handler)}">${this.escapeHtml(handler)}</span></td>
         <td class="px-5 py-3 sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">
@@ -3616,8 +4056,8 @@ const IngestionView = {
               <th class="px-4 py-4 w-[176px] sticky left-[60px] z-30 bg-[#f7f8fa]">年月</th>
               <th class="px-3 py-4 w-56 sticky left-[236px] z-30 bg-[#f7f8fa] shadow-[6px_0_10px_-10px_rgba(15,23,42,0.45)]">原始门店名称</th>
               <th class="px-5 py-4 w-36">原始门店编码</th>
-              <th class="px-5 py-4 w-48">门店名称（客户名称）</th>
-              <th class="px-5 py-4 w-40">门店编码（客户编码）</th>
+              <th class="px-5 py-4 w-48">门店名称</th>
+              <th class="px-5 py-4 w-40">门店编码</th>
               <th class="px-5 py-4 w-36">经销商</th>
               <th class="px-5 py-4 w-28">ACC</th>
               <th class="px-5 py-4 w-32">本部</th>
@@ -3737,8 +4177,8 @@ const IngestionView = {
             { label: '年月', value: displayMonth },
             { label: '原始门店名称', value: row.storeName || '-' },
             { label: '原始门店编码', value: rawStoreCode },
-            { label: '门店名称（客户名称）', value: row.customerStoreName || '-' },
-            { label: '门店编码（客户编码）', value: row.customerStoreCode || '-' },
+            { label: '门店名称', value: row.customerStoreName || '-' },
+            { label: '门店编码', value: row.customerStoreCode || '-' },
             { label: '经销商', value: row.customerDealer || '-' },
             { label: 'ACC', value: row.customerAcc || '-' },
             { label: '本部', value: row.customerHeadquarters || '-' },
@@ -3783,7 +4223,6 @@ const IngestionView = {
         const isEditing = icon?.classList.contains('fa-check');
         const displays = rowElement.querySelectorAll('.stash-edit-display');
         const inputs = rowElement.querySelectorAll('.stash-edit-input');
-        const periodEditor = rowElement.querySelector('.stash-period-editor');
 
         if (!isEditing) {
           icon.className = 'fa-solid fa-check stash-edit-icon';
@@ -3791,35 +4230,21 @@ const IngestionView = {
           trigger.classList.add('bg-amber-100');
           displays.forEach(item => item.classList.add('hidden'));
           inputs.forEach(input => input.classList.remove('hidden'));
-          periodEditor?.classList.remove('hidden');
-          periodEditor?.classList.add('flex');
           rowElement.querySelector('.stash-edit-input')?.focus();
           return;
         }
 
         const storeNameInput = rowElement.querySelector('[data-edit-field="storeName"]');
-        const headquartersSelect = rowElement.querySelector('.stash-headquarters-select');
-        const salesOfficeSelect = rowElement.querySelector('.stash-sales-office-select');
         if (!storeNameInput?.value.trim()) {
           storeNameInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
           storeNameInput?.focus();
           Dialog.toast('请输入原始门店名称', 'warning');
           return;
         }
-        if (headquartersSelect?.value && !salesOfficeSelect?.value) {
-          salesOfficeSelect.classList.add('border-red-300', 'ring-2', 'ring-red-100');
-          salesOfficeSelect.focus();
-          Dialog.toast('请选择对应营业所', 'warning');
-          return;
-        }
-
         const edits = {};
         inputs.forEach(input => {
           if (input.dataset.editField && input.dataset.editField !== 'handler') edits[input.dataset.editField] = input.value.trim();
         });
-        const year = rowElement.querySelector('[data-period-part="year"]')?.value;
-        const month = rowElement.querySelector('[data-period-part="month"]')?.value;
-        edits.month = `${year}年${month}月`;
         this.stashEdits.set(key, edits);
         this.renderStashTable();
         Dialog.toast('已保存', 'success');
@@ -3934,6 +4359,7 @@ const IngestionView = {
       region: row.region || '华北区域',
       salesOffice: row.salesOffice || '石家庄营业所',
       dealer: row.dealer || '河北聚昊商贸',
+      matchSource: 'from-unmatched',
       sourceEmailId: row.sourceEmailId,
       sourceAttIdx: row.sourceAttIdx,
       remark: ''
@@ -4304,7 +4730,6 @@ const IngestionView = {
           
           const editableDisplays = row.querySelectorAll('.row-edit-display');
           const editableInputs = row.querySelectorAll('.row-edit-input');
-          const periodEditor = row.querySelector('.row-period-editor');
           
           if (!isEditing) {
             // 进入编辑态
@@ -4314,25 +4739,11 @@ const IngestionView = {
             
             editableDisplays.forEach(item => item.classList.add('hidden'));
             editableInputs.forEach(input => input.classList.remove('hidden'));
-            periodEditor?.classList.remove('hidden');
-            periodEditor?.classList.add('flex');
             const firstInput = row.querySelector('.row-edit-input');
             firstInput?.focus();
             firstInput?.select();
           } else {
-            const headquartersSelect = row.querySelector('.row-headquarters-select');
-            const salesOfficeSelect = row.querySelector('.row-sales-office-select');
-            if (headquartersSelect?.value && !salesOfficeSelect?.value) {
-              salesOfficeSelect.classList.add('border-red-300', 'ring-2', 'ring-red-100');
-              salesOfficeSelect.focus();
-              Dialog.toast(this.getCurrentLang() === 'cn' ? '请选择对应营业所' : '영업소를 선택하세요', 'warning');
-              return;
-            }
-
             const edits = {};
-            const periodYear = row.querySelector('[data-period-part="year"]')?.value;
-            const periodMonth = row.querySelector('[data-period-part="month"]')?.value;
-            if (periodYear && periodMonth) edits.month = `${periodYear}年${periodMonth}月`;
             editableInputs.forEach(input => {
               const field = input.dataset.editField;
               const value = input.value.trim();
@@ -4343,18 +4754,14 @@ const IngestionView = {
             this.data = this.data.map(r => {
               if (r.id === id) {
                 Object.assign(r, edits);
-                if (edits.month) r.period = edits.month;
                 if (edits.rawStoreName) r.fileName = edits.rawStoreName;
-                if (edits.headquarters) r.region = edits.headquarters.replace('本部', '区域');
               }
               return r;
             });
             this.filteredData = this.filteredData.map(r => {
               if (r.id === id) {
                 Object.assign(r, edits);
-                if (edits.month) r.period = edits.month;
                 if (edits.rawStoreName) r.fileName = edits.rawStoreName;
-                if (edits.headquarters) r.region = edits.headquarters.replace('本部', '区域');
               }
               return r;
             });

@@ -2,6 +2,7 @@
   {
     "id": "F001",
     "fileName": "保定市聚昊商贸有限公司-S0091005.xlsx",
+    "logRoute": "异常表",
     "version": "v1.2",
     "team": "华北 Team / 화북 Team",
     "storeName": "保定聚昊 / 보정 취호",
@@ -13,6 +14,7 @@
   {
     "id": "F002",
     "fileName": "多客隆购物中心(会盟大街)-S0219489-12月.XLS",
+    "matchSource": "from-unmatched",
     "version": "v1.0",
     "team": "华中 Team / 화중 Team",
     "storeName": "多客隆会盟大街 / 도객륭 회맹대가",
