@@ -224,9 +224,11 @@ const IngestionView = {
   recalcInboxItemStatus(inboxItem) {
     if (!inboxItem?.attachments?.length) return;
 
-    const hasChecking = inboxItem.attachments.some(item => item.status === '校验中' || item.status === '检验中');
-    const allNormal = inboxItem.attachments.every(item => item.status === '正常');
-    const needsAttention = inboxItem.attachments
+    const activeAttachments = inboxItem.attachments.filter(item => !item.isHistorical);
+    if (!activeAttachments.length) return;
+    const hasChecking = activeAttachments.some(item => item.status === '校验中' || item.status === '检验中');
+    const allNormal = activeAttachments.every(item => item.status === '正常');
+    const needsAttention = activeAttachments
       .filter(item => item.status !== '正常' && item.status !== '校验中' && item.status !== '检验中')
       .map(item => item.rejectReason)
       .filter(reason => reason && reason !== '-');
@@ -235,6 +237,20 @@ const IngestionView = {
       inboxItem.isNormal = false;
       inboxItem.statusText = '校验中';
       inboxItem.suggestion = '存在附件正在校验中，请等待校验完成';
+      return;
+    }
+
+    if (activeAttachments.some(item => item.status === '驳回')) {
+      inboxItem.isNormal = false;
+      inboxItem.statusText = '驳回';
+      inboxItem.suggestion = [...new Set(needsAttention)].join('；') || '当前版本存在驳回文件';
+      return;
+    }
+
+    if (activeAttachments.some(item => item.status === '待处理')) {
+      inboxItem.isNormal = false;
+      inboxItem.statusText = '待处理';
+      inboxItem.suggestion = [...new Set(needsAttention)].join('；') || '当前版本存在重复门店，等待覆盖或忽略';
       return;
     }
 
@@ -305,7 +321,7 @@ const IngestionView = {
   },
 
   migrateOriginalStatusToPending() {
-    const migrationKey = 'ingestion_original_status_pending_20260707';
+    const migrationKey = 'ingestion_original_status_pending_20260713_v2';
     if (localStorage.getItem(migrationKey) === 'done') return;
     localStorage.removeItem('ingestion_approved_original_ids');
     localStorage.removeItem('ingestion_quality_original_states');
@@ -452,11 +468,6 @@ const IngestionView = {
       this.saveApprovedOriginalIds();
       this.updateStats();
       this.applyFilters();
-      if (options.showResult === false) {
-        Dialog.toast(this.getCurrentLang() === 'cn' ? '质量校验完成，数据已同步' : '품질 검사가 완료되었습니다');
-        return;
-      }
-      this.showOriginalQualityCheckResult(completedRows, targetIds.length);
     }, delay);
   },
 
@@ -1079,6 +1090,7 @@ const IngestionView = {
         index: idx + 1,
         emailSubject,
         emailBody,
+        month: row.month || '2026年06月',
         attachmentCount,
         isNormal: true,
         statusText: '正常',
@@ -1157,7 +1169,7 @@ const IngestionView = {
             <th class="px-4 py-3 w-24 text-center">${cn ? '附件数' : '첨부 수'}</th>
             <th class="px-4 py-3 w-44">${cn ? '材料提供人' : '제공자'}</th>
             <th class="px-4 py-3 w-32">${cn ? '材料提供时间' : '제공 시간'}</th>
-            <th class="px-3 py-3 w-20 text-center">${cn ? '操作' : '조작'}</th>
+            <th class="px-3 py-3 w-32 text-center">${cn ? '操作' : '조작'}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100" id="inbox-tbody">
@@ -1180,23 +1192,23 @@ const IngestionView = {
   },
 
   getInboxParentStatus(item = {}) {
-    const attachments = item.attachments || [];
+    const attachments = (item.attachments || []).filter(attachment => !attachment.isHistorical);
     if (attachments.some(attachment => attachment.status === '校验中' || attachment.status === '检验中')) {
       return {
         text: '校验中',
         className: 'bg-blue-50 text-brand border-blue-100'
       };
     }
-    if (attachments.some(attachment => attachment.status === '待处理')) {
-      return {
-        text: '待处理',
-        className: 'bg-amber-50 text-amber-700 border-amber-100'
-      };
-    }
     if (attachments.some(attachment => attachment.status === '驳回')) {
       return {
         text: '驳回',
         className: 'bg-red-50 text-red-600 border-red-100'
+      };
+    }
+    if (attachments.some(attachment => attachment.status === '待处理')) {
+      return {
+        text: '待处理',
+        className: 'bg-amber-50 text-amber-700 border-amber-100'
       };
     }
     if (attachments.length > 0 && attachments.every(attachment => attachment.status === '正常')) {
@@ -1212,6 +1224,7 @@ const IngestionView = {
   },
   
   renderInboxRow(item) {
+    const hasRetryableAttachments = (item.attachments || []).some(att => att.status === '驳回' && !att.isHistorical);
     const parentStatus = this.getInboxParentStatus(item);
     return `
       <tr class="inbox-master-row hover:bg-slate-50 transition-colors cursor-pointer" data-id="${item.id}">
@@ -1242,9 +1255,16 @@ const IngestionView = {
           <span class="text-sm text-[#4e5969]">${item.provideTime}</span>
         </td>
         <td class="px-3 py-3 text-center">
-          <button type="button" class="inbox-parent-delete-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors" data-email-id="${item.id}" title="${this.getCurrentLang() === 'cn' ? '删除单据' : '문서 삭제'}">
-            <i class="fa-solid fa-trash-can"></i>
-          </button>
+          <div class="flex w-full items-center justify-center gap-1 whitespace-nowrap">
+            <button type="button" class="inbox-parent-delete-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors" data-email-id="${item.id}" title="${this.getCurrentLang() === 'cn' ? '删除单据' : '문서 삭제'}" aria-label="${this.getCurrentLang() === 'cn' ? '删除单据' : '문서 삭제'}">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+            ${hasRetryableAttachments ? `
+              <button type="button" class="inbox-parent-retry-btn hidden h-8 w-8 items-center justify-center rounded-lg text-brand hover:bg-blue-50 transition-colors" data-email-id="${item.id}" title="${this.getCurrentLang() === 'cn' ? '批量重传驳回文件' : '반려 파일 일괄 재업로드'}" aria-label="${this.getCurrentLang() === 'cn' ? '批量重传驳回文件' : '반려 파일 일괄 재업로드'}">
+                <i class="fa-solid fa-file-arrow-up"></i>
+              </button>
+            ` : ''}
+          </div>
         </td>
       </tr>
     `;
@@ -1252,6 +1272,7 @@ const IngestionView = {
   
   renderInboxDetailRow(item) {
     const cn = this.getCurrentLang() === 'cn';
+    const orderedAttachments = [...(item.attachments || [])].sort((a, b) => Number(Boolean(a.isHistorical)) - Number(Boolean(b.isHistorical)));
     return `
       <tr class="inbox-detail-row hidden" data-parent-id="${item.id}">
         <td colspan="9" class="p-0 bg-[#f7faff]">
@@ -1266,7 +1287,7 @@ const IngestionView = {
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-100 bg-white">
-                ${item.attachments.map((att, i) => this.renderAttachmentRow(item.id, att, i)).join('')}
+                ${orderedAttachments.map(att => this.renderAttachmentRow(item.id, att, item.attachments.indexOf(att))).join('')}
               </tbody>
             </table>
           </div>
@@ -1276,37 +1297,45 @@ const IngestionView = {
   },
   
   renderAttachmentRow(emailId, att, index) {
-    const isRejected = att.status === '驳回';
+    const isHistorical = Boolean(att.isHistorical);
+    const isRejected = att.status === '驳回' && !isHistorical;
     const isArchived = att.status === '已归档';
     const isPending = att.status === '待处理';
     const isCovered = att.status === '覆盖';
     const isStashed = att.status === '暂存';
     const canResolveDuplicate = this.isPendingDuplicateAttachment(att);
+    const statusDescription = isHistorical ? (att.historicalReason || att.rejectReason) : att.rejectReason;
+    const versionLabel = att.version ? ` V${att.version}` : '';
     return `
       <tr class="hover:bg-slate-50 transition-colors" data-email-id="${emailId}" data-att-idx="${index}">
         <td class="px-4 py-2.5 w-[34%] max-w-0">
-          <span class="inbox-att-name-text cursor-pointer text-brand hover:text-blue-700 hover:underline transition-colors truncate block" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '点击预览' : '클릭하여 미리보기'}">${this.escapeHtml(this.getAttachmentDisplayName(att))}</span>
+          <span class="inbox-att-name-text cursor-pointer text-brand hover:text-blue-700 hover:underline transition-colors truncate block" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '点击预览' : '클릭하여 미리보기'}">${this.escapeHtml(this.getAttachmentDisplayName(att))}<span class="ml-1 text-[11px] font-semibold ${isHistorical ? 'text-slate-400' : 'text-brand'}">${versionLabel}</span></span>
         </td>
         <td class="px-4 py-2.5 w-[120px] text-center">
-          <span class="px-2 py-0.5 rounded-full text-xs font-semibold border ${isRejected ? 'bg-red-50 text-red-600 border-red-100' : isPending ? 'bg-amber-50 text-amber-700 border-amber-100' : isCovered ? 'bg-blue-50 text-brand border-blue-100' : isArchived ? 'bg-slate-50 text-slate-500 border-slate-100' : isStashed ? 'bg-blue-50 text-brand border-blue-100' : 'bg-green-50 text-green-700 border-green-100'}">
-            ${att.status}
+          <span class="px-2 py-0.5 rounded-full text-xs font-semibold border ${isHistorical ? 'bg-slate-50 text-slate-500 border-slate-200' : isRejected ? 'bg-red-50 text-red-600 border-red-100' : isPending ? 'bg-amber-50 text-amber-700 border-amber-100' : isCovered ? 'bg-blue-50 text-brand border-blue-100' : isArchived ? 'bg-slate-50 text-slate-500 border-slate-100' : isStashed ? 'bg-blue-50 text-brand border-blue-100' : 'bg-green-50 text-green-700 border-green-100'}">
+            ${isHistorical ? (this.getCurrentLang() === 'cn' ? '历史版本' : '이전 버전') : att.status}
           </span>
         </td>
         <td class="px-4 py-2.5 w-[28%] max-w-0 ${isRejected ? 'text-red-600' : isPending ? 'text-amber-700' : 'text-[#86909c]'}">
-          <div class="truncate" title="${this.escapeHtml(att.rejectReason)}">${this.escapeHtml(att.rejectReason)}</div>
+          <div class="truncate" title="${this.escapeHtml(statusDescription)}">${this.escapeHtml(statusDescription)}</div>
         </td>
         <td class="px-4 py-2.5 w-[220px]">
           <div class="flex items-center justify-start gap-1.5 whitespace-nowrap">
             <button type="button" class="inbox-att-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '单据详情' : '문서 상세'}">
               <i class="fa-solid fa-list-check"></i>
             </button>
-            ${canResolveDuplicate ? `
-              <button type="button" class="inbox-att-resolve-btn rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-medium text-brand hover:bg-blue-100 transition-colors" data-action="cover" data-email-id="${emailId}" data-att-idx="${index}">覆盖</button>
-              <button type="button" class="inbox-att-resolve-btn rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-[#4e5969] hover:bg-slate-50 transition-colors" data-action="ignore" data-email-id="${emailId}" data-att-idx="${index}">忽略</button>
+            ${isRejected ? `
+              <button type="button" class="inbox-att-retry-btn hidden h-7 w-7 items-center justify-center rounded text-brand hover:bg-blue-50 transition-colors" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '批量重传驳回文件' : '반려 파일 일괄 재업로드'}" aria-label="${this.getCurrentLang() === 'cn' ? '批量重传驳回文件' : '반려 파일 일괄 재업로드'}">
+                <i class="fa-solid fa-file-arrow-up"></i>
+              </button>
             ` : ''}
             <button type="button" class="inbox-att-delete-btn rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '删除附件' : '첨부 파일 삭제'}">
               <i class="fa-solid fa-trash-can"></i>
             </button>
+            ${canResolveDuplicate ? `
+              <button type="button" class="inbox-att-resolve-btn rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-medium text-brand hover:bg-blue-100 transition-colors" data-action="cover" data-email-id="${emailId}" data-att-idx="${index}">覆盖</button>
+              <button type="button" class="inbox-att-resolve-btn rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-[#4e5969] hover:bg-slate-50 transition-colors" data-action="ignore" data-email-id="${emailId}" data-att-idx="${index}">忽略</button>
+            ` : ''}
           </div>
         </td>
       </tr>
@@ -1323,7 +1352,17 @@ const IngestionView = {
       ? (cn ? '已覆盖重复门店' : '중복 매장을 덮어썼습니다')
       : (cn ? '已忽略重复门店' : '중복 매장을 무시했습니다');
 
+    attachment.splitStores = (attachment.splitStores || []).map(store => {
+      if (store.status !== '重复') return store;
+      return {
+        ...store,
+        status: action === 'cover' ? '已覆盖' : '已忽略',
+        reason: resolvedText
+      };
+    });
     attachment.status = '正常';
+    attachment.duplicateResolution = action;
+    attachment.resolvedAt = this.formatNowDateTime(new Date());
     attachment.rejectReason = resolvedText;
     this.recalcInboxItemStatus(inboxItem);
     this.renderInbox();
@@ -1684,7 +1723,7 @@ const IngestionView = {
     tbody.querySelectorAll('.inbox-master-row').forEach(row => {
       row.addEventListener('click', (e) => {
         // 不拦截已有的事件
-        if (e.target.closest('.inbox-expand-btn, .inbox-parent-delete-btn')) return;
+        if (e.target.closest('.inbox-expand-btn, .inbox-parent-delete-btn, .inbox-parent-retry-btn')) return;
         const btn = row.querySelector('.inbox-expand-btn');
         if (btn) btn.click();
       });
@@ -1694,6 +1733,13 @@ const IngestionView = {
       btn.addEventListener('click', event => {
         event.stopPropagation();
         self.confirmDeleteInboxParent(btn.dataset.emailId);
+      });
+    });
+
+    tbody.querySelectorAll('.inbox-parent-retry-btn').forEach(btn => {
+      btn.addEventListener('click', event => {
+        event.stopPropagation();
+        self.showUploadModal({ mode: 'retry', emailId: btn.dataset.emailId });
       });
     });
     
@@ -1828,6 +1874,17 @@ const IngestionView = {
         const attIdx = Number(btn.getAttribute('data-att-idx') || 0);
         const action = btn.getAttribute('data-action') || 'ignore';
         self.resolveDuplicateAttachment(emailId, attIdx, action);
+      });
+    });
+
+    detailRow.querySelectorAll('.inbox-att-retry-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        self.showUploadModal({
+          mode: 'retry',
+          emailId: btn.getAttribute('data-email-id'),
+          attachmentIndex: Number(btn.getAttribute('data-att-idx') || 0)
+        });
       });
     });
 
@@ -2114,13 +2171,15 @@ const IngestionView = {
     if (!inboxItem || !attachment) return [];
 
     const configuredSplitStores = context.splitStores || attachment.splitStores;
-    if (attachment.isMultiStore && Array.isArray(configuredSplitStores) && configuredSplitStores.length) {
+    if (Array.isArray(configuredSplitStores) && configuredSplitStores.length) {
       return configuredSplitStores.map((store, index) => {
         const split = typeof store === 'string' ? { storeName: store, status: '已匹配' } : store;
         const status = split.status || '已匹配';
+        const splitStoreName = split.storeName || `待识别门店${index + 1}`;
         return {
-          fileName: split.fileName || this.getSingleStoreExcelName(`${split.storeName}-销售明细.xlsx`, split.storeName),
+          fileName: split.fileName || this.getSingleStoreExcelName(`${splitStoreName}-销售明细.xlsx`, splitStoreName),
           storeName: split.storeName || '—',
+          storeCode: split.storeCode || split.rawStoreCode || '—',
           status,
           tone: status === '驳回' ? 'danger' : /未匹配|重复/.test(status) ? 'warning' : 'success',
           reason: split.reason || '',
@@ -2143,6 +2202,7 @@ const IngestionView = {
         return {
           fileName: this.getSingleStoreExcelName(row.rawStoreName || row.fileName || attachment.name, storeName),
           storeName,
+          storeCode: row.storeCode || row.rawStoreCode || '—',
           status: '已匹配',
           tone: 'success',
           previewKind: 'matched',
@@ -2160,6 +2220,7 @@ const IngestionView = {
         return {
           fileName: this.getSingleStoreExcelName(storeName, storeName),
           storeName,
+          storeCode: item.row?.storeCode || item.row?.rawStoreCode || '—',
           status: '未匹配',
           tone: 'warning',
           previewKind: 'stash',
@@ -2176,6 +2237,7 @@ const IngestionView = {
     return [{
       fileName: isZip ? this.getZipAttachmentFiles(inboxItem, attachment)[0]?.name || '门店销售明细.xlsx' : this.getSingleStoreExcelName(attachment.name, fallbackStore),
       storeName: fallbackStore,
+      storeCode: context.row?.storeCode || context.row?.rawStoreCode || '—',
       status: '已匹配',
       tone: 'success',
       previewKind: 'source',
@@ -2222,6 +2284,190 @@ const IngestionView = {
           }).join('')}
         </div>
       </div>
+    `;
+  },
+
+  buildDocumentSplitGroups(context = {}) {
+    const inboxItem = context.inboxItem;
+    if (!inboxItem) return [];
+    const attachments = inboxItem.attachments || [];
+    const selectedAttachment = context.attachment;
+    const selectedIndex = typeof context.attachmentIndex === 'number'
+      ? context.attachmentIndex
+      : attachments.indexOf(selectedAttachment);
+    const selectedGroupId = selectedAttachment?.sourceGroupId || '';
+    const selectedName = this.normalizeRetryFileName(selectedAttachment?.name || '');
+    const candidates = attachments
+      .map((attachment, attachmentIndex) => ({ attachment, attachmentIndex }))
+      .filter(({ attachment }) => {
+        if (!selectedAttachment) return true;
+        if (selectedGroupId) return attachment.sourceGroupId === selectedGroupId;
+        return this.normalizeRetryFileName(attachment.name) === selectedName;
+      });
+    const groupMap = new Map();
+
+    candidates.forEach(({ attachment, attachmentIndex }) => {
+      const groupKey = attachment.sourceGroupId || `${inboxItem.id}-${this.normalizeRetryFileName(attachment.name) || attachmentIndex}`;
+      if (!groupMap.has(groupKey)) {
+        groupMap.set(groupKey, {
+          key: groupKey,
+          fileName: attachment.originalFileName || attachment.name || `附件${attachmentIndex + 1}`,
+          versions: []
+        });
+      }
+      const group = groupMap.get(groupKey);
+      const makeVersion = (versionNumber, splitStores, options = {}) => {
+        const hasConfiguredRows = Array.isArray(splitStores) && splitStores.length > 0;
+        const cannotSplit = /驳回|校验中/.test(String(attachment.status || '')) && !hasConfiguredRows;
+        const rows = cannotSplit
+          ? []
+          : this.buildAttachmentStoreSplitRows({
+              ...context,
+              inboxItem,
+              attachment,
+              attachmentIndex,
+              splitStores: hasConfiguredRows ? splitStores : undefined
+            });
+        group.versions.push({
+          number: Number(versionNumber || 1),
+          label: Number(versionNumber || 1) === 1 ? '首次上传' : '驳回重传',
+          state: options.state || (attachment.isHistorical ? '历史版本' : '当前版本'),
+          uploadedAt: options.uploadedAt || attachment.uploadedAt || inboxItem.provideTime || '-',
+          status: options.status || attachment.status || '-',
+          rows,
+          attachmentIndex
+        });
+      };
+
+      if (attachment.repeatMultiStoreFlow && Array.isArray(attachment.initialSplitStores)) {
+        makeVersion(1, attachment.initialSplitStores, {
+          state: '历史版本',
+          uploadedAt: inboxItem.provideTime,
+          status: '部分异常'
+        });
+        makeVersion(Math.max(2, Number(attachment.version || 2)), attachment.splitStores, {
+          state: '当前版本',
+          uploadedAt: attachment.uploadedAt || inboxItem.provideTime,
+          status: attachment.status || '待处理'
+        });
+      } else {
+        makeVersion(attachment.version || 1, attachment.splitStores);
+      }
+    });
+
+    return [...groupMap.values()].map(group => ({
+      ...group,
+      versions: group.versions.sort((a, b) => a.number - b.number)
+    }));
+  },
+
+  renderDocumentSplitResultSection(groups = []) {
+    const cn = this.getCurrentLang() === 'cn';
+    const statusClass = (row = {}) => {
+      if (row.tone === 'danger' || /驳回|失败/.test(row.status || '')) return 'bg-red-50 text-red-600 border-red-100';
+      if (row.tone === 'warning' || /未匹配|重复|待处理/.test(row.status || '')) return 'bg-amber-50 text-amber-700 border-amber-100';
+      return 'bg-green-50 text-green-700 border-green-100';
+    };
+    const reasonText = (row = {}) => row.reason || (
+      row.status === '已匹配' ? '已匹配门店主数据'
+        : row.status === '未匹配' ? '未匹配到门店主数据'
+          : row.status === '重复' ? '历史版本中该门店数据已流转'
+            : row.status === '驳回' ? '拆分数据不满足流转条件'
+              : '-'
+    );
+    return `
+      <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
+        <div class="flex items-center justify-between gap-3 mb-4">
+          <div class="flex items-center gap-2">
+            <span class="h-7 w-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <i class="fa-solid fa-code-branch text-xs"></i>
+            </span>
+            <h4 class="text-sm font-extrabold text-[#1d2129]">${cn ? '拆分结果' : '분할 결과'}</h4>
+          </div>
+          <span class="text-xs font-medium text-[#86909c]">${cn ? '单门店单 Excel' : '매장별 Excel'}</span>
+        </div>
+        ${groups.length ? `
+          <div class="space-y-4">
+            ${groups.map((group, groupIndex) => {
+              const currentIndex = Math.max(0, group.versions.findIndex(version => version.state === '当前版本'));
+              const activeIndex = currentIndex >= 0 ? currentIndex : group.versions.length - 1;
+              return `
+                <div class="overflow-hidden rounded-xl border border-gray-100 bg-slate-50/60">
+                  <div class="border-b border-gray-100 bg-white px-4 py-3">
+                    <div class="flex min-w-0 items-center gap-2">
+                      <i class="fa-solid fa-file-excel shrink-0 text-green-600"></i>
+                      <span class="truncate text-sm font-semibold text-[#1d2129]" title="${this.escapeHtml(group.fileName)}">${this.escapeHtml(group.fileName)}</span>
+                    </div>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      ${group.versions.map((version, versionIndex) => `
+                        <button type="button"
+                          class="document-split-version-tab rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${versionIndex === activeIndex ? 'border-blue-200 bg-blue-50 text-brand' : 'border-gray-200 bg-white text-[#4e5969] hover:border-blue-100 hover:text-brand'}"
+                          data-split-group="${groupIndex}"
+                          data-split-version="${versionIndex}">
+                          V${version.number} ${this.escapeHtml(version.label)}
+                          <span class="ml-1 font-medium ${version.state === '历史版本' ? 'text-[#86909c]' : 'text-green-600'}">· ${this.escapeHtml(version.state)}</span>
+                        </button>
+                      `).join('')}
+                    </div>
+                  </div>
+                  ${group.versions.map((version, versionIndex) => {
+                    const counts = version.rows.reduce((result, row) => {
+                      result[row.status] = (result[row.status] || 0) + 1;
+                      return result;
+                    }, {});
+                    return `
+                      <div class="document-split-version-panel ${versionIndex === activeIndex ? '' : 'hidden'}" data-split-group="${groupIndex}" data-split-version="${versionIndex}">
+                        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-gray-100 px-4 py-3 text-xs text-[#86909c]">
+                          <span>上传时间：${this.escapeHtml(version.uploadedAt)}</span>
+                          <span>拆分数量：<strong class="text-[#1d2129]">${version.rows.length}</strong></span>
+                          ${Object.entries(counts).map(([status, count]) => `<span>${this.escapeHtml(status)} <strong class="text-[#1d2129]">${count}</strong></span>`).join('')}
+                        </div>
+                        ${version.rows.length ? `
+                          <div class="overflow-x-auto bg-white">
+                            <div class="min-w-[620px]">
+                              <div class="grid grid-cols-[minmax(0,1.35fr)_minmax(0,0.9fr)_80px_minmax(0,1.1fr)] gap-3 bg-slate-50 px-4 py-2 text-[11px] font-semibold text-[#86909c]">
+                                <span>单门店文件</span><span>识别门店</span><span>状态</span><span>说明</span>
+                              </div>
+                              <div class="divide-y divide-gray-100">
+                                ${version.rows.map(row => `
+                                  <div class="grid grid-cols-[minmax(0,1.35fr)_minmax(0,0.9fr)_80px_minmax(0,1.1fr)] items-center gap-3 px-4 py-3 text-xs">
+                                    <button type="button"
+                                      class="store-split-preview-btn min-w-0 flex items-center gap-2 text-left text-brand hover:text-blue-700 hover:underline"
+                                      data-preview-kind="${this.escapeHtml(row.previewKind || '')}"
+                                      data-row-id="${this.escapeHtml(row.rowId || '')}"
+                                      data-stash-key="${this.escapeHtml(row.stashKey || '')}"
+                                      data-email-id="${this.escapeHtml(row.emailId || '')}"
+                                      data-att-idx="${typeof row.attachmentIndex === 'number' ? row.attachmentIndex : version.attachmentIndex}"
+                                      data-zip-index="${typeof row.zipIndex === 'number' ? row.zipIndex : 0}"
+                                      title="${this.escapeHtml(row.fileName)}">
+                                      <i class="fa-solid fa-file-excel shrink-0 text-green-600"></i>
+                                      <span class="truncate">${this.escapeHtml(row.fileName)}</span>
+                                    </button>
+                                    <div class="min-w-0">
+                                      <div class="truncate font-medium text-[#4e5969]" title="${this.escapeHtml(row.storeName)}">${this.escapeHtml(row.storeName)}</div>
+                                      <div class="mt-0.5 truncate font-mono text-[11px] text-[#86909c]">${this.escapeHtml(row.storeCode || '—')}</div>
+                                    </div>
+                                    <span class="justify-self-start rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClass(row)}">${this.escapeHtml(row.status)}</span>
+                                    <span class="leading-5 text-[#4e5969]">${this.escapeHtml(reasonText(row))}</span>
+                                  </div>
+                                `).join('')}
+                              </div>
+                            </div>
+                          </div>
+                        ` : `
+                          <div class="bg-white px-4 py-7 text-center text-sm text-[#86909c]">
+                            ${/驳回|失败/.test(version.status || '') ? '文件校验未通过，未生成拆分结果' : '暂无拆分结果'}
+                          </div>
+                        `}
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        ` : `<div class="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-7 text-center text-sm text-[#86909c]">${cn ? '暂无拆分结果' : '분할 결과 없음'}</div>`}
+      </section>
     `;
   },
 
@@ -2374,6 +2620,44 @@ const IngestionView = {
     }
 
     if (/文件收取|收件箱/.test(moduleName || currentNode) && attachment) {
+      if (attachment.isHistorical) {
+        const version = attachment.version || 1;
+        logs.push(this.createLifecycleLog('文件收取', '已接收', `V${version} 原始Excel已进入文件箱`, provideTime, 'info'));
+        logs.push(this.createLifecycleLog('文件处理', attachment.previousStatus || '驳回', attachment.rejectReason || '原版本存在异常Sheet，正常Sheet已继续流转', provideTime, 'danger'));
+        logs.push(this.createLifecycleLog('版本切换', '历史版本', attachment.historicalReason || `V${version} 已由新版本接替，原文件及流转日志保留`, attachment.historicalAt || updateTime, 'info'));
+        return logs;
+      }
+
+      if (attachment.retryBatchId) {
+        const retryBatch = (inboxItem?.retryBatches || []).find(item => item.id === attachment.retryBatchId);
+        const previousVersion = attachment.previousVersion || retryBatch?.previousVersion || Math.max(1, Number(attachment.version || 2) - 1);
+        const currentVersion = attachment.version || retryBatch?.version || previousVersion + 1;
+        if (attachment.isNewAttachment) {
+          logs.push(this.createLifecycleLog('新增附件', '已接收', `父级内未找到同名文件，${attachment.name} 作为新增附件 V1`, retryBatch?.uploadedAt || updateTime, 'info'));
+        } else {
+          logs.push(this.createLifecycleLog('文件收取', '已接收', `V${previousVersion} 原始Excel已进入文件箱`, provideTime, 'info'));
+          logs.push(this.createLifecycleLog('文件处理', '驳回', `V${previousVersion} 存在异常Sheet，正常Sheet已继续流转`, provideTime, 'danger'));
+          logs.push(this.createLifecycleLog('驳回重传', '已接收', `检测到同名文件，已上传完整Excel V${currentVersion}`, retryBatch?.uploadedAt || updateTime, 'info'));
+          logs.push(this.createLifecycleLog('版本切换', '历史版本', `同名V${previousVersion}转为历史版本，原文件及已流转日志保留；V${currentVersion}成为当前版本`, retryBatch?.uploadedAt || updateTime, 'info'));
+        }
+        addFileCheck(fileStatus, attachment.rejectReason || '批量修正文件正在重新校验');
+        if (attachment.isMultiStore && attachment.splitStores?.length) {
+          const duplicateCount = attachment.splitStores.filter(store => store.status === '重复').length;
+          const matchedCount = attachment.splitStores.filter(store => store.status === '已匹配').length;
+          const storeLog = this.createLifecycleLog(
+            '门店拆分',
+            duplicateCount ? '待处理' : '已完成',
+            `V${currentVersion} 拆分出 ${attachment.splitStores.length} 个单门店Excel，${matchedCount} 个新增已匹配，${duplicateCount} 个重复`,
+            updateTime,
+            duplicateCount ? 'warning' : 'success'
+          );
+          storeLog.splitRows = this.buildAttachmentStoreSplitRows({ ...context, inboxItem, attachment });
+          logs.push(storeLog);
+          if (duplicateCount) logs.push(this.createLifecycleLog('重复处理', '待处理', '请选择覆盖历史数据或忽略本次重复数据', updateTime, 'warning'));
+        }
+        return logs;
+      }
+
       if (attachment.repeatMultiStoreFlow) {
         addFileReceived();
         logs.push(this.createLifecycleLog(
@@ -2621,6 +2905,13 @@ const IngestionView = {
       muted: 'bg-slate-50 text-slate-500 border-slate-100'
     };
     const logs = this.buildDocumentDetailLogs({ ...context, inboxItem });
+    const splitGroups = this.buildDocumentSplitGroups({
+      ...context,
+      inboxItem,
+      attachment: sourceAttachment,
+      attachmentIndex: sourceAttachmentIndex,
+      row
+    });
     const content = `
       <div class="space-y-5">
         <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
@@ -2639,6 +2930,8 @@ const IngestionView = {
           </div>
         </section>
 
+        ${this.renderDocumentSplitResultSection(splitGroups)}
+
         <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
           <h4 class="text-sm font-extrabold text-[#1d2129] mb-4">${cn ? '状态日志流转' : '상태 로그 흐름'}</h4>
           <div class="space-y-3">
@@ -2655,7 +2948,6 @@ const IngestionView = {
                   </div>
                   <div class="mt-1 text-sm leading-6 text-[#4e5969]">${this.escapeHtml(log.action)}</div>
                   <div class="mt-1 text-xs text-[#86909c]">${this.escapeHtml(log.time)}</div>
-                  ${log.splitRows ? this.renderStoreSplitRows(log.splitRows) : ''}
                 </div>
               </div>
             `).join('')}
@@ -2690,6 +2982,25 @@ const IngestionView = {
     overlay.querySelector('.doc-fallback-source-trigger')?.addEventListener('click', event => {
       event.stopPropagation();
       if (row && Object.keys(row).length) this.showStoreDataPreviewModal(row);
+    });
+
+    overlay.querySelectorAll('.document-split-version-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const groupId = btn.dataset.splitGroup;
+        const versionId = btn.dataset.splitVersion;
+        overlay.querySelectorAll(`.document-split-version-tab[data-split-group="${groupId}"]`).forEach(tab => {
+          const active = tab.dataset.splitVersion === versionId;
+          tab.classList.toggle('border-blue-200', active);
+          tab.classList.toggle('bg-blue-50', active);
+          tab.classList.toggle('text-brand', active);
+          tab.classList.toggle('border-gray-200', !active);
+          tab.classList.toggle('bg-white', !active);
+          tab.classList.toggle('text-[#4e5969]', !active);
+        });
+        overlay.querySelectorAll(`.document-split-version-panel[data-split-group="${groupId}"]`).forEach(panel => {
+          panel.classList.toggle('hidden', panel.dataset.splitVersion !== versionId);
+        });
+      });
     });
 
     overlay.querySelectorAll('.store-split-preview-btn').forEach(btn => {
@@ -4436,26 +4747,54 @@ const IngestionView = {
       return;
     }
 
-    this.stashCheckState = {
-      active: true,
-      count: selectedRows.length
-    };
-    this.updateStashBatchButton();
+    const selectedCount = selectedRows.length;
+    Dialog.show({
+      title: '确认门店校验',
+      content: `
+        <div class="space-y-3 text-left">
+          <div class="flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+            <span class="text-sm text-gray-600">本次校验数据</span>
+            <span class="text-base font-semibold text-blue-600">${selectedCount} 条</span>
+          </div>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div class="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+              <div class="mb-1 text-sm font-medium text-emerald-700">校验成功</div>
+              <div class="text-xs leading-5 text-emerald-700/80">流向“单门店已匹配数据”</div>
+            </div>
+            <div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+              <div class="mb-1 text-sm font-medium text-amber-700">校验失败</div>
+              <div class="text-xs leading-5 text-amber-700/80">继续保留在“单门店未匹配数据”</div>
+            </div>
+          </div>
+          <div class="rounded-lg bg-gray-50 px-4 py-3 text-xs leading-5 text-gray-500">
+            校验将根据门店名称和门店编码匹配门店主数据。
+          </div>
+        </div>
+      `,
+      confirmText: '继续校验',
+      cancelText: '取消',
+      onConfirm: () => {
+        this.stashCheckState = {
+          active: true,
+          count: selectedCount
+        };
+        this.updateStashBatchButton();
 
-    setTimeout(() => {
-      const successRows = selectedRows.slice(0, 1);
-      const failedRows = selectedRows.slice(1);
+        setTimeout(() => {
+          const successRows = selectedRows.slice(0, 1);
+          const failedRows = selectedRows.slice(1);
 
-      this.promoteStashRows(successRows);
-      failedRows.forEach(item => this.failedStashKeys.add(item.key));
-      this.stashCheckState = {
-        active: false,
-        count: 0
-      };
-      this.updateStats();
-      this.renderStashTable();
-      this.showStashAiCheckResult(successRows, failedRows);
-    }, this.checkingMinDurationMs);
+          this.promoteStashRows(successRows);
+          failedRows.forEach(item => this.failedStashKeys.add(item.key));
+          this.stashCheckState = {
+            active: false,
+            count: 0
+          };
+          this.updateStats();
+          this.renderStashTable();
+        }, this.checkingMinDurationMs);
+      }
+    });
   },
   
   // 跳转到收件箱并高亮指定邮件/附件
@@ -4789,10 +5128,31 @@ const IngestionView = {
           const operationText = this.getCurrentLang() === 'cn' ? '操作？' : '조작하시겠습니까?';
           
           Dialog.show({
-            title: `${confirmText}【${actionNames[action]}】`,
+            title: action === 'approve' ? '确认质量校验' : `${confirmText}【${actionNames[action]}】`,
             content: action === 'approve'
-              ? `${confirmContentText}${rowData.fileName}」通过后将进入质量校验，完成后自动同步到标准POS或异常数据列表，是否继续？`
+              ? `
+                <div class="space-y-3 text-left">
+                  <div class="flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+                    <span class="text-sm text-gray-600">本次校验数据</span>
+                    <span class="text-base font-semibold text-blue-600">1 条</span>
+                  </div>
+                  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div class="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                      <div class="mb-1 text-sm font-medium text-emerald-700">正常数据</div>
+                      <div class="text-xs leading-5 text-emerald-700/80">流向“质量检查 - 标准POS表”</div>
+                    </div>
+                    <div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+                      <div class="mb-1 text-sm font-medium text-amber-700">异常数据</div>
+                      <div class="text-xs leading-5 text-amber-700/80">流向“质量检查 - 异常数据”</div>
+                    </div>
+                  </div>
+                  <div class="rounded-lg bg-gray-50 px-4 py-3 text-xs leading-5 text-gray-500">
+                    校验提交后将在后台执行，可通过数据状态查看处理进度。
+                  </div>
+                </div>
+              `
               : `${confirmContentText}${rowData.fileName}${actionText}${actionNames[action]}${operationText}`,
+            ...(action === 'approve' ? { confirmText: '继续校验', cancelText: '取消' } : {}),
             onConfirm: () => {
               if (action === 'approve' && this.activeDataMode === 'files') {
                 this.startOriginalQualityCheck([id]);
@@ -5071,7 +5431,12 @@ const IngestionView = {
       .replace(/'/g, '&#39;');
   },
 
-  showUploadModal() {
+  showUploadModal(options = {}) {
+    return this.showEnhancedUploadModal(options);
+  },
+
+  // 保留旧弹窗实现用于演示数据兼容；页面入口统一调用 showUploadModal。
+  showLegacyUploadModal() {
     const cn = this.getCurrentLang() === 'cn';
     const currentDate = new Date();
     const previousMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
@@ -5227,6 +5592,374 @@ const IngestionView = {
       close();
       Dialog.toast(cn ? '文件已上传，正在自动校验' : '파일 업로드 후 자동 검사 중입니다', 'success');
     });
+  },
+
+  getRejectedUploadDocuments() {
+    return this.getInboxData()
+      .map(item => ({
+        ...item,
+        rejectedAttachments: (item.attachments || [])
+          .map((attachment, index) => ({ attachment, index }))
+          .filter(entry => entry.attachment.status === '驳回' && !entry.attachment.isHistorical)
+      }))
+      .filter(item => item.rejectedAttachments.length > 0);
+  },
+
+  showEnhancedUploadModal(options = {}) {
+    const cn = this.getCurrentLang() === 'cn';
+    const rejectedDocuments = this.getRejectedUploadDocuments();
+    const initialMode = options.mode === 'retry' ? 'retry' : 'new';
+    const initialDocument = options.emailId
+      ? rejectedDocuments.find(item => String(item.id) === String(options.emailId))
+      : null;
+    const currentDate = new Date();
+    const previousMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+    const defaultPeriod = `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, '0')}`;
+    const yearOptions = [2024, 2025, 2026].map(year => `<option value="${year}" ${year === previousMonth.getFullYear() ? 'selected' : ''}>${year} 年</option>`).join('');
+    const monthOptions = Array.from({ length: 12 }, (_, index) => {
+      const month = index + 1;
+      return `<option value="${String(month).padStart(2, '0')}" ${month === previousMonth.getMonth() + 1 ? 'selected' : ''}>${month} 月</option>`;
+    }).join('');
+
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/35 p-4';
+    overlay.innerHTML = `
+      <div class="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <div>
+            <h3 class="text-base font-bold text-[#1d2129]">${cn ? '上传文件' : '파일 업로드'}</h3>
+            <p id="enhanced-upload-subtitle" class="mt-1 text-xs text-[#86909c]"></p>
+          </div>
+          <button type="button" class="enhanced-upload-close flex h-8 w-8 items-center justify-center rounded-md text-[#86909c] hover:bg-gray-100"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <form id="enhanced-upload-form" class="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          <div>
+            <div class="mb-2 text-sm font-medium text-[#1d2129]">${cn ? '上传方式' : '업로드 방식'}</div>
+            <div class="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-1.5">
+              <button type="button" class="upload-mode-btn rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors" data-mode="new">${cn ? '新建上传' : '새 업로드'}</button>
+              <button type="button" class="upload-mode-btn rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors" data-mode="retry">${cn ? '驳回重传' : '반려 재업로드'}</button>
+            </div>
+          </div>
+
+          <section id="upload-new-section" class="space-y-5">
+            <label class="block">
+              <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '标题' : '제목'} <span class="text-red-500">*</span></span>
+              <input id="enhanced-upload-title" type="text" maxlength="100" class="w-full rounded-md border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" placeholder="${cn ? '请输入标题' : '제목을 입력하세요'}">
+            </label>
+            <label class="block">
+              <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '内容' : '내용'}</span>
+              <textarea id="enhanced-upload-content" rows="3" maxlength="500" class="w-full resize-none rounded-md border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" placeholder="${cn ? '请输入内容' : '내용을 입력하세요'}"></textarea>
+            </label>
+            <div>
+              <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '年月' : '연월'} <span class="text-red-500">*</span></span>
+              <input id="enhanced-upload-period" type="hidden" value="${defaultPeriod}">
+              <div class="flex gap-3">
+                <select id="enhanced-upload-year" class="w-32 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-brand">${yearOptions}</select>
+                <select id="enhanced-upload-month" class="w-28 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-brand">${monthOptions}</select>
+              </div>
+            </div>
+          </section>
+
+          <section id="upload-retry-section" class="hidden space-y-4">
+            <div>
+              <label class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '历史驳回单据' : '이전 반려 문서'} <span class="text-red-500">*</span></label>
+              <div class="relative">
+                <div class="flex items-center rounded-lg border border-gray-200 bg-white px-3 focus-within:border-brand">
+                  <i class="fa-solid fa-magnifying-glass text-xs text-[#86909c]"></i>
+                  <input id="retry-document-search" type="text" autocomplete="off" class="min-w-0 flex-1 px-3 py-2.5 text-sm outline-none" placeholder="${cn ? '搜索单据编号、标题、文件名、年月或上传人' : '문서번호, 제목, 파일명 검색'}">
+                  <i class="fa-solid fa-chevron-down text-xs text-[#86909c]"></i>
+                </div>
+                <div id="retry-document-dropdown" class="absolute z-20 mt-1 hidden max-h-64 w-full overflow-auto rounded-lg border border-gray-200 bg-white p-1 shadow-xl"></div>
+              </div>
+              <p id="retry-document-error" class="mt-2 hidden text-xs text-red-500">${cn ? '请选择历史驳回单据' : '이전 반려 문서를 선택하세요'}</p>
+            </div>
+            <div id="retry-document-summary" class="hidden rounded-xl border border-blue-100 bg-blue-50/50 p-4"></div>
+          </section>
+
+          <div>
+            <span id="enhanced-file-label" class="mb-2 block text-sm font-medium text-[#1d2129]"></span>
+            <input id="enhanced-upload-files" type="file" multiple class="hidden" accept=".xlsx,.xls,.csv,.zip">
+            <button type="button" id="enhanced-file-picker" class="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-blue-300 bg-blue-50/50 px-4 py-5 text-sm font-medium text-brand hover:bg-blue-50">
+              <i class="fa-solid fa-cloud-arrow-up"></i><span>${cn ? '选择本地文件' : '로컬 파일 선택'}</span>
+            </button>
+            <p id="enhanced-file-help" class="mt-2 text-xs text-[#86909c]"></p>
+            <div id="enhanced-file-list" class="mt-3 hidden space-y-2"></div>
+            <p id="enhanced-file-error" class="mt-2 hidden text-xs text-red-500">${cn ? '请至少选择一个文件' : '파일을 하나 이상 선택하세요'}</p>
+          </div>
+        </form>
+        <div class="flex justify-end gap-2 border-t border-gray-100 bg-gray-50/60 px-6 py-4">
+          <button type="button" class="enhanced-upload-close rounded-md border border-gray-200 bg-white px-4 py-2 text-sm text-[#4e5969] hover:bg-gray-50">${cn ? '取消' : '취소'}</button>
+          <button type="submit" form="enhanced-upload-form" class="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"><i class="fa-solid fa-upload mr-1"></i><span id="enhanced-submit-label"></span></button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+    let mode = initialMode;
+    let selectedDocument = initialDocument || null;
+    let selectedFiles = [];
+    const fileInput = overlay.querySelector('#enhanced-upload-files');
+    const fileList = overlay.querySelector('#enhanced-file-list');
+    const searchInput = overlay.querySelector('#retry-document-search');
+    const dropdown = overlay.querySelector('#retry-document-dropdown');
+
+    let handleOutsideClick = null;
+    const close = () => {
+      if (handleOutsideClick) document.removeEventListener('click', handleOutsideClick);
+      overlay.remove();
+    };
+    const documentSearchText = item => [item.id, item.emailSubject, item.emailBody, item.month, item.provider, ...(item.attachments || []).map(att => att.name)].join(' ').toLowerCase();
+    const renderDocumentOptions = (keyword = '') => {
+      const normalized = keyword.trim().toLowerCase();
+      const rows = rejectedDocuments.filter(item => !normalized || documentSearchText(item).includes(normalized));
+      dropdown.innerHTML = rows.length ? rows.map(item => `
+        <button type="button" class="retry-document-option w-full rounded-md px-3 py-2.5 text-left hover:bg-blue-50" data-document-id="${this.escapeHtml(item.id)}">
+          <div class="flex items-center justify-between gap-3"><span class="truncate text-sm font-semibold text-[#1d2129]">${this.escapeHtml(item.emailSubject)}</span><span class="shrink-0 text-xs text-brand">${item.rejectedAttachments.length} 个驳回附件</span></div>
+          <div class="mt-1 truncate text-xs text-[#86909c]">${this.escapeHtml(item.id)} · ${this.escapeHtml(item.month || '-')} · ${this.escapeHtml(item.provider || '-')}</div>
+        </button>`).join('') : `<div class="px-3 py-8 text-center text-sm text-[#86909c]">${cn ? '未找到符合条件的驳回单据' : '조건에 맞는 문서가 없습니다'}</div>`;
+      dropdown.classList.remove('hidden');
+    };
+    const renderSelectedDocument = () => {
+      const summary = overlay.querySelector('#retry-document-summary');
+      if (!selectedDocument) {
+        summary.classList.add('hidden');
+        return;
+      }
+      searchInput.value = `${selectedDocument.emailSubject}（${selectedDocument.id}）`;
+      const rejectedRows = selectedDocument.rejectedAttachments.map(entry => `
+        <div class="flex items-start gap-2 rounded-lg border border-red-100 bg-white px-3 py-2">
+          <i class="fa-regular fa-file-excel mt-0.5 text-emerald-600"></i>
+          <div class="min-w-0 flex-1"><div class="truncate text-xs font-medium text-[#1d2129]">${this.escapeHtml(entry.attachment.name)}</div><div class="mt-0.5 truncate text-[11px] text-red-500">${this.escapeHtml(entry.attachment.rejectReason || '文件校验未通过')}</div></div>
+        </div>`).join('');
+      summary.innerHTML = `<div class="grid grid-cols-2 gap-x-5 gap-y-2 text-xs"><div class="col-span-2"><span class="text-[#86909c]">年月：</span>${this.escapeHtml(selectedDocument.month || '2026年06月')}</div><div class="col-span-2"><span class="text-[#86909c]">标题：</span>${this.escapeHtml(selectedDocument.emailSubject)}</div><div class="col-span-2"><span class="text-[#86909c]">内容：</span>${this.escapeHtml(selectedDocument.emailBody || '-')}</div></div><div class="mt-3 border-t border-blue-100 pt-3"><div class="mb-2 flex items-center justify-between text-xs"><span class="font-medium text-[#4e5969]">驳回单据列表</span><span class="text-red-500">${selectedDocument.rejectedAttachments.length} 个</span></div><div class="space-y-2">${rejectedRows}</div></div>`;
+      summary.classList.remove('hidden');
+    };
+    const renderFiles = () => {
+      fileList.classList.toggle('hidden', selectedFiles.length === 0);
+      const currentFiles = (selectedDocument?.attachments || []).filter(attachment => !attachment.isHistorical);
+      fileList.innerHTML = selectedFiles.map((file, index) => {
+        const sameNameFile = mode === 'retry'
+          ? currentFiles.find(attachment => this.normalizeRetryFileName(attachment.name) === this.normalizeRetryFileName(file.name))
+          : null;
+        const compareResult = mode !== 'retry'
+          ? ''
+          : sameNameFile
+            ? `<div class="mt-1 text-[11px] font-medium text-blue-600">找到同名文件 V${sameNameFile.version || 1}，将创建 V${Number(sameNameFile.version || 1) + 1}，原文件转为历史版本</div>`
+            : '<div class="mt-1 text-[11px] font-medium text-emerald-600">父级内无同名文件，将作为新增附件 V1</div>';
+        return `<div class="flex items-start gap-3 rounded-md border border-gray-100 bg-gray-50 px-3 py-2"><i class="fa-regular fa-file-excel mt-0.5 text-emerald-600"></i><span class="min-w-0 flex-1"><span class="block truncate text-sm text-[#4e5969]">${this.escapeHtml(file.name)}</span>${compareResult}</span><span class="shrink-0 text-xs text-[#86909c]">${(file.size / 1024).toFixed(1)} KB</span><button type="button" class="enhanced-file-remove shrink-0 text-slate-400 hover:text-red-500" data-index="${index}"><i class="fa-solid fa-xmark"></i></button></div>`;
+      }).join('');
+      fileList.querySelectorAll('.enhanced-file-remove').forEach(btn => btn.addEventListener('click', () => { selectedFiles.splice(Number(btn.dataset.index), 1); renderFiles(); }));
+    };
+    const renderMode = () => {
+      overlay.querySelector('#upload-new-section').classList.toggle('hidden', mode !== 'new');
+      overlay.querySelector('#upload-retry-section').classList.toggle('hidden', mode !== 'retry');
+      overlay.querySelectorAll('.upload-mode-btn').forEach(btn => {
+        const active = btn.dataset.mode === mode;
+        btn.className = `upload-mode-btn rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${active ? 'bg-white text-brand shadow-sm' : 'text-[#86909c] hover:text-[#1d2129]'}`;
+      });
+      overlay.querySelector('#enhanced-upload-subtitle').textContent = mode === 'new' ? '创建新的上传单据并进行文件校验' : '上传完整Excel新版本，保留历史原文件与已流转日志';
+      overlay.querySelector('#enhanced-file-label').innerHTML = `本地文件 <span class="text-red-500">*</span>`;
+      overlay.querySelector('#enhanced-file-help').textContent = '支持 .zip、.xls、.xlsx、.csv 文件上传';
+      overlay.querySelector('#enhanced-submit-label').textContent = mode === 'new' ? '确认上传' : '上传新版本';
+      fileInput.multiple = true;
+      renderSelectedDocument();
+      renderFiles();
+    };
+
+    overlay.querySelectorAll('.enhanced-upload-close').forEach(btn => btn.addEventListener('click', close));
+    overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
+    overlay.querySelectorAll('.upload-mode-btn').forEach(btn => btn.addEventListener('click', () => { mode = btn.dataset.mode; selectedFiles = []; fileInput.value = ''; renderMode(); if (mode === 'retry' && !selectedDocument) renderDocumentOptions(''); }));
+    overlay.querySelector('#enhanced-file-picker').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => { selectedFiles = Array.from(fileInput.files || []); overlay.querySelector('#enhanced-file-error').classList.add('hidden'); renderFiles(); });
+    const syncPeriod = () => { overlay.querySelector('#enhanced-upload-period').value = `${overlay.querySelector('#enhanced-upload-year').value}-${overlay.querySelector('#enhanced-upload-month').value}`; };
+    overlay.querySelector('#enhanced-upload-year').addEventListener('change', syncPeriod);
+    overlay.querySelector('#enhanced-upload-month').addEventListener('change', syncPeriod);
+    searchInput.addEventListener('focus', () => renderDocumentOptions(selectedDocument ? '' : searchInput.value));
+    searchInput.addEventListener('input', () => { selectedDocument = null; renderSelectedDocument(); renderDocumentOptions(searchInput.value); });
+    dropdown.addEventListener('click', event => {
+      const option = event.target.closest('.retry-document-option');
+      if (!option) return;
+      selectedDocument = rejectedDocuments.find(item => String(item.id) === String(option.dataset.documentId)) || null;
+      dropdown.classList.add('hidden');
+      overlay.querySelector('#retry-document-error').classList.add('hidden');
+      renderSelectedDocument();
+      renderFiles();
+    });
+    handleOutsideClick = event => {
+      if (!event.target.closest('#retry-document-search') && !event.target.closest('#retry-document-dropdown')) dropdown.classList.add('hidden');
+    };
+    document.addEventListener('click', handleOutsideClick);
+
+    overlay.querySelector('#enhanced-upload-form').addEventListener('submit', event => {
+      event.preventDefault();
+      if (selectedFiles.length === 0) { overlay.querySelector('#enhanced-file-error').classList.remove('hidden'); return; }
+      const files = selectedFiles.map(file => ({ name: file.name, size: file.size, type: file.type }));
+      if (mode === 'retry') {
+        if (!selectedDocument) { overlay.querySelector('#retry-document-error').classList.remove('hidden'); searchInput.focus(); return; }
+        const duplicateUploadNames = files
+          .map(file => this.normalizeRetryFileName(file.name))
+          .filter((name, index, names) => names.indexOf(name) !== index);
+        if (duplicateUploadNames.length) {
+          const fileError = overlay.querySelector('#enhanced-file-error');
+          fileError.textContent = '本次选择中存在重复文件名，请移除重复文件后再上传';
+          fileError.classList.remove('hidden');
+          return;
+        }
+        this.startRejectedBatchRetry({ documentId: selectedDocument.id, files });
+        close();
+        return;
+      }
+      const titleInput = overlay.querySelector('#enhanced-upload-title');
+      const title = titleInput.value.trim();
+      if (!title) { titleInput.focus(); return; }
+      this.startUploadAutoCheck({ title, content: overlay.querySelector('#enhanced-upload-content').value.trim(), period: overlay.querySelector('#enhanced-upload-period').value, files });
+      close();
+      Dialog.toast(cn ? '文件已上传，正在自动校验' : '파일 업로드 후 자동 검사 중입니다', 'success');
+    });
+
+    renderMode();
+    if (initialMode === 'retry' && initialDocument) renderSelectedDocument();
+  },
+
+  normalizeRetryFileName(name = '') {
+    return String(name || '').trim().toLowerCase();
+  },
+
+  buildRetrySplitStores(sourceAttachment = {}, file = {}) {
+    sourceAttachment = sourceAttachment || {};
+    const sourceStores = Array.isArray(sourceAttachment.splitStores) ? sourceAttachment.splitStores : [];
+    if (!sourceAttachment.isMultiStore && !/多门店|multi/i.test(file.name || '')) return [];
+
+    if (sourceStores.length) {
+      return sourceStores.map((store, index) => {
+        const wasInvalid = store.status === '驳回' || !store.storeName;
+        if (wasInvalid) {
+          return {
+            ...store,
+            storeName: store.storeName || `修正识别门店${index + 1}`,
+            fileName: store.fileName || `修正识别门店${index + 1}-销售明细.xlsx`,
+            status: '已匹配',
+            reason: 'V2已补充门店名称/门店编码，匹配主数据成功'
+          };
+        }
+        return {
+          ...store,
+          status: '重复',
+          reason: '该年月、经销商和门店数据已由历史版本流转'
+        };
+      });
+    }
+
+    const baseName = String(file.name || '多门店数据').replace(/\.(xlsx|xls|csv|zip)$/i, '');
+    return [
+      { storeName: `${baseName}-门店A`, status: '重复', reason: '历史版本已流转' },
+      { storeName: `${baseName}-门店B`, status: '重复', reason: '历史版本已流转' },
+      { storeName: `${baseName}-新增门店`, status: '已匹配', reason: '本次首次识别成功' }
+    ];
+  },
+
+  startRejectedBatchRetry(payload = {}) {
+    const cn = this.getCurrentLang() === 'cn';
+    const inboxItem = this.getInboxData().find(item => String(item.id) === String(payload.documentId));
+    const files = Array.isArray(payload.files) ? payload.files : [];
+    const currentAttachments = (inboxItem?.attachments || []).filter(attachment => !attachment.isHistorical);
+    if (!inboxItem || !files.length || !currentAttachments.length) return;
+
+    const nowText = this.formatNowDateTime(new Date());
+    const remainingSources = [...currentAttachments];
+    const retryBatchId = `${inboxItem.id}-RETRY-${Date.now()}`;
+    const correctionAttachments = files.map((file, fileIndex) => {
+      const normalizedFileName = this.normalizeRetryFileName(file.name);
+      const sourceIndex = remainingSources.findIndex(source => this.normalizeRetryFileName(source.name) === normalizedFileName);
+      const sourceAttachment = sourceIndex >= 0 ? remainingSources.splice(sourceIndex, 1)[0] : null;
+      const previousVersion = sourceAttachment ? Number(sourceAttachment.version || 1) : 0;
+      const nextVersion = sourceAttachment ? previousVersion + 1 : 1;
+      const sourceGroupId = sourceAttachment?.sourceGroupId || `${inboxItem.id}-SOURCE-NEW-${Date.now()}-${fileIndex + 1}`;
+
+      if (sourceAttachment) {
+        sourceAttachment.sourceGroupId = sourceGroupId;
+        sourceAttachment.version = previousVersion;
+        sourceAttachment.previousStatus = sourceAttachment.status;
+        sourceAttachment.status = '历史版本';
+        sourceAttachment.isHistorical = true;
+        sourceAttachment.isCurrentVersion = false;
+        sourceAttachment.historicalAt = nowText;
+        sourceAttachment.historicalReason = `V${previousVersion} 已由 V${nextVersion} 完整Excel接替，原文件及流转日志保留`;
+      }
+
+      return {
+        name: file.name,
+        status: '校验中',
+        rejectReason: `V${nextVersion} 完整Excel正在进行可读性校验`,
+        sourceMethod: '驳回重传',
+        sourceGroupId,
+        sourceVersionId: `${sourceGroupId}-V${nextVersion}`,
+        version: nextVersion,
+        previousVersion,
+        isCurrentVersion: true,
+        retryBatchId,
+        uploadedAt: nowText,
+        retrySourceAttachment: sourceAttachment,
+        isMultiStore: Boolean(sourceAttachment?.isMultiStore || /多门店|multi/i.test(file.name || '')),
+        originalFileName: sourceAttachment?.name || file.name,
+        uploadFileIndex: fileIndex,
+        isNewAttachment: !sourceAttachment,
+        versionMatchType: sourceAttachment ? 'same-name' : 'new-file'
+      };
+    });
+    inboxItem.attachments.push(...correctionAttachments);
+    inboxItem.attachmentCount = inboxItem.attachments.filter(item => !item.isHistorical).length;
+    inboxItem.currentVersion = Math.max(...correctionAttachments.map(item => item.version), Number(inboxItem.currentVersion || 1));
+    inboxItem.retryBatches = Array.isArray(inboxItem.retryBatches) ? inboxItem.retryBatches : [];
+    inboxItem.retryBatches.push({
+      id: retryBatchId,
+      version: inboxItem.currentVersion,
+      previousVersion: Math.max(1, inboxItem.currentVersion - 1),
+      uploadedAt: nowText,
+      fileCount: files.length,
+      historicalRejectedCount: correctionAttachments.filter(item => !item.isNewAttachment).length,
+      newAttachmentCount: correctionAttachments.filter(item => item.isNewAttachment).length,
+      status: '校验中'
+    });
+    this.recalcInboxItemStatus(inboxItem);
+    this.uploadCheckState = { active: true, count: files.length };
+    this.renderUploadCheckStatus();
+    this.renderInbox();
+    Dialog.toast(cn ? `已绑定历史单据 ${inboxItem.id}，${files.length} 个修正文件正在重新校验` : '이전 문서에 연결하여 일괄 재검사합니다', 'success');
+    setTimeout(() => {
+      correctionAttachments.forEach((attachment, index) => {
+        const checkResult = this.getUploadAttachmentCheckResult(files[index]);
+        Object.assign(attachment, checkResult);
+        if (checkResult.status !== '正常') return;
+
+        const splitStores = this.buildRetrySplitStores(attachment.retrySourceAttachment, files[index]);
+        attachment.splitStores = splitStores;
+        attachment.isMultiStore = splitStores.length > 1 || attachment.isMultiStore;
+        attachment.retrySourceAttachment = undefined;
+        const duplicateCount = splitStores.filter(store => store.status === '重复').length;
+        const matchedCount = splitStores.filter(store => store.status === '已匹配').length;
+        if (duplicateCount > 0) {
+          attachment.status = '待处理';
+          attachment.rejectReason = `V${attachment.version} 已拆分 ${splitStores.length} 个门店，${matchedCount} 个新增已匹配，${duplicateCount} 个与历史流转数据重复，请覆盖或忽略`;
+          attachment.pendingDuplicateCount = duplicateCount;
+        } else {
+          attachment.status = '正常';
+          attachment.rejectReason = `V${attachment.version} 完整Excel校验通过，门店拆分与匹配完成`;
+        }
+      });
+      const batch = inboxItem.retryBatches.find(item => item.id === retryBatchId);
+      if (batch) {
+        batch.status = correctionAttachments.some(item => item.status === '驳回')
+          ? '驳回'
+          : correctionAttachments.some(item => item.status === '待处理')
+            ? '待处理'
+            : '正常';
+        batch.completedAt = this.formatNowDateTime(new Date());
+      }
+      this.recalcInboxItemStatus(inboxItem);
+      this.uploadCheckState = { active: false, count: 0 };
+      this.renderInbox();
+      Dialog.toast(cn ? '批量修正文件重新校验完成' : '일괄 수정 파일 재검사가 완료되었습니다', 'success');
+    }, this.checkingMinDurationMs);
   },
 
   getUploadAttachmentCheckResult(file = {}) {
@@ -5612,10 +6345,31 @@ const IngestionView = {
       const successAction = this.getCurrentLang() === 'cn' ? '操作' : '조작';
       
       Dialog.show({
-        title: `${batchTitle}【${actionNames[action]}】`,
+        title: action === 'approve' ? '确认质量校验' : `${batchTitle}【${actionNames[action]}】`,
         content: action === 'approve'
-          ? `当前将对【${selected.length}】条数据执行通过操作，并进入质量校验；完成后自动同步到标准POS或异常数据列表，是否继续？`
+          ? `
+            <div class="space-y-3 text-left">
+              <div class="flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+                <span class="text-sm text-gray-600">本次校验数据</span>
+                <span class="text-base font-semibold text-blue-600">${selected.length} 条</span>
+              </div>
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div class="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                  <div class="mb-1 text-sm font-medium text-emerald-700">正常数据</div>
+                  <div class="text-xs leading-5 text-emerald-700/80">流向“质量检查 - 标准POS表”</div>
+                </div>
+                <div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+                  <div class="mb-1 text-sm font-medium text-amber-700">异常数据</div>
+                  <div class="text-xs leading-5 text-amber-700/80">流向“质量检查 - 异常数据”</div>
+                </div>
+              </div>
+              <div class="rounded-lg bg-gray-50 px-4 py-3 text-xs leading-5 text-gray-500">
+                校验提交后将在后台执行，可通过数据状态查看处理进度。
+              </div>
+            </div>
+          `
           : `${batchContent}【${selected.length}${batchMiddle}${actionNames[action]}${batchEnd}`,
+        ...(action === 'approve' ? { confirmText: '继续校验', cancelText: '取消' } : {}),
         onConfirm: async () => {
           // 显示loading
           this.showLoading();
