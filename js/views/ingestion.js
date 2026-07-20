@@ -18,6 +18,104 @@ const IngestionView = {
   getCurrentLang() {
     return Store?.getState?.()?.lang || 'cn';
   },
+
+  isPosActor() {
+    return Store?.isPosActor?.() !== false;
+  },
+
+  hasFullDataScope() {
+    const actor = Store?.getState?.() || {};
+    if (actor.isAdmin || actor.team === '全部数据') return true;
+    const role = typeof SettingsView !== 'undefined'
+      ? SettingsView.roles?.find((item) => item.name === actor.userRole)
+      : null;
+    return role?.dataScope === '全部数据';
+  },
+
+  hasIngestionPermission(child, action) {
+    return typeof SettingsView !== 'undefined'
+      && SettingsView.hasCurrentPermission('文件收取', child, action);
+  },
+
+  loadWorkflowState() {
+    try { return JSON.parse(localStorage.getItem('pos_demo_ingestion_workflow') || '{}'); }
+    catch (error) { return {}; }
+  },
+
+  saveWorkflowState() {
+    const saved = {};
+    this.data.forEach((row) => {
+      if (!row.workflowStatus) return;
+      saved[row.id] = {
+        workflowStatus: row.workflowStatus, handler: row.handler || '', remark: row.remark || '',
+        rejectedBy: row.rejectedBy || '', rejectedAt: row.rejectedAt || '',
+        salesSubmitNote: row.salesSubmitNote || '', salesSubmittedBy: row.salesSubmittedBy || '', salesSubmittedAt: row.salesSubmittedAt || '',
+        currentOwnerType: row.currentOwnerType || '', currentOwnerName: row.currentOwnerName || '', currentOwnerTeam: row.currentOwnerTeam || '',
+        lastOperatorName: row.lastOperatorName || '', lastOperatorRole: row.lastOperatorRole || '', lastAction: row.lastAction || '', lastOperatedAt: row.lastOperatedAt || ''
+      };
+    });
+    localStorage.setItem('pos_demo_ingestion_workflow', JSON.stringify(saved));
+  },
+
+  getWorkflowStatus(row = {}) {
+    if (row.workflowStatus) return row.workflowStatus;
+    if (String(row.status).includes('质量校验中')) return '质检中';
+    if (/(已同步|已通过)/.test(String(row.status))) return '已同步';
+    if (String(row.status).includes('校验失败')) return '校验失败';
+    return '待通过';
+  },
+
+  getRoleDisplayStatus(row = {}) {
+    return this.getMatchedQualityStatus(row);
+  },
+
+  getMatchedQualityStatus(row = {}) {
+    const status = this.getWorkflowStatus(row);
+    return status === '已同步' || /已同步|已通过/.test(String(row.status || '')) ? '已质检' : '待质检';
+  },
+
+  getMatchedResponsibility(row = {}) {
+    const status = this.getWorkflowStatus(row);
+    let currentOwnerType = row.currentOwnerType;
+    let currentOwnerName = row.currentOwnerName;
+    if (!currentOwnerType) currentOwnerType = status === '营业担当处理中' ? 'sales' : (status === '质检中' ? 'system' : 'pos');
+    if (!currentOwnerName) {
+      if (currentOwnerType === 'sales') currentOwnerName = row.currentOwnerTeam || row.handler || row.team || '-';
+      else if (currentOwnerType === 'system') currentOwnerName = '系统';
+      else currentOwnerName = status === '已同步' ? '-' : 'POS担当';
+    }
+    const lastOperatorName = row.lastOperatorName || row.salesSubmittedBy || row.rejectedBy || row.approvedBy || '系统';
+    return { currentOwnerType, currentOwnerName, lastOperatorName };
+  },
+
+  hasMatchedEditPermission() {
+    if (this.isPosActor()) return true;
+    const role = typeof SettingsView !== 'undefined' ? SettingsView.roles?.find((item) => item.name === Store.getState().userRole) : null;
+    return Boolean(role?.functions?.some((permission) => permission === '文件收取/单门店已匹配数据:编辑'));
+  },
+
+  canEditMatchedRow(row = {}) {
+    const status = this.getWorkflowStatus(row);
+    if (!this.hasIngestionPermission('单门店已匹配数据', '编辑')) return false;
+    if (this.isPosActor()) return ['待通过', 'POS担当待处理'].includes(status);
+    const responsibility = this.getMatchedResponsibility(row);
+    return this.hasMatchedEditPermission()
+      && status === '营业担当处理中'
+      && responsibility.currentOwnerType === 'sales'
+      && (row.currentOwnerTeam || row.handler || row.team) === Store.getState().team;
+  },
+
+  renderMatchedWorkflowActions(row) {
+    const isPos = this.isPosActor();
+    const id = this.escapeHtml(row.id);
+    if (isPos && this.canEditMatchedRow(row)) return `
+      ${this.hasIngestionPermission('单门店已匹配数据', '质检') ? `<button class="px-2 py-1 text-xs rounded action-btn text-green-600 hover:bg-green-50" data-action="approve" data-id="${id}" title="进入质量检查"><i class="fa-solid fa-check"></i></button>` : ''}
+      <button class="px-2 py-1 text-xs rounded action-btn row-edit-btn text-amber-500 hover:bg-amber-50" data-action="edit" data-id="${id}" title="编辑"><i class="fa-solid fa-pen-to-square row-edit-icon"></i></button>`;
+    if (!isPos && this.canEditMatchedRow(row)) return `
+      <button class="px-2 py-1 text-xs rounded action-btn text-green-600 hover:bg-green-50" data-action="submit-sales-result" data-id="${id}" title="提交处理结果"><i class="fa-solid fa-check"></i></button>
+      <button class="px-2 py-1 text-xs rounded action-btn row-edit-btn text-amber-500 hover:bg-amber-50" data-action="edit" data-id="${id}" title="编辑"><i class="fa-solid fa-pen-to-square row-edit-icon"></i></button>`;
+    return '<span class="px-2 text-xs text-[#86909c]">只读</span>';
+  },
   
   // 处理双语文本 - 中文模式只显示中文部分
   getLocalizedText(text) {
@@ -200,6 +298,24 @@ const IngestionView = {
     `;
   },
 
+  getRejectAssignee(team = '') {
+    const normalizedTeam = String(team || '华北 Team').replace(/\s*Team.*$/, ' Team').trim();
+    const assigneeMap = {
+      '华北 Team': '张敏',
+      '东北 Team': '李娜',
+      '华东 Team': '王芳',
+      '华中 Team': '刘洋',
+      '华南 Team': '陈静',
+      '西南 Team': '赵磊',
+      '西北 Team': '周婷'
+    };
+    return {
+      team: normalizedTeam,
+      user: assigneeMap[normalizedTeam] || '待配置',
+      label: `${normalizedTeam.replace(/\s+/g, '')}—${assigneeMap[normalizedTeam] || '待配置'}`
+    };
+  },
+
   enrichOriginalStoreRow(row = {}, index = 0) {
     const teams = ['华北 Team', '东北 Team', '华东 Team', '华中 Team', '华南 Team', '西南 Team', '西北 Team'];
     const headquarters = ['北部本部', '东北本部', '东部本部', '中部本部', '南部本部', '西南本部', '西北本部'];
@@ -271,7 +387,8 @@ const IngestionView = {
     searchField: 'all',
     headquarters: '',
     salesOffice: '',
-    approvalStatus: 'all'
+    approvalStatus: 'all',
+    stashStatus: 'all'
   },
   
   // 收件箱状态筛选
@@ -300,6 +417,7 @@ const IngestionView = {
     try {
       const res = await fetch('data/files_mock.json?v=20260710-exception-table-route');
       this.data = await res.json();
+      const workflowState = this.loadWorkflowState();
       this.migrateOriginalStatusToPending();
       this.loadApprovedOriginalIds();
       this.loadQualityOriginalStates();
@@ -308,7 +426,8 @@ const IngestionView = {
         ...this.enrichOriginalStoreRow(row, index),
         ...this.getQualityOriginalState(String(row.id), row.status),
         handler: row.status.includes('异常') ? row.team : 'POS担当',
-        remark: row.remark || ''
+        remark: row.remark || '',
+        ...(workflowState[row.id] || {})
       }));
       this.resumeQualityChecks();
       this.loadFiltersFromCache();
@@ -348,8 +467,11 @@ const IngestionView = {
       if (!this.getSalesOfficeOptions(this.filters.headquarters).includes(this.filters.salesOffice)) {
         this.filters.salesOffice = '';
       }
-      if (!['all', 'pending', 'checking', 'synced', 'failed'].includes(this.filters.approvalStatus)) {
+      if (!['all', 'pending', 'completed'].includes(this.filters.approvalStatus)) {
         this.filters.approvalStatus = 'all';
+      }
+      if (!['all', 'pending', 'processing', 'review'].includes(this.filters.stashStatus)) {
+        this.filters.stashStatus = 'all';
       }
       if (!this.filters.searchField) {
         this.filters.searchField = 'all';
@@ -437,11 +559,17 @@ const IngestionView = {
     const targetIds = ids.map(String);
     targetIds.forEach((id) => {
       const row = this.data.find(item => String(item.id) === id);
+      if (row) Object.assign(row, {
+        workflowStatus: '质检中', currentOwnerType: 'system', currentOwnerName: '系统', currentOwnerTeam: '',
+        lastOperatorName: Store.getState().userName, lastOperatorRole: Store.getState().userRole,
+        lastAction: '提交质量校验', lastOperatedAt: this.formatNowDateTime()
+      });
       this.setQualityOriginalState(id, {
         status: '质量校验中',
         route: row ? this.getQualityRoute(row) : '标准POS'
       });
     });
+    this.saveWorkflowState();
     this.saveQualityOriginalStates();
     this.scheduleQualityCheckCompletion(targetIds);
   },
@@ -461,11 +589,13 @@ const IngestionView = {
           status: '已同步',
           route
         });
+        Object.assign(row, { workflowStatus: '已同步', currentOwnerType: 'none', currentOwnerName: '-', lastOperatorName: '系统', lastOperatorRole: '系统', lastAction: '完成质量校验', lastOperatedAt: this.formatNowDateTime() });
         completedRows.push({ id, row, route });
         this.approvedOriginalIds.add(id);
       });
       this.saveQualityOriginalStates();
       this.saveApprovedOriginalIds();
+      this.saveWorkflowState();
       this.updateStats();
       this.applyFilters();
     }, delay);
@@ -566,14 +696,15 @@ const IngestionView = {
       result = result.filter(row => row.salesOffice === this.filters.salesOffice);
     }
 
+    if (!this.isPosActor()) {
+      const actor = Store.getState();
+      result = result.filter(row => row.team === actor.team || row.salesOffice === actor.salesOffice);
+    }
+
     if (this.filters.approvalStatus === 'pending') {
-      result = result.filter(row => !/(已通过|已同步|已驳回|质量校验中|校验失败)/.test(row.status));
-    } else if (this.filters.approvalStatus === 'checking') {
-      result = result.filter(row => row.status.includes('质量校验中'));
-    } else if (this.filters.approvalStatus === 'synced') {
-      result = result.filter(row => row.status.includes('已同步') || row.status.includes('已通过'));
-    } else if (this.filters.approvalStatus === 'failed') {
-      result = result.filter(row => row.status.includes('校验失败'));
+      result = result.filter(row => this.getMatchedQualityStatus(row) === '待质检');
+    } else if (this.filters.approvalStatus === 'completed') {
+      result = result.filter(row => this.getMatchedQualityStatus(row) === '已质检');
     }
     
     this.filteredData = result;
@@ -602,7 +733,8 @@ const IngestionView = {
       searchField: 'all',
       headquarters: '',
       salesOffice: '',
-      approvalStatus: 'all'
+      approvalStatus: 'all',
+      stashStatus: 'all'
     };
     this.pagination.page = 1;
     this.saveFiltersToCache();
@@ -783,10 +915,8 @@ const IngestionView = {
               <select id="approval-status-select"
                 class="w-40 appearance-none px-4 py-2 pr-9 border border-gray-200 rounded-lg text-sm text-[#4e5969] bg-white focus:outline-none focus:border-brand transition-all">
                 <option value="all" ${this.filters.approvalStatus === 'all' ? 'selected' : ''}>全部状态</option>
-                <option value="pending" ${this.filters.approvalStatus === 'pending' ? 'selected' : ''}>待通过</option>
-                <option value="checking" ${this.filters.approvalStatus === 'checking' ? 'selected' : ''}>质量校验中</option>
-                <option value="synced" ${this.filters.approvalStatus === 'synced' ? 'selected' : ''}>已同步</option>
-                <option value="failed" ${this.filters.approvalStatus === 'failed' ? 'selected' : ''}>校验失败</option>
+                <option value="pending" ${this.filters.approvalStatus === 'pending' ? 'selected' : ''}>待质检</option>
+                <option value="completed" ${this.filters.approvalStatus === 'completed' ? 'selected' : ''}>已质检</option>
               </select>
               <i class="fa-solid fa-chevron-down pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#86909c]"></i>
             </div>
@@ -812,7 +942,7 @@ const IngestionView = {
                 <i class="fa-solid fa-spinner fa-spin mr-1"></i><span id="stash-checking-count">0</span> 条校验中
               </button>
               <button type="button" id="btn-upload-file"
-                class="px-4 py-2 bg-brand hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:shadow-brand/30 hover:-translate-y-0.5">
+                class="${this.hasIngestionPermission('文件箱', '上传') ? '' : 'hidden '}px-4 py-2 bg-brand hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:shadow-brand/30 hover:-translate-y-0.5">
                 <i class="fa-solid fa-upload mr-1"></i>${this.getCurrentLang() === 'cn' ? '上传文件' : '파일 업로드'}
               </button>
               <button type="button" id="btn-batch-archive" disabled
@@ -975,22 +1105,22 @@ const IngestionView = {
       const storeNameCN = row.storeName ? row.storeName.split(' / ')[0] : row.fileName;
       const isZip = /\.zip$/i.test(row.fileName);
       
-      // 材料提供人
+      // 上传用户
       const providers = [
-        'zhangsan@orion.cn',
-        'lisi@orion.cn',
-        'wangwu@orion.cn',
-        'zhaoliu@orion.cn',
-        'chenqi@orion.cn',
-        'liuba@orion.cn',
-        'zhoujiu@orion.cn',
-        'wushi@orion.cn',
-        'zhengshiyi@orion.cn',
-        'qianshier@orion.cn'
+        '张伟',
+        '李娜',
+        '王敏',
+        '赵磊',
+        '陈晨',
+        '刘洋',
+        '周静',
+        '吴昊',
+        '郑欣怡',
+        '钱诗雅'
       ];
       const provider = providers[idx % providers.length];
       
-      // 材料提供时间精确到时分秒
+      // 上传时间精确到时分秒
       const uploadTime = row.uploadTime || '';
       const provideTime = uploadTime
         ? this.formatDateTime(uploadTime)
@@ -1167,7 +1297,7 @@ const IngestionView = {
             <th class="px-4 py-3 min-w-[200px]">${cn ? '内容' : '내용'}</th>
             <th class="px-4 py-3 w-24 text-center">${cn ? '状态' : '상태'}</th>
             <th class="px-4 py-3 w-24 text-center">${cn ? '附件数' : '첨부 수'}</th>
-            <th class="px-4 py-3 w-44">${cn ? '材料提供人' : '제공자'}</th>
+            <th class="px-4 py-3 w-44">${cn ? '上传用户' : '업로드 사용자'}</th>
             <th class="px-4 py-3 w-32">${cn ? '材料提供时间' : '제공 시간'}</th>
             <th class="px-3 py-3 w-32 text-center">${cn ? '操作' : '조작'}</th>
           </tr>
@@ -1256,9 +1386,9 @@ const IngestionView = {
         </td>
         <td class="px-3 py-3 text-center">
           <div class="flex w-full items-center justify-center gap-1 whitespace-nowrap">
-            <button type="button" class="inbox-parent-delete-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors" data-email-id="${item.id}" title="${this.getCurrentLang() === 'cn' ? '删除单据' : '문서 삭제'}" aria-label="${this.getCurrentLang() === 'cn' ? '删除单据' : '문서 삭제'}">
+            ${this.hasIngestionPermission('文件箱', '删除') ? `<button type="button" class="inbox-parent-delete-btn inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors" data-email-id="${item.id}" title="${this.getCurrentLang() === 'cn' ? '删除单据' : '문서 삭제'}" aria-label="${this.getCurrentLang() === 'cn' ? '删除单据' : '문서 삭제'}">
               <i class="fa-solid fa-trash-can"></i>
-            </button>
+            </button>` : ''}
             ${hasRetryableAttachments ? `
               <button type="button" class="inbox-parent-retry-btn hidden h-8 w-8 items-center justify-center rounded-lg text-brand hover:bg-blue-50 transition-colors" data-email-id="${item.id}" title="${this.getCurrentLang() === 'cn' ? '批量重传驳回文件' : '반려 파일 일괄 재업로드'}" aria-label="${this.getCurrentLang() === 'cn' ? '批量重传驳回文件' : '반려 파일 일괄 재업로드'}">
                 <i class="fa-solid fa-file-arrow-up"></i>
@@ -1321,18 +1451,18 @@ const IngestionView = {
         </td>
         <td class="px-4 py-2.5 w-[220px]">
           <div class="flex items-center justify-start gap-1.5 whitespace-nowrap">
-            <button type="button" class="inbox-att-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '单据详情' : '문서 상세'}">
+            ${this.hasIngestionPermission('文件箱', '单据详情') ? `<button type="button" class="inbox-att-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '单据详情' : '문서 상세'}">
               <i class="fa-solid fa-list-check"></i>
-            </button>
+            </button>` : ''}
             ${isRejected ? `
               <button type="button" class="inbox-att-retry-btn hidden h-7 w-7 items-center justify-center rounded text-brand hover:bg-blue-50 transition-colors" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '批量重传驳回文件' : '반려 파일 일괄 재업로드'}" aria-label="${this.getCurrentLang() === 'cn' ? '批量重传驳回文件' : '반려 파일 일괄 재업로드'}">
                 <i class="fa-solid fa-file-arrow-up"></i>
               </button>
             ` : ''}
-            <button type="button" class="inbox-att-delete-btn rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '删除附件' : '첨부 파일 삭제'}">
+            ${this.hasIngestionPermission('文件箱', '删除') ? `<button type="button" class="inbox-att-delete-btn rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '删除附件' : '첨부 파일 삭제'}">
               <i class="fa-solid fa-trash-can"></i>
-            </button>
-            ${canResolveDuplicate ? `
+            </button>` : ''}
+            ${canResolveDuplicate && this.hasIngestionPermission('文件箱', '重复处理（覆盖、忽略）') ? `
               <button type="button" class="inbox-att-resolve-btn rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-medium text-brand hover:bg-blue-100 transition-colors" data-action="cover" data-email-id="${emailId}" data-att-idx="${index}">覆盖</button>
               <button type="button" class="inbox-att-resolve-btn rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-[#4e5969] hover:bg-slate-50 transition-colors" data-action="ignore" data-email-id="${emailId}" data-att-idx="${index}">忽略</button>
             ` : ''}
@@ -1536,7 +1666,7 @@ const IngestionView = {
               <div class="text-sm leading-6 text-[#1d2129]">${this.escapeHtml(abnormalReason)}</div>
             </div>
             <div class="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 flex items-center justify-between gap-4">
-              <span class="text-sm text-[#4e5969]">${cn ? '退回至材料提供人' : '자료 제공자에게 반려'}</span>
+              <span class="text-sm text-[#4e5969]">${cn ? '退回至上传用户' : '업로드 사용자에게 반려'}</span>
               <span class="text-sm font-bold text-brand truncate" title="${this.escapeHtml(provider)}">${this.escapeHtml(provider)}</span>
             </div>
             <div>
@@ -1625,7 +1755,7 @@ const IngestionView = {
               placeholder="${cn ? '可补充本次驳回的具体说明' : '이번 반려에 대한 상세 설명을 입력하세요'}">${this.escapeHtml(rowData.remark || '')}</textarea>
             <div class="mt-1 text-right text-xs text-[#86909c]"><span id="original-reject-note-count">0</span>/500</div>
           </label>
-          <p class="text-xs text-[#86909c] leading-5"><span class="font-semibold text-[#4e5969]">${cn ? '说明：' : '안내: '}</span>${cn ? '驳回操作需针对门店级的完整 POS 表执行，而非单条数据。确认驳回后，该门店对应状态将更新为「已驳回」。' : '반려 작업은 단일 데이터가 아닌 매장 단위 POS 표에 적용됩니다.'}</p>
+          <p class="text-xs text-[#86909c] leading-5"><span class="font-semibold text-[#4e5969]">${cn ? '说明：' : '안내: '}</span>${cn ? `驳回操作需针对门店级的完整 POS 表执行。确认后状态更新为「处理中」，当前责任人变更为 ${handler}。` : '반려 작업은 단일 데이터가 아닌 매장 단위 POS 표에 적용됩니다.'}</p>
         </div>
         <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
           <button type="button" id="original-reject-cancel" class="px-4 py-2 rounded-lg text-sm text-[#4e5969] bg-gray-100 hover:bg-gray-200 transition-colors">${cn ? '取消' : '취소'}</button>
@@ -1660,13 +1790,17 @@ const IngestionView = {
         if (String(row.id) === String(rowId)) {
           return {
             ...row,
-            status: '已驳回',
+            workflowStatus: '营业担当处理中', currentOwnerType: 'sales', currentOwnerName: selectedTeam, currentOwnerTeam: selectedTeam,
             handler: selectedTeam,
-            remark
+            remark,
+            rejectedBy: Store.getState().userName,
+            rejectedAt: this.formatNowDateTime(), lastOperatorName: Store.getState().userName,
+            lastOperatorRole: Store.getState().userRole, lastAction: '驳回', lastOperatedAt: this.formatNowDateTime()
           };
         }
         return row;
       });
+      this.saveWorkflowState();
       this.updateStats();
       this.applyFilters();
       close();
@@ -1674,6 +1808,34 @@ const IngestionView = {
     });
 
     noteInput?.focus();
+  },
+
+  openMatchedSalesSubmitDialog(rowData) {
+    if (!rowData) return;
+    const overlay = document.getElementById('overlay-container');
+    if (!overlay) return;
+    overlay.innerHTML = `
+      <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6">
+        <div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden">
+          <div class="px-6 py-5 border-b border-gray-100"><h3 class="text-lg font-bold text-[#1d2129]">提交营业处理结果</h3><p class="mt-1 text-sm text-[#86909c]">${this.escapeHtml(rowData.storeName || rowData.fileName)} · ${this.escapeHtml(rowData.storeCode || '-')}</p></div>
+          <div class="px-6 py-5 space-y-4">
+            <div class="rounded-xl border border-red-100 bg-red-50 px-4 py-3"><div class="text-xs font-semibold text-red-500">POS驳回原因</div><div class="mt-1 text-sm">${this.escapeHtml(rowData.remark || '-')}</div></div>
+            <label class="block"><span class="block mb-2 text-xs font-semibold text-[#4e5969]">处理说明 <em class="text-red-500">*</em></span><textarea id="matched-sales-note" rows="4" maxlength="500" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="请说明已完成的补充或修正"></textarea></label>
+          </div>
+          <div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-3"><button id="matched-sales-cancel" class="px-4 py-2 rounded-lg bg-gray-100 text-sm">取消</button><button id="matched-sales-submit" class="px-4 py-2 rounded-lg bg-brand text-white text-sm">提交POS复核</button></div>
+        </div>
+      </div>`;
+    const close = () => { overlay.innerHTML = ''; };
+    overlay.querySelector('#matched-sales-cancel')?.addEventListener('click', close);
+    overlay.querySelector('#matched-sales-submit')?.addEventListener('click', () => {
+      const note = overlay.querySelector('#matched-sales-note')?.value.trim() || '';
+      if (!note) { Dialog.toast('请填写处理说明', 'error'); return; }
+      Object.assign(rowData, { workflowStatus: 'POS担当待处理', currentOwnerType: 'pos', currentOwnerName: 'POS担当', currentOwnerTeam: '', salesSubmitNote: note, salesSubmittedBy: Store.getState().userName, salesSubmittedAt: this.formatNowDateTime(), handler: 'POS担当', lastOperatorName: Store.getState().userName, lastOperatorRole: Store.getState().userRole, lastAction: '提交处理结果', lastOperatedAt: this.formatNowDateTime() });
+      this.saveWorkflowState();
+      close();
+      this.applyFilters();
+      Dialog.toast('已提交POS担当复核', 'success');
+    });
   },
   
   bindInboxEvents() {
@@ -4010,12 +4172,7 @@ const IngestionView = {
         <th class="px-5 py-4 min-w-28">ACC名称</th>
         <th class="px-5 py-4 min-w-32">${cn ? '本部' : '본부'}</th>
         <th class="px-5 py-4 min-w-36">${cn ? '营业所' : '영업소'}</th>
-        <th class="px-5 py-4 min-w-32">
-          <div class="flex items-center gap-1">
-            ${cn ? '处理人' : '처리자'}
-            <i class="fa-solid fa-circle-info text-xs text-[#86909c] cursor-help" title="${cn ? '处理人信息' : '처리자 정보'}"></i>
-          </div>
-        </th>
+        <th class="px-5 py-4 min-w-32">${cn ? '最近操作人' : '최근 작업자'}</th>
         <th class="px-5 py-4 w-28 min-w-28 sticky right-[96px] z-20 bg-blue-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">${cn ? '状态' : '상태'}</th>
         <th class="px-5 py-4 w-24 min-w-24 rounded-tr-lg sticky right-0 z-20 bg-blue-50">
           <div class="flex items-center gap-1">
@@ -4084,7 +4241,9 @@ const IngestionView = {
       const isSynced = row.status.includes('已同步');
       const isChecking = row.status.includes('质量校验中');
       const isCheckFailed = row.status.includes('校验失败');
-      const isRejected = row.status.includes('已驳回');
+      const workflowStatus = this.getWorkflowStatus(row);
+      const responsibility = this.getMatchedResponsibility(row);
+      const isRejected = workflowStatus === '营业担当处理中';
       const isActionLocked = isApproved || isSynced || isChecking || isRejected;
       
       let statusClass, statusText;
@@ -4118,7 +4277,7 @@ const IngestionView = {
       const suggestionText = row.suggestion || (confidenceValue > 95 ? '-' : '请复核原始文件字段完整性与门店匹配关系。');
       const rawStoreCode = row.rawStoreCode || this.getRawStoreCode(row);
       const customerStoreName = this.getLocalizedText(row.storeName) || '-';
-      const customerStoreCode = row.storeCode || '-';
+      const customerStoreCode = rawStoreCode;
       const dealer = row.dealer || '-';
       const acc = this.getAccName(row.acc, index);
       const headquarters = row.headquarters || row.region || '-';
@@ -4186,25 +4345,22 @@ const IngestionView = {
           <td class="px-5 py-3 text-[#4e5969]">
             <span>${this.escapeHtml(salesOffice)}</span>
           </td>
-          <td class="px-5 py-3">
-            <span class="${row.handler ? '' : 'text-[#d1d5db]'}" title="${this.getLocalizedText(row.handler) || '-'}">
-              ${this.getLocalizedText(row.handler) || '-'}
-            </span>
-          </td>
+          ${isOriginalStoreList ? `
+            <td class="px-5 py-3 text-[#4e5969]">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
+          ` : `<td class="px-5 py-3">${this.escapeHtml(this.getLocalizedText(row.handler) || '-')}</td>`}
           ${isOriginalStoreList ? `
             <td class="px-5 py-3 sticky right-[96px] z-10 bg-white group-hover:bg-slate-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">
-              <span class="inline-flex h-6 min-w-[64px] items-center justify-center gap-1 whitespace-nowrap px-2 rounded-full border text-xs font-semibold leading-none ${isRejected || isCheckFailed ? 'bg-red-50 text-red-600 border-red-100' : isChecking ? 'bg-blue-50 text-brand border-blue-100' : (isSynced || isApproved) ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'}"
-                title="${isSynced || isApproved ? `已同步至${this.escapeHtml(qualityRoute)}` : isChecking ? `正在质量校验，完成后同步至${this.escapeHtml(qualityRoute)}` : ''}">
-                ${isChecking ? '<i class="fa-solid fa-spinner fa-spin text-[10px]"></i>' : ''}
-                ${isRejected ? (this.getCurrentLang() === 'cn' ? '已驳回' : '반려됨') : isCheckFailed ? (this.getCurrentLang() === 'cn' ? '校验失败' : '검사 실패') : isChecking ? (this.getCurrentLang() === 'cn' ? '质检中' : '검사 중') : (isSynced || isApproved) ? (this.getCurrentLang() === 'cn' ? '已同步' : '동기화됨') : (this.getCurrentLang() === 'cn' ? '待通过' : '승인 대기')}
+              <span class="inline-flex h-6 min-w-[64px] items-center justify-center gap-1 whitespace-nowrap px-2 rounded-full border text-xs font-semibold leading-none ${this.getMatchedQualityStatus(row) === '已质检' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'}"
+                title="${this.getMatchedQualityStatus(row) === '已质检' ? '已完成质量检查' : '等待质量检查'}">
+                ${this.escapeHtml(this.getRoleDisplayStatus(row))}
               </span>
             </td>
           ` : ''}
           <td class="px-5 py-3 sticky right-0 z-10 bg-white group-hover:bg-slate-50">
             <div class="flex items-center gap-1">
-              <button class="px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 action-btn" data-action="detail" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '单据详情' : '문서 상세'}">
+              ${this.activeDataMode !== 'files' || this.hasIngestionPermission('单门店已匹配数据', '单据详情') ? `<button class="px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 action-btn" data-action="detail" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '单据详情' : '문서 상세'}">
                 <i class="fa-solid fa-list-check"></i>
-              </button>
+              </button>` : ''}
               ${this.activeDataMode === 'archive' ? `
               <button class="px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 action-btn" data-action="move-inbox" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '移动到收件箱' : '받은 편지함으로 이동'}">
                 <i class="fa-solid fa-inbox"></i>
@@ -4213,15 +4369,7 @@ const IngestionView = {
                 <i class="fa-solid fa-pen-to-square row-edit-icon"></i>
               </button>
               ` : `
-              <button class="px-2 py-1 text-xs rounded action-btn ${isActionLocked ? 'text-gray-300 cursor-not-allowed' : 'text-green-600 hover:bg-green-50'}" data-action="approve" data-id="${row.id}" title="${isSynced || isApproved ? (this.getCurrentLang() === 'cn' ? '已同步' : '동기화됨') : isChecking ? (this.getCurrentLang() === 'cn' ? '质量校验中' : '검사 중') : isRejected ? (this.getCurrentLang() === 'cn' ? '已驳回' : '반려됨') : (this.getCurrentLang() === 'cn' ? '通过并进入质量校验' : '승인 후 검사')}" ${isActionLocked ? 'disabled' : ''}>
-                <i class="fa-solid fa-check"></i>
-              </button>
-              <button class="px-2 py-1 text-xs rounded action-btn ${isActionLocked ? 'text-gray-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-50'}" data-action="reject" data-id="${row.id}" title="${isRejected ? (this.getCurrentLang() === 'cn' ? '已驳回' : '반려됨') : isChecking ? (this.getCurrentLang() === 'cn' ? '质量校验中不可驳回' : '검사 중 반려 불가') : (this.getCurrentLang() === 'cn' ? '驳回' : '거부')}" ${isActionLocked ? 'disabled' : ''}>
-                <i class="fa-solid fa-reply"></i>
-              </button>
-              <button class="px-2 py-1 text-xs rounded action-btn row-edit-btn ${isActionLocked ? 'text-gray-300 cursor-not-allowed' : 'text-amber-500 hover:bg-amber-50'}" data-action="edit" data-id="${row.id}" title="${isActionLocked ? (this.getCurrentLang() === 'cn' ? '当前状态不可编辑' : '현재 상태 편집 불가') : (this.getCurrentLang() === 'cn' ? '编辑' : '편집')}" ${isActionLocked ? 'disabled' : ''}>
-                <i class="fa-solid fa-pen-to-square row-edit-icon"></i>
-              </button>
+              ${this.renderMatchedWorkflowActions(row)}
               `}
             </div>
           </td>
@@ -4288,9 +4436,105 @@ const IngestionView = {
     return `standard-${index}-${name}`;
   },
 
+  getStashWorkflow(key) {
+    try {
+      const state = JSON.parse(localStorage.getItem('pos_demo_stash_workflow') || '{}');
+      const workflow = state[key] || { workflowStatus: '待处理' };
+      if (!workflow.currentOwnerType) {
+        workflow.currentOwnerType = workflow.workflowStatus === '营业担当处理中' ? 'sales' : 'pos';
+      }
+      if (!workflow.targetSalesTeam && workflow.currentOwnerType === 'sales') {
+        workflow.targetSalesTeam = workflow.handler || '';
+      }
+      return workflow;
+    } catch (error) { return { workflowStatus: '待处理' }; }
+  },
+
+  saveStashWorkflow(key, patch) {
+    let state = {};
+    try { state = JSON.parse(localStorage.getItem('pos_demo_stash_workflow') || '{}'); } catch (error) {}
+    state[key] = { ...(state[key] || {}), ...patch };
+    localStorage.setItem('pos_demo_stash_workflow', JSON.stringify(state));
+    return state[key];
+  },
+
+  getStashDisplayStatus(key) {
+    const status = this.getStashWorkflow(key).workflowStatus;
+    return ({ 待处理: '待处理', 营业担当处理中: '处理中', POS担当待处理: '待复核' })[status] || status;
+  },
+
+  getStashResponsibility(row = {}, key = '') {
+    const workflow = this.getStashWorkflow(key);
+    const status = workflow.workflowStatus || '待处理';
+    let currentOwnerName = workflow.currentOwnerName;
+    if (!currentOwnerName) {
+      if (workflow.currentOwnerType === 'sales') currentOwnerName = this.getStashOwnerTeam(row, workflow) || '-';
+      else if (workflow.currentOwnerType === 'system') currentOwnerName = '系统';
+      else currentOwnerName = status === '已完成' ? '-' : 'POS担当';
+    }
+    return {
+      currentOwnerName,
+      lastOperatorName: workflow.lastOperatorName || workflow.salesSubmittedBy || workflow.rejectedBy || '系统'
+    };
+  },
+
+  getStashOwnerTeam(row = {}, workflow = {}) {
+    const target = workflow.targetSalesTeam && workflow.targetSalesTeam !== 'POS担当'
+      ? workflow.targetSalesTeam
+      : '';
+    return target || row.salesTeam || row.team || '';
+  },
+
+  hasStashEditPermission() {
+    if (this.isPosActor()) return true;
+    const role = typeof SettingsView !== 'undefined'
+      ? SettingsView.roles?.find((item) => item.name === Store.getState().userRole)
+      : null;
+    return Boolean(role?.functions?.some((permission) => permission === '文件收取/单门店未匹配数据:编辑'));
+  },
+
+  canEditStashRow(item) {
+    if (!item?.key) return false;
+    const workflow = this.getStashWorkflow(item.key);
+    const status = workflow.workflowStatus || '待处理';
+    if (this.isPosActor()) return ['待处理', 'POS担当待处理'].includes(status);
+    const actor = Store.getState();
+    return this.hasStashEditPermission()
+      && status === '营业担当处理中'
+      && workflow.currentOwnerType === 'sales'
+      && this.getStashOwnerTeam(item.row, workflow) === actor.team;
+  },
+
+  canSelectStashRow(item) {
+    return this.canEditStashRow(item);
+  },
+
+  getStashEditDisabledReason(item) {
+    const workflow = this.getStashWorkflow(item.key);
+    const status = workflow.workflowStatus || '待处理';
+    if (!this.isPosActor()) {
+      if (status === '待处理') return '当前责任人为POS担当，驳回至所属Team后方可编辑';
+      if (status === 'POS担当待处理') return '当前为待复核，营业担当不可修改';
+      if (this.getStashOwnerTeam(item.row, workflow) !== Store.getState().team) return '该单据不属于当前账号处理范围';
+    }
+    return '当前状态不可编辑';
+  },
+
   getFilteredStashRows() {
     const keyword = this.filters.fileName.trim().toLowerCase();
     return this.getStashSourceRows().filter(({ row, index }) => {
+      const key = this.getStashRowKey(row, index);
+      const workflow = this.getStashWorkflow(key);
+      const statusMap = { pending: '待处理', processing: '处理中', review: '待复核' };
+      if (this.filters.stashStatus !== 'all' && this.getStashDisplayStatus(key) !== statusMap[this.filters.stashStatus]) {
+        return false;
+      }
+      if (!this.isPosActor()) {
+        const actor = Store.getState();
+        const sameScope = this.getStashOwnerTeam(row, workflow) === actor.team
+          || row.salesOffice === actor.salesOffice;
+        if (!sameScope) return false;
+      }
       if (keyword) {
         return this.matchesStashSearch(row, index, keyword);
       }
@@ -4306,7 +4550,8 @@ const IngestionView = {
     const totalCount = document.getElementById('total-count');
     if (totalCount) totalCount.textContent = String(rows.length);
     const tableRows = rows.map(({ row, index, key }) => {
-      const handler = row.handler || 'POS担当';
+      const stashWorkflow = this.getStashWorkflow(key);
+      const handler = stashWorkflow.handler || row.handler || 'POS担当';
       const displayMonth = row.month || this.getCurrentDisplayMonth();
       const rawStoreCode = this.getStashRawStoreCode(row, index);
       const abnormalReason = this.getStashAbnormalReason(row);
@@ -4317,9 +4562,17 @@ const IngestionView = {
       const headquarters = row.customerHeadquarters || '-';
       const salesOffice = row.customerSalesOffice || '-';
       const isRejected = this.rejectedStashKeys.has(key);
+      const stashStatus = stashWorkflow.workflowStatus || '待处理';
+      const canPosReject = this.isPosActor() && this.hasFullDataScope() && this.hasIngestionPermission('单门店未匹配数据', '驳回') && ['待处理', 'POS担当待处理'].includes(stashStatus);
+      const item = { row, index, key };
+      const responsibility = this.getStashResponsibility(row, key);
+      const canEdit = this.canEditStashRow(item);
+      const canSalesSubmit = !this.isPosActor() && canEdit;
+      const canSelect = this.canSelectStashRow(item);
+      const editReason = canEdit ? '编辑' : this.getStashEditDisabledReason(item);
       return `
       <tr class="group bg-white hover:bg-slate-50 transition-colors ${isRejected ? 'bg-red-50/30' : ''}" data-stash-key="${this.escapeHtml(key)}">
-        <td class="px-4 py-3 w-[60px] sticky left-0 z-10 bg-white group-hover:bg-slate-50"><input type="checkbox" class="row-cb-ingestion-stash rounded border-gray-300 text-brand focus:ring-brand" data-stash-key="${this.escapeHtml(key)}"></td>
+        <td class="px-4 py-3 w-[60px] sticky left-0 z-10 bg-white group-hover:bg-slate-50"><input type="checkbox" class="row-cb-ingestion-stash rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" data-stash-key="${this.escapeHtml(key)}" title="${this.escapeHtml(canSelect ? '可选择处理' : editReason)}" ${canSelect ? '' : 'disabled'}></td>
         <td class="px-4 py-3 w-[176px] text-[#4e5969] sticky left-[60px] z-10 bg-white group-hover:bg-slate-50">
           <span>${this.escapeHtml(displayMonth)}</span>
         </td>
@@ -4340,16 +4593,17 @@ const IngestionView = {
         <td class="px-5 py-3 text-amber-700">
           <div class="truncate max-w-[220px]" title="${this.escapeHtml(abnormalReason)}">${this.escapeHtml(abnormalReason)}</div>
         </td>
-        <td class="px-5 py-3 text-[#4e5969]"><span title="${this.escapeHtml(handler)}">${this.escapeHtml(handler)}</span></td>
+        <td class="px-5 py-3"><span class="inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${stashStatus === '营业担当处理中' ? 'border-blue-100 bg-blue-50 text-brand' : 'border-amber-100 bg-amber-50 text-amber-700'}">${this.escapeHtml(this.getStashDisplayStatus(key))}</span></td>
+        <td class="px-5 py-3 font-medium text-[#1d2129]">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
+        <td class="px-5 py-3 text-[#4e5969]">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
         <td class="px-5 py-3 sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">
           <div class="flex items-center gap-1">
-            <button type="button" class="ingestion-stash-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-colors" data-stash-key="${this.escapeHtml(key)}" title="单据详情">
+            ${this.hasIngestionPermission('单门店未匹配数据', '单据详情') ? `<button type="button" class="ingestion-stash-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-colors" data-stash-key="${this.escapeHtml(key)}" title="单据详情">
               <i class="fa-solid fa-list-check"></i>
-            </button>
-            <button type="button" class="ingestion-stash-reject-btn px-2 py-1 text-xs rounded ${isRejected ? 'text-gray-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-50'} transition-colors" data-stash-key="${this.escapeHtml(key)}" title="${isRejected ? '已驳回' : '驳回'}" ${isRejected ? 'disabled' : ''}>
-              <i class="fa-solid fa-reply"></i>
-            </button>
-            <button type="button" class="ingestion-stash-edit-btn px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 transition-colors" data-stash-key="${this.escapeHtml(key)}" title="编辑">
+            </button>` : ''}
+            ${canPosReject ? `<button type="button" class="ingestion-stash-reject-btn px-2 py-1 text-xs rounded text-red-500 hover:bg-red-50" data-stash-key="${this.escapeHtml(key)}" title="${stashStatus === 'POS担当待处理' ? '再次驳回' : '驳回'}"><i class="fa-solid fa-reply"></i></button>` : ''}
+            ${canSalesSubmit ? `<button type="button" class="ingestion-stash-sales-submit-btn px-2 py-1 text-xs rounded text-green-600 hover:bg-green-50" data-stash-key="${this.escapeHtml(key)}" title="提交处理结果"><i class="fa-solid fa-check"></i></button>` : ''}
+            <button type="button" class="ingestion-stash-edit-btn px-2 py-1 text-xs rounded ${canEdit ? 'text-amber-500 hover:bg-amber-50' : 'text-gray-300 cursor-not-allowed'} transition-colors" data-stash-key="${this.escapeHtml(key)}" title="${this.escapeHtml(editReason)}" ${canEdit ? '' : 'disabled'}>
               <i class="fa-solid fa-pen-to-square stash-edit-icon"></i>
             </button>
           </div>
@@ -4374,14 +4628,16 @@ const IngestionView = {
               <th class="px-5 py-4 w-32">本部</th>
               <th class="px-5 py-4 w-36">营业所</th>
               <th class="px-5 py-4 w-56">异常原因</th>
-              <th class="px-5 py-4 w-32">处理人</th>
+              <th class="px-5 py-4 w-40">状态</th>
+              <th class="px-5 py-4 w-32">当前责任人</th>
+              <th class="px-5 py-4 w-32">最近操作人</th>
               <th class="px-5 py-4 w-28 rounded-tr-lg sticky right-0 z-30 bg-[#f7f8fa] shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">操作</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
             ${rows.length === 0 ? `
               <tr>
-                <td colspan="13" class="px-4 py-16 text-center text-[#86909c]">
+                <td colspan="15" class="px-4 py-16 text-center text-[#86909c]">
                   <i class="fa-regular fa-folder-open text-3xl mb-3 block text-gray-300"></i>
                   暂无暂存数据
                 </td>
@@ -4399,7 +4655,8 @@ const IngestionView = {
   updateStashBatchButton() {
     const container = document.getElementById('ingestion-stash-container');
     const rowCheckboxes = Array.from(container?.querySelectorAll('.row-cb-ingestion-stash') || []);
-    const selected = rowCheckboxes.filter((checkbox) => checkbox.checked).length;
+    const actionableCheckboxes = rowCheckboxes.filter((checkbox) => !checkbox.disabled);
+    const selected = actionableCheckboxes.filter((checkbox) => checkbox.checked).length;
     const approveBtn = document.getElementById('btn-batch-approve');
     const checkingHint = document.getElementById('stash-checking-hint');
     const checkingCount = document.getElementById('stash-checking-count');
@@ -4415,19 +4672,24 @@ const IngestionView = {
       if (this.stashCheckState.active) {
         approveBtn.disabled = true;
         approveBtn.className = 'px-4 py-2 bg-[#86909c] text-white rounded-lg text-sm font-medium transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed';
-        approveBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles mr-1"></i>门店名称/编码校验';
+        approveBtn.innerHTML = this.isPosActor()
+          ? '<i class="fa-solid fa-wand-magic-sparkles mr-1"></i>门店名称/编码校验'
+          : '<i class="fa-solid fa-check mr-1"></i>批量提交处理结果';
       } else {
         approveBtn.disabled = selected === 0;
         approveBtn.className = selected > 0
         ? 'px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:bg-blue-700 hover:shadow-brand/30 hover:-translate-y-0.5'
         : 'px-4 py-2 bg-[#86909c] text-white rounded-lg text-sm font-medium transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed';
-        approveBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles mr-1"></i>门店名称/编码校验';
+        approveBtn.innerHTML = this.isPosActor()
+          ? '<i class="fa-solid fa-wand-magic-sparkles mr-1"></i>门店名称/编码校验'
+          : '<i class="fa-solid fa-check mr-1"></i>批量提交处理结果';
       }
     }
 
     if (selectAll) {
-      selectAll.checked = selected > 0 && selected === rowCheckboxes.length;
-      selectAll.indeterminate = selected > 0 && selected < rowCheckboxes.length;
+      selectAll.disabled = actionableCheckboxes.length === 0;
+      selectAll.checked = selected > 0 && selected === actionableCheckboxes.length;
+      selectAll.indeterminate = selected > 0 && selected < actionableCheckboxes.length;
     }
   },
 
@@ -4438,7 +4700,7 @@ const IngestionView = {
 
     selectAll?.addEventListener('change', (event) => {
       rowCheckboxes.forEach((checkbox) => {
-        checkbox.checked = event.target.checked;
+        if (!checkbox.disabled) checkbox.checked = event.target.checked;
       });
       this.updateStashBatchButton();
     });
@@ -4477,12 +4739,13 @@ const IngestionView = {
         const row = item.row || {};
         const displayMonth = row.month || this.getCurrentDisplayMonth();
         const rawStoreCode = this.getStashRawStoreCode(row, item.index);
+        const responsibility = this.getStashResponsibility(row, key);
         this.openDocumentDetail({
           moduleName: '文件收取 - 暂存数据',
           currentNode: '暂存数据',
           title: row.storeName || '暂存单据',
           nameLabel: '原始门店名称',
-          statusText: '暂存',
+          statusText: this.getStashDisplayStatus(key),
           row,
           moduleFields: [
             { label: '年月', value: displayMonth },
@@ -4495,7 +4758,8 @@ const IngestionView = {
             { label: '本部', value: row.customerHeadquarters || '-' },
             { label: '营业所', value: row.customerSalesOffice || '-' },
             { label: '异常原因', value: this.getStashAbnormalReason(row) },
-            { label: '处理人', value: row.handler || 'POS担当' },
+            { label: '当前责任人', value: responsibility.currentOwnerName || '-' },
+            { label: '最近操作人', value: responsibility.lastOperatorName || '-' },
             { label: 'AI判断', value: row.aiNote || '-' }
           ]
         });
@@ -4507,8 +4771,24 @@ const IngestionView = {
         event.stopPropagation();
         const key = trigger.dataset.stashKey;
         const item = this.getFilteredStashRows().find(row => row.key === key);
-        if (!item || this.rejectedStashKeys.has(key)) return;
+        if (!item || !this.isPosActor() || !this.hasFullDataScope() || !this.hasIngestionPermission('单门店未匹配数据', '驳回') || !['待处理', 'POS担当待处理'].includes(this.getStashWorkflow(key).workflowStatus)) {
+          Dialog.toast('当前账号或单据状态不可驳回', 'warning');
+          return;
+        }
         this.openStashRejectConfirm(item);
+      });
+    });
+
+    container?.querySelectorAll('.ingestion-stash-sales-submit-btn').forEach((trigger) => {
+      trigger.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const key = trigger.dataset.stashKey;
+        const item = this.getFilteredStashRows().find(row => row.key === key);
+        if (!item || !this.canEditStashRow(item) || this.isPosActor()) {
+          Dialog.toast('当前单据尚未流转至你处理', 'warning');
+          return;
+        }
+        this.openStashSalesSubmitDialog(item);
       });
     });
 
@@ -4529,6 +4809,11 @@ const IngestionView = {
         const rowElement = trigger.closest('tr');
         const key = trigger.dataset.stashKey;
         if (!rowElement || !key) return;
+        const item = this.getFilteredStashRows().find((stashItem) => stashItem.key === key);
+        if (!item || !this.canEditStashRow(item)) {
+          Dialog.toast(item ? this.getStashEditDisabledReason(item) : '当前单据不可编辑', 'warning');
+          return;
+        }
 
         const icon = trigger.querySelector('.stash-edit-icon');
         const isEditing = icon?.classList.contains('fa-check');
@@ -4542,6 +4827,12 @@ const IngestionView = {
           displays.forEach(item => item.classList.add('hidden'));
           inputs.forEach(input => input.classList.remove('hidden'));
           rowElement.querySelector('.stash-edit-input')?.focus();
+          return;
+        }
+
+        if (!this.canEditStashRow(item)) {
+          Dialog.toast('单据状态已变化，当前不可保存', 'warning');
+          this.renderStashTable();
           return;
         }
 
@@ -4570,7 +4861,8 @@ const IngestionView = {
     if (!overlay) return;
     const row = item.row || {};
     const key = item.key;
-    const handler = row.handler || 'POS担当';
+    const handler = row.salesTeam || row.team || '华北 Team';
+    const rejectAssignee = this.getRejectAssignee(handler);
     const abnormalReason = this.getStashAbnormalReason(row);
 
     overlay.innerHTML = `
@@ -4591,8 +4883,8 @@ const IngestionView = {
               <div class="text-sm leading-6 text-[#1d2129]">${this.escapeHtml(abnormalReason)}</div>
             </div>
             <div class="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3">
-              <label for="stash-reject-team-select" class="mb-2 block text-xs font-semibold text-[#4e5969]">驳回至营业 Team</label>
-              ${this.renderRejectTeamSelect(handler, 'stash-reject-team-select')}
+              <div class="mb-1 text-xs font-semibold text-[#4e5969]">驳回至营业担当</div>
+              <div class="text-sm font-bold text-brand">${this.escapeHtml(rejectAssignee.label)}</div>
             </div>
             <div>
               <label for="stash-reject-manual-note" class="block mb-2 text-xs font-semibold text-[#4e5969]">手动备注信息</label>
@@ -4601,7 +4893,7 @@ const IngestionView = {
                 placeholder="请输入补充说明或处理建议"></textarea>
               <div class="mt-1 text-right text-xs text-[#86909c]"><span id="stash-reject-note-count">0</span>/500</div>
             </div>
-            <p class="text-xs text-[#86909c] leading-5"><span class="font-semibold text-[#4e5969]">说明：</span>驳回操作需针对门店级的完整 POS 表执行，而非单条数据。确认驳回后，该单据将标记为已驳回。</p>
+            <p class="text-xs text-[#86909c] leading-5"><span class="font-semibold text-[#4e5969]">说明：</span>确认后状态更新为「处理中」，当前责任人变更为 ${this.escapeHtml(rejectAssignee.label)}。</p>
           </div>
           <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
             <button type="button" id="stash-reject-cancel" class="px-4 py-2 rounded-lg text-sm text-[#4e5969] bg-gray-100 hover:bg-gray-200 transition-colors">取消</button>
@@ -4624,7 +4916,7 @@ const IngestionView = {
       if (noteCount) noteCount.textContent = String(noteInput.value.length);
     });
     overlay.querySelector('#stash-reject-submit')?.addEventListener('click', () => {
-      const selectedTeam = overlay.querySelector('#stash-reject-team-select')?.value || handler;
+      const selectedTeam = rejectAssignee.team;
       row.rejectNote = noteInput?.value.trim() || '';
       row.handler = selectedTeam;
       this.stashEdits.set(key, {
@@ -4633,11 +4925,40 @@ const IngestionView = {
         rejectNote: row.rejectNote
       });
       this.rejectedStashKeys.add(key);
+      this.saveStashWorkflow(key, {
+        workflowStatus: '营业担当处理中', rejectNote: row.rejectNote,
+        currentOwnerType: 'sales', targetSalesTeam: selectedTeam,
+        currentOwnerName: rejectAssignee.label, currentOwnerTeam: selectedTeam,
+        currentOwnerUserName: rejectAssignee.user,
+        handler: selectedTeam, rejectedBy: Store.getState().userName, rejectedAt: this.formatNowDateTime(),
+        lastOperatorName: Store.getState().userName, lastOperatorRole: Store.getState().userRole,
+        lastAction: '驳回', lastOperatedAt: this.formatNowDateTime()
+      });
       close();
       this.renderStashTable();
-      Dialog.toast(`${row.storeName || '未匹配数据'} 已驳回至 ${selectedTeam}`, 'success');
+      Dialog.toast(`${row.storeName || '未匹配数据'} 已驳回至 ${rejectAssignee.label}`, 'success');
     });
     noteInput?.focus();
+  },
+
+  openStashSalesSubmitDialog(item) {
+    if (this.isPosActor() || !this.canEditStashRow(item)) {
+      Dialog.toast('当前单据尚未流转至你处理', 'warning');
+      return;
+    }
+    const overlay = document.getElementById('overlay-container');
+    if (!overlay) return;
+    const row = item.row || {};
+    const workflow = this.getStashWorkflow(item.key);
+    overlay.innerHTML = `<div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6"><div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden"><div class="px-6 py-5 border-b border-gray-100"><h3 class="text-lg font-bold">提交未匹配数据处理结果</h3><p class="mt-1 text-sm text-[#86909c]">${this.escapeHtml(row.storeName || '-')}</p></div><div class="px-6 py-5 space-y-4"><div class="rounded-xl border border-red-100 bg-red-50 px-4 py-3"><div class="text-xs font-semibold text-red-500">POS驳回原因</div><div class="mt-1 text-sm">${this.escapeHtml(workflow.rejectNote || '-')}</div></div><label class="block"><span class="block mb-2 text-xs font-semibold">处理说明 <em class="text-red-500">*</em></span><textarea id="stash-sales-note" rows="4" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"></textarea></label></div><div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-3"><button id="stash-sales-cancel" class="px-4 py-2 rounded-lg bg-gray-100 text-sm">取消</button><button id="stash-sales-submit" class="px-4 py-2 rounded-lg bg-brand text-white text-sm">提交POS复核</button></div></div></div>`;
+    const close = () => { overlay.innerHTML = ''; };
+    overlay.querySelector('#stash-sales-cancel')?.addEventListener('click', close);
+    overlay.querySelector('#stash-sales-submit')?.addEventListener('click', () => {
+      const note = overlay.querySelector('#stash-sales-note')?.value.trim() || '';
+      if (!note) { Dialog.toast('请填写处理说明', 'error'); return; }
+      this.saveStashWorkflow(item.key, { workflowStatus: 'POS担当待处理', currentOwnerType: 'pos', currentOwnerName: 'POS担当', currentOwnerTeam: '', salesSubmitNote: note, salesSubmittedBy: Store.getState().userName, salesSubmittedAt: this.formatNowDateTime(), handler: 'POS担当', lastOperatorName: Store.getState().userName, lastOperatorRole: Store.getState().userRole, lastAction: '提交处理结果', lastOperatedAt: this.formatNowDateTime() });
+      close(); this.renderStashTable(); Dialog.toast('已进入待复核，当前责任人为POS担当', 'success');
+    });
   },
 
   getSelectedStashRows() {
@@ -4739,6 +5060,10 @@ const IngestionView = {
   },
 
   handleStashAiCheck() {
+    if (!this.isPosActor() || !this.hasIngestionPermission('单门店未匹配数据', '校验')) {
+      Dialog.toast('门店名称/编码校验仅由POS担当执行', 'warning');
+      return;
+    }
     if (this.stashCheckState.active) return;
 
     const selectedRows = this.getSelectedStashRows();
@@ -4793,6 +5118,32 @@ const IngestionView = {
           this.updateStats();
           this.renderStashTable();
         }, this.checkingMinDurationMs);
+      }
+    });
+  },
+
+  handleStashSalesBatchSubmit() {
+    if (this.isPosActor()) return;
+    const selectedRows = this.getSelectedStashRows().filter((item) => this.canEditStashRow(item));
+    if (selectedRows.length === 0) {
+      Dialog.toast('请选择已驳回至当前Team的待处理单据', 'warning');
+      return;
+    }
+    Dialog.show({
+      title: '批量提交处理结果',
+      content: `<div class="space-y-3 text-left"><div class="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm">本次提交 <strong class="text-brand">${selectedRows.length}</strong> 条单据至POS担当复核</div><label class="block"><span class="mb-2 block text-xs font-semibold">统一处理说明 <em class="text-red-500">*</em></span><textarea id="stash-batch-sales-note" rows="4" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="请说明本次补充或修正内容"></textarea></label></div>`,
+      confirmText: '提交POS复核', cancelText: '取消',
+      onConfirm: () => {
+        const note = document.getElementById('stash-batch-sales-note')?.value.trim() || '';
+        if (!note) { Dialog.toast('请填写处理说明', 'error'); return false; }
+        selectedRows.forEach((item) => this.saveStashWorkflow(item.key, {
+          workflowStatus: 'POS担当待处理', currentOwnerType: 'pos', currentOwnerName: 'POS担当', currentOwnerTeam: '', handler: 'POS担当',
+          salesSubmitNote: note, salesSubmittedBy: Store.getState().userName,
+          salesSubmittedAt: this.formatNowDateTime(), lastOperatorName: Store.getState().userName,
+          lastOperatorRole: Store.getState().userRole, lastAction: '批量提交处理结果', lastOperatedAt: this.formatNowDateTime()
+        }));
+        this.renderStashTable();
+        Dialog.toast(`已提交 ${selectedRows.length} 条单据至POS担当复核`, 'success');
       }
     });
   },
@@ -4907,7 +5258,7 @@ const IngestionView = {
   renderPagination() {
     const paginationArea = document.getElementById('pagination-area');
     const pagerControls = document.getElementById('pagination-controls');
-    if (this.activeDataMode === 'files' || this.activeDataMode === 'stash') {
+      if (this.activeDataMode === 'files' || this.activeDataMode === 'stash') {
       paginationArea?.classList.remove('justify-between');
       paginationArea?.classList.add('justify-end');
       pagerControls?.classList.add('hidden');
@@ -5033,18 +5384,20 @@ const IngestionView = {
         if (action === 'detail') {
           if (!rowData) return;
           const isArchive = this.activeDataMode === 'archive';
+          const responsibility = this.getMatchedResponsibility(rowData);
           this.openDocumentDetail({
             moduleName: isArchive ? '文件收取 - 归档（非POS表）' : '文件收取 - 原始门店数据列表',
             currentNode: isArchive ? '归档（非POS表）' : '原始门店数据列表',
             title: rowData.storeName || rowData.fileName,
             nameLabel: '门店名称',
-            statusText: isArchive ? '已归档' : (rowData.status || '正常'),
+            statusText: isArchive ? '已归档' : this.getRoleDisplayStatus(rowData),
             row: rowData,
             moduleFields: [
               { label: '年月', value: this.getDisplayMonth(rowData) },
               { label: '门店编码', value: rowData.storeCode || '-' },
               { label: '营业Team', value: this.getLocalizedText(rowData.team) || '-' },
-              { label: '处理人', value: this.getLocalizedText(rowData.handler) || '-' },
+              { label: '当前责任人', value: isArchive ? (this.getLocalizedText(rowData.handler) || '-') : responsibility.currentOwnerName },
+              { label: '最近操作人', value: isArchive ? '-' : responsibility.lastOperatorName },
               { label: '所属区域', value: rowData.region || '-' },
               { label: '所属营业所', value: rowData.salesOffice || '-' },
               { label: '所属经销商', value: rowData.dealer || '-' }
@@ -5059,6 +5412,10 @@ const IngestionView = {
           // 居中弹窗预览
           this.showStoreDataPreviewModal(rowData);
         } else if (action === 'edit') {
+          if (!rowData || !this.canEditMatchedRow(rowData)) {
+            Dialog.toast('当前单据尚未流转至当前账号处理', 'warning');
+            return;
+          }
           // 行内编辑：切换编辑态/只读态
           const btn = e.currentTarget;
           const row = btn.closest('tr');
@@ -5088,6 +5445,7 @@ const IngestionView = {
               const value = input.value.trim();
               if (field && value) edits[field] = value;
             });
+            if (edits.rawStoreCode) edits.storeCode = edits.rawStoreCode;
             
             // 更新数据
             this.data = this.data.map(r => {
@@ -5114,6 +5472,8 @@ const IngestionView = {
           }
         } else if (action === 'reject') {
           this.openOriginalFileRejectConfirm(id);
+        } else if (action === 'submit-sales-result') {
+          this.openMatchedSalesSubmitDialog(rowData);
         } else {
           // 通过、归档操作
           const actionNames = this.getCurrentLang() === 'cn' 
@@ -5331,14 +5691,15 @@ const IngestionView = {
     }
 
     document.getElementById('approval-status-select')?.addEventListener('change', (e) => {
-      this.filters.approvalStatus = e.target.value || 'all';
+      if (this.activeDataMode === 'stash') this.filters.stashStatus = e.target.value || 'all';
+      else this.filters.approvalStatus = e.target.value || 'all';
       this.applyFilters();
     });
 
     document.getElementById('quality-checking-hint')?.addEventListener('click', () => {
-      this.filters.approvalStatus = 'checking';
+      this.filters.approvalStatus = 'pending';
       const approvalStatusSelect = document.getElementById('approval-status-select');
-      if (approvalStatusSelect) approvalStatusSelect.value = 'checking';
+      if (approvalStatusSelect) approvalStatusSelect.value = 'pending';
       this.applyFilters();
     });
 
@@ -6028,7 +6389,7 @@ const IngestionView = {
       isNormal: false,
       statusText: '校验中',
       suggestion: '存在附件正在校验中，请等待校验完成',
-      provider: Store?.getState?.()?.user?.name || '当前用户',
+      provider: Store?.getState?.()?.userName || '当前用户',
       provideTime: this.formatNowDateTime(now),
       attachments: checkingAttachments
     };
@@ -6284,9 +6645,14 @@ const IngestionView = {
   
   bindBatchEvents() {
     const handleBatchAction = (action) => {
+      if (this.activeDataMode === 'files' && action === 'approve' && !this.hasIngestionPermission('单门店已匹配数据', '质检')) {
+        Dialog.toast('当前账号无质检权限', 'warning');
+        return;
+      }
       if (this.activeDataMode === 'stash') {
         if (action !== 'approve') return;
-        this.handleStashAiCheck();
+        if (this.isPosActor()) this.handleStashAiCheck();
+        else this.handleStashSalesBatchSubmit();
         return;
       }
 
@@ -6478,16 +6844,23 @@ const IngestionView = {
       document.getElementById('table-container')?.classList.toggle('hidden', !showTable);
       document.getElementById('ingestion-stash-container')?.classList.toggle('hidden', !showStash);
       document.getElementById('pagination-area')?.classList.toggle('hidden', showOriginal);
-      document.getElementById('btn-upload-file')?.classList.toggle('hidden', !showOriginal);
+      document.getElementById('btn-upload-file')?.classList.toggle('hidden', !showOriginal || !this.hasIngestionPermission('文件箱', '上传'));
       document.getElementById('btn-batch-archive')?.classList.toggle('hidden', showOriginal || showStash || activeTab === 'archive' || activeTab === 'files');
       document.getElementById('btn-batch-approve')?.classList.toggle('hidden', showOriginal || activeTab === 'archive');
       document.getElementById('btn-batch-reject')?.classList.toggle('hidden', showOriginal || showStash || activeTab === 'files');
       document.getElementById('team-select-wrapper')?.classList.toggle('hidden', showOriginal || showStash);
-      document.getElementById('approval-status-wrapper')?.classList.toggle('hidden', showOriginal || showStash);
+      document.getElementById('approval-status-wrapper')?.classList.toggle('hidden', showOriginal || activeTab === 'archive');
       document.getElementById('inbox-status-wrapper')?.classList.toggle('hidden', !showOriginal);
       document.getElementById('quality-checking-hint')?.classList.toggle('hidden', showOriginal || showStash);
       document.getElementById('upload-checking-hint')?.classList.toggle('hidden', !showOriginal || !this.uploadCheckState.active);
       document.getElementById('stash-checking-hint')?.classList.toggle('hidden', !showStash || !this.stashCheckState.active);
+      const statusSelect = document.getElementById('approval-status-select');
+      if (statusSelect) {
+        statusSelect.innerHTML = showStash
+          ? `<option value="all">全部状态</option><option value="pending">待处理</option><option value="processing">处理中</option><option value="review">待复核</option>`
+          : `<option value="all">全部状态</option><option value="pending">待质检</option><option value="completed">已质检</option>`;
+        statusSelect.value = showStash ? this.filters.stashStatus : this.filters.approvalStatus;
+      }
       const approveBtn = document.getElementById('btn-batch-approve');
       if (approveBtn) {
         approveBtn.innerHTML = showStash

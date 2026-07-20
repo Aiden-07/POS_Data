@@ -13,6 +13,7 @@ const App = {
   placeholderRoutes: {},
   
   async init() {
+    Store.restoreAccount();
     await I18n.init();
     
     // Setup listeners
@@ -57,6 +58,18 @@ const App = {
     if (userNameEl) userNameEl.textContent = state.userName || 'Aiden';
     if (userRoleEl) userRoleEl.textContent = state.userRole || 'POS担当';
 
+    document.querySelectorAll('.demo-account-switch').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (!Store.switchAccount(button.dataset.account)) return;
+        closeMenu();
+        this.applyRoleVisibility();
+        this.syncHeaderUser();
+        this.mountView(Store.getState().currentView || 'dashboard');
+        Dialog.toast(`已切换为 ${Store.getState().userName}（${Store.getState().userRole}）`, 'success');
+      });
+    });
+
     const closeMenu = () => {
       menuPanel?.classList.add('hidden');
       menuBtn?.setAttribute('aria-expanded', 'false');
@@ -92,6 +105,19 @@ const App = {
         closeMenu();
       }
     });
+  },
+
+  syncHeaderUser() {
+    const state = Store.getState();
+    const name = document.getElementById('header-user-name');
+    const role = document.getElementById('header-user-role');
+    if (name) name.textContent = state.userName;
+    if (role) role.textContent = state.userRole;
+  },
+
+  applyRoleVisibility() {
+    const isPos = Store.isPosActor();
+    document.getElementById('settings-nav-group')?.classList.toggle('hidden', !isPos);
   },
 
   bindSidebarControls() {
@@ -398,6 +424,13 @@ const App = {
       loginContainer.classList.add('hidden');
       loginContainer.classList.remove('flex');
       layout.classList.remove('sidebar-open');
+      this.applyRoleVisibility();
+      this.syncHeaderUser();
+    }
+
+    if (hash.startsWith('settings-') && !Store.isPosActor()) {
+      window.location.hash = '#dashboard';
+      return;
     }
     
     // Update active nav

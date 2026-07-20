@@ -629,6 +629,18 @@ a:active {
   z-index: 40;
 }
 
+#ledger-column-panel {
+  width: 620px;
+  max-width: min(620px, calc(100vw - 64px));
+}
+
+#ledger-column-panel .ledger-field-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .ledger-table-tools:last-child .ledger-tool-panel {
   left: auto;
   right: 0;
@@ -2253,8 +2265,69 @@ textarea:focus {
 .settings-org-tree {
   max-height: 260px;
   display: grid;
-  grid-template-columns: minmax(180px, 0.9fr) minmax(240px, 1.4fr);
+  grid-template-columns: 30% 28% 42%;
   overflow: hidden;
+}
+
+.settings-org-column {
+  min-width: 0;
+  min-height: 230px;
+  max-height: 260px;
+  overflow: auto;
+  background: #fff;
+}
+
+.settings-org-column + .settings-org-column {
+  border-left: 1px solid rgba(29, 33, 41, 0.08);
+}
+
+.settings-org-column > strong {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: block;
+  padding: 9px 12px;
+  color: var(--text-muted);
+  background: #f8faff;
+  border-bottom: 1px solid rgba(29, 33, 41, 0.07);
+  font-size: 12px;
+}
+
+.settings-org-nav-row,
+.settings-org-office-row {
+  min-height: 38px;
+  padding: 8px 11px;
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  gap: 8px !important;
+  color: var(--text-body);
+  cursor: pointer;
+}
+
+.settings-org-nav-row:hover,
+.settings-org-office-row:hover,
+.settings-org-nav-row.is-current {
+  color: var(--brand);
+  background: rgba(22, 93, 255, 0.07);
+}
+
+.settings-org-nav-row > span,
+.settings-org-office-row > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-org-nav-row > span i {
+  margin-right: 6px;
+}
+
+.settings-org-nav-row > .fa-chevron-right {
+  color: #a9b4c4;
+  font-size: 10px;
 }
 
 .settings-org-region-list,
@@ -2265,7 +2338,25 @@ textarea:focus {
 }
 
 .settings-org-region-list {
-  border-right: 1px solid rgba(29, 33, 41, 0.08);
+  width: 100%;
+}
+
+.settings-org-team + .settings-org-team {
+  border-top: 1px solid rgba(29, 33, 41, 0.06);
+}
+
+.settings-org-team-label {
+  font-weight: 800;
+}
+
+.settings-org-regions {
+  display: none;
+  padding-left: 28px;
+  background: #fbfcff;
+}
+
+.settings-org-team.is-expanded > .settings-org-regions {
+  display: block;
 }
 
 .settings-org-region + .settings-org-region {
@@ -2291,7 +2382,7 @@ textarea:focus {
   flex: 1;
 }
 
-.settings-org-region-expand {
+.settings-org-node-expand {
   width: 26px;
   height: 26px;
   display: inline-flex;
@@ -2302,20 +2393,26 @@ textarea:focus {
   font-size: 11px;
 }
 
-.settings-org-region-expand:hover {
+.settings-org-node-expand:hover {
   background: rgba(22, 93, 255, 0.08);
   color: var(--brand);
 }
 
 .settings-org-offices {
   display: none;
+  padding: 5px 14px 9px 58px;
+  background: #fff;
 }
 
-.settings-org-office-stage .settings-org-offices {
-  padding: 12px 14px;
+.settings-org-region.is-expanded > .settings-org-offices {
   display: grid;
   grid-template-columns: 1fr;
   gap: 5px;
+}
+
+.settings-org-team.is-expanded > .settings-org-team-label .settings-org-node-expand > i,
+.settings-org-region.is-expanded > .settings-org-region-label .settings-org-node-expand > i {
+  transform: rotate(90deg);
 }
 
 .settings-org-offices > strong {
@@ -2550,6 +2647,16 @@ textarea:focus {
 
 .settings-permission-row input {
   accent-color: var(--brand);
+}
+
+.settings-permission-row label.settings-permission-option.is-disabled {
+  color: #c9cdd4;
+  cursor: not-allowed;
+}
+
+.settings-permission-row label.settings-permission-option.is-disabled input {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 @media (max-width: 1180px) {

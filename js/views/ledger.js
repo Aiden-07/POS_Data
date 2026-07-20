@@ -1,4 +1,11 @@
+const LEDGER_DEFAULT_COLUMNS = [
+  'transactionDate', 'dealerName', 'team', 'region', 'salesOffice', 'acc',
+  'orionStoreCode', 'orionStoreName', 'orionProductCode', 'orionBarcode',
+  'orionProductName', 'quantity', 'amount', 'cost', 'retailPrice'
+];
+
 const LedgerView = {
+  edits: new Map(),
   filters: {
     year: '2026',
     month: '06',
@@ -16,20 +23,8 @@ const LedgerView = {
     office: '',
     dealer: ''
   },
-  visibleColumnKeys: [
-    'month',
-    'acc',
-    'dealerName',
-    'storeCode',
-    'storeName',
-    'productCode',
-    'productName',
-    'barcode69',
-    'quantity',
-    'amount',
-    'cost',
-    'retailPrice'
-  ],
+  visibleColumnKeys: [...LEDGER_DEFAULT_COLUMNS],
+  columnPreferenceLoaded: false,
   groupBy: '',
   collapsedGroups: new Set(),
   closePanelsBound: false,
@@ -38,28 +33,41 @@ const LedgerView = {
   keywordFieldOptions: [
     { value: 'all', label: '全部' },
     { value: 'acc', label: 'ACC' },
-    { value: 'storeName', label: '门店名称' },
-    { value: 'storeCode', label: '门店编码' },
+    { value: 'customerStoreName', label: '客户门店名称' },
+    { value: 'customerStoreNo', label: '客户门店号' },
+    { value: 'orionStoreName', label: '好丽友交易处名称' },
+    { value: 'orionStoreCode', label: '好丽友交易处编码' },
     { value: 'dealer', label: '经销商' },
-    { value: 'productName', label: '产品名称' },
-    { value: 'productCode', label: '产品A码' },
-    { value: 'barcode', label: '产品69码' }
+    { value: 'customerProductName', label: '客户产品名称' },
+    { value: 'customerProductCode', label: '客户产品号' },
+    { value: 'orionProductName', label: '好丽友产品名称' },
+    { value: 'orionProductCode', label: '好丽友产品编码' },
+    { value: 'orionBarcode', label: '好丽友条形码' }
   ],
 
   tableColumns: [
-    { key: 'month', label: '年月', width: 'w-24', order: 10, value: (item) => item.month },
-    { key: 'acc', label: 'ACC', width: 'w-20', order: 20, value: (item) => item.acc },
-    { key: 'region', label: '区域', width: 'w-24', order: 30, value: (item) => item.fullRegion },
-    { key: 'salesOffice', label: '营业所', width: 'w-32', order: 40, value: (item) => item.salesOffice },
-    { key: 'dealerName', label: '经销商名称', width: 'w-36', truncate: true, value: (item) => item.dealer },
-    { key: 'storeCode', label: '门店编码', width: 'w-28', mono: true, value: (item) => item.storeCode },
-    { key: 'storeName', label: '门店名称', width: 'w-44', truncate: true, value: (item) => item.storeName },
-    { key: 'barcode', label: '产品A码', width: 'w-36', mono: true, value: (item) => item.productCode || item.barcode },
-    { key: 'productName', label: '产品名称', width: 'w-56', truncate: true, value: (item) => item.productName },
+    { key: 'transactionDate', label: '时间', width: 'w-28', value: (item) => item.transactionDate },
+    { key: 'partnerErp', label: '合作方ERP', width: 'w-32', value: (item) => item.partnerErp },
+    { key: 'dealerName', label: '经销商', width: 'w-36', truncate: true, value: (item) => item.dealer },
+    { key: 'customerStoreNo', label: '客户门店号', width: 'w-32', mono: true, value: (item) => item.customerStoreNo },
+    { key: 'rawTransactionCode', label: '原始交易出码', width: 'w-36', mono: true, value: (item) => item.rawTransactionCode },
+    { key: 'customerStoreName', label: '客户门店名称', width: 'w-44', truncate: true, value: (item) => item.customerStoreName },
+    { key: 'team', label: 'TEAM', width: 'w-28', value: (item) => item.salesTeam },
+    { key: 'region', label: '区域', width: 'w-28', value: (item) => item.fullRegion },
+    { key: 'salesOffice', label: '营业所', width: 'w-32', value: (item) => item.salesOffice },
+    { key: 'acc', label: 'ACC', width: 'w-24', value: (item) => item.acc },
+    { key: 'orionStoreCode', label: '好丽友交易处编码', width: 'w-40', mono: true, value: (item) => item.storeCode },
+    { key: 'orionStoreName', label: '好丽友交易处名称', width: 'w-48', truncate: true, value: (item) => item.storeName },
+    { key: 'customerProductCode', label: '客户产品号', width: 'w-32', mono: true, value: (item) => item.customerProductCode },
+    { key: 'customerProductName', label: '客户产品名称', width: 'w-52', truncate: true, value: (item) => item.customerProductName },
+    { key: 'customerBarcode', label: '客户条形码', width: 'w-36', mono: true, value: (item) => item.customerBarcode },
+    { key: 'orionProductCode', label: '好丽友产品编码', width: 'w-36', mono: true, value: (item) => item.productCode },
+    { key: 'orionBarcode', label: '好丽友条形码', width: 'w-40', mono: true, value: (item) => item.barcode },
+    { key: 'orionProductName', label: '好丽友产品名称', width: 'w-56', truncate: true, value: (item) => item.productName },
     { key: 'quantity', label: '销售数量', width: 'w-24', align: 'right', value: (item) => item.quantity },
     { key: 'amount', label: '销售金额', width: 'w-24', align: 'right', value: (item) => `￥${item.amount}` },
-    { key: 'cost', label: '销售成本', width: 'w-24', align: 'right', value: (item) => `￥${item.cost}` },
-    { key: 'retailPrice', label: '零售价', width: 'w-20', align: 'right', value: (item) => `￥${item.retailPrice}` }
+    { key: 'cost', label: '成本', width: 'w-24', align: 'right', value: (item) => `￥${item.cost}` },
+    { key: 'retailPrice', label: '零售单价', width: 'w-24', align: 'right', value: (item) => `￥${item.retailPrice}` }
   ],
 
   standardData: [
@@ -90,6 +98,7 @@ const LedgerView = {
   },
   
   render() {
+    this.loadColumnPreference();
     return `
       <div class="ledger-page-stack animate-[fadeIn_0.4s_ease-out]">
         <section class="ledger-filter-card">
@@ -120,6 +129,7 @@ const LedgerView = {
                     </label>
                   `).join('')}
                 </div>
+                <button id="ledger-column-reset" type="button" class="mt-3 text-xs font-medium text-brand hover:underline">恢复默认字段</button>
               </div>
             </div>
           </div>
@@ -141,7 +151,7 @@ const LedgerView = {
           </div>
         </div>
         <div class="overflow-auto flex-1 relative px-2">
-          <table class="w-full table-fixed min-w-[1360px] text-left text-sm text-[#4e5969]" id="ledger-table">
+          <table class="w-full table-fixed text-left text-sm text-[#4e5969]" style="min-width:${Math.max(1360, this.getVisibleColumns().length * 132)}px" id="ledger-table">
             <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10" id="ledger-thead">
               ${this.renderTableHeader()}
             </thead>
@@ -180,15 +190,33 @@ const LedgerView = {
   },
 
   getTableColumns() {
-    if (typeof SettingsView !== 'undefined' && typeof SettingsView.getLedgerFieldColumns === 'function') {
-      const configured = SettingsView.getLedgerFieldColumns();
-      const orgColumns = [
-        { key: 'region', label: '区域', width: 'w-24', order: 25, value: (item) => item.fullRegion },
-        { key: 'salesOffice', label: '营业所', width: 'w-32', order: 26, value: (item) => item.salesOffice }
-      ];
-      return [...configured, ...orgColumns];
-    }
     return this.tableColumns;
+  },
+
+  getColumnPreferenceKey() {
+    const account = typeof Store !== 'undefined' && Store.state?.account
+      ? Store.state.account
+      : 'default';
+    return `pos_demo_ledger_columns_${account}`;
+  },
+
+  loadColumnPreference() {
+    if (this.columnPreferenceLoaded) return;
+    this.columnPreferenceLoaded = true;
+    try {
+      const saved = JSON.parse(localStorage.getItem(this.getColumnPreferenceKey()) || 'null');
+      const validKeys = new Set(this.tableColumns.map((column) => column.key));
+      if (Array.isArray(saved)) {
+        const validSaved = saved.filter((key) => validKeys.has(key));
+        if (validSaved.length) this.visibleColumnKeys = validSaved;
+      }
+    } catch (error) {
+      this.visibleColumnKeys = [...LEDGER_DEFAULT_COLUMNS];
+    }
+  },
+
+  saveColumnPreference() {
+    localStorage.setItem(this.getColumnPreferenceKey(), JSON.stringify(this.visibleColumnKeys));
   },
 
   renderTableHeader() {
@@ -406,18 +434,30 @@ const LedgerView = {
       const productName = productNames[index % productNames.length];
       const quantity = [3, 6, 4, 8, 5, 9, 7, 12][index % 8];
       const price = [1.8, 4.5, 3.9, 5.2, 6.8, 7.5, 6.2, 8.9][index % 8];
+      const numericStoreCode = String(row.storeCode).replace(/\D/g, '').slice(-6).padStart(6, '0');
+      const customerProductCode = `SKU-${String(380011 + index * 29).padStart(6, '0')}`;
+      const orionBarcode = `69209${String(7871409 + index * 137).padStart(8, '0')}`;
       return {
         month: '2026年06月',
+        transactionDate: `2026-06-${String((index % 28) + 1).padStart(2, '0')}`,
+        partnerErp: `${row.dealer.replace(/商贸|商业|集团|有限公司/g, '')}ERP`,
         acc: accNames[index % accNames.length],
         dealer: row.dealer,
+        salesTeam: row.salesTeam,
         region: row.region.replace('区域', ''),
         fullRegion: row.region,
         salesOffice: row.salesOffice,
+        customerStoreNo: `C${numericStoreCode}`,
+        rawTransactionCode: `RAW-${row.storeCode}`,
+        customerStoreName: row.storeName,
         storeCode: row.storeCode,
         storeName: row.storeName,
+        customerProductCode,
+        customerProductName: productName.replace(/^好丽友/, ''),
+        customerBarcode: `69012${String(5300000 + index * 113).padStart(8, '0')}`,
         productCode: `A${String(6678011 + index * 137).padStart(7, '0')}`,
         productName,
-        barcode: `69209${String(7871409 + index * 137).padStart(8, '0')}`,
+        barcode: orionBarcode,
         quantity,
         amount: (quantity * price).toFixed(1),
         cost: (quantity * (price * 0.72)).toFixed(1),
@@ -428,7 +468,15 @@ const LedgerView = {
   },
 
   getAllRows() {
-    return this.standardData.flatMap((row) => this.getStandardPreviewRows(row));
+    return this.standardData.flatMap((row) => this.getStandardPreviewRows(row)).map((item) => ({
+      ...item,
+      ...(this.edits.get(this.getLedgerRowKey(item)) || {})
+    }));
+  },
+
+  hasLedgerPermission(action) {
+    return typeof SettingsView !== 'undefined'
+      && SettingsView.hasCurrentPermission('台账与汇总', '标准POS明细', action);
   },
 
   getFilteredRows() {
@@ -437,12 +485,16 @@ const LedgerView = {
     const contains = (value, keyword) => !normalize(keyword) || normalize(value).includes(normalize(keyword));
     const searchableValues = (item) => ({
       acc: item.acc,
-      storeName: item.storeName,
-      storeCode: item.storeCode,
+      customerStoreName: item.customerStoreName,
+      customerStoreNo: item.customerStoreNo,
+      orionStoreName: item.storeName,
+      orionStoreCode: item.storeCode,
       dealer: item.dealer,
-      productName: item.productName,
-      productCode: item.productCode,
-      barcode: item.barcode
+      customerProductName: item.customerProductName,
+      customerProductCode: item.customerProductCode,
+      orionProductName: item.productName,
+      orionProductCode: item.productCode,
+      orionBarcode: item.barcode
     });
     const matchesKeyword = (item) => {
       const keyword = filters.keyword;
@@ -516,17 +568,43 @@ const LedgerView = {
       if (column.align === 'right') classes.push('text-right');
       if (column.mono) classes.push('font-mono', 'text-xs', 'text-[#1d2129]');
       if (column.truncate) classes.push('truncate');
-      if (['dealerName', 'storeName', 'productName'].includes(column.key)) classes.push('max-w-[220px]');
+      if (['dealerName', 'customerStoreName', 'orionStoreName', 'customerProductName', 'orionProductName'].includes(column.key)) classes.push('max-w-[220px]');
       const title = column.truncate ? ` title="${this.escapeHtml(value)}"` : '';
       return `<td class="${classes.join(' ')}"${title}>${this.escapeHtml(value)}</td>`;
     }).join('');
     return `${cells}
       <td class="px-4 py-3">
+        <div class="flex items-center gap-1">
         <button type="button" class="ledger-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-colors" data-ledger-key="${this.escapeHtml(this.getLedgerRowKey(item))}" title="单据详情">
           <i class="fa-solid fa-list-check"></i>
         </button>
+        ${this.hasLedgerPermission('编辑') ? `<button type="button" class="ledger-edit-btn px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 transition-colors" data-ledger-key="${this.escapeHtml(this.getLedgerRowKey(item))}" title="编辑"><i class="fa-regular fa-pen-to-square"></i></button>` : ''}
+        </div>
       </td>
     `;
+  },
+
+  openLedgerEditDialog(row) {
+    if (!row || !this.hasLedgerPermission('编辑')) {
+      Dialog.toast('当前账号无编辑权限', 'warning');
+      return;
+    }
+    const key = this.getLedgerRowKey(row);
+    Dialog.show({
+      title: '编辑标准POS明细',
+      content: `<div class="grid grid-cols-2 gap-3 text-left"><label class="text-sm">销售数量<input id="ledger-edit-quantity" type="number" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" value="${this.escapeHtml(row.quantity)}"></label><label class="text-sm">销售金额<input id="ledger-edit-amount" type="number" step="0.1" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" value="${this.escapeHtml(row.amount)}"></label><label class="text-sm">销售成本<input id="ledger-edit-cost" type="number" step="0.1" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" value="${this.escapeHtml(row.cost)}"></label><label class="text-sm">零售价<input id="ledger-edit-price" type="number" step="0.1" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" value="${this.escapeHtml(row.retailPrice)}"></label></div>`,
+      confirmText: '保存', cancelText: '取消',
+      onConfirm: () => {
+        this.edits.set(key, {
+          quantity: document.getElementById('ledger-edit-quantity')?.value || row.quantity,
+          amount: document.getElementById('ledger-edit-amount')?.value || row.amount,
+          cost: document.getElementById('ledger-edit-cost')?.value || row.cost,
+          retailPrice: document.getElementById('ledger-edit-price')?.value || row.retailPrice
+        });
+        this.refreshTable();
+        Dialog.toast('标准POS明细已保存', 'success');
+      }
+    });
   },
 
   getGroupLabel(item) {
@@ -589,9 +667,11 @@ const LedgerView = {
   },
 
   refreshTable() {
+    const table = document.getElementById('ledger-table');
     const thead = document.getElementById('ledger-thead');
     const tbody = document.getElementById('ledger-tbody');
     const rows = this.getFilteredRows();
+    if (table) table.style.minWidth = `${Math.max(1360, this.getVisibleColumns().length * 132)}px`;
     if (thead) thead.innerHTML = this.renderTableHeader();
     if (tbody) tbody.innerHTML = this.renderRows(rows);
     this.updateRecordCount(rows.length);
@@ -711,6 +791,16 @@ const LedgerView = {
       input.checked = true;
       return;
     }
+    this.saveColumnPreference();
+    this.refreshTable();
+  },
+
+  resetColumnsToDefault() {
+    this.visibleColumnKeys = [...LEDGER_DEFAULT_COLUMNS];
+    this.saveColumnPreference();
+    document.querySelectorAll('[data-ledger-column]').forEach((input) => {
+      input.checked = this.visibleColumnKeys.includes(input.dataset.ledgerColumn);
+    });
     this.refreshTable();
   },
 
@@ -811,6 +901,17 @@ const LedgerView = {
       const groupButton = event.target.closest('#ledger-group-btn');
       const groupToggle = event.target.closest('.ledger-group-toggle');
       const detailButton = event.target.closest('.ledger-detail-btn');
+      const editButton = event.target.closest('.ledger-edit-btn');
+      if (event.target.closest('#ledger-column-reset')) {
+        this.resetColumnsToDefault();
+        return;
+      }
+      if (editButton) {
+        const rowKey = editButton.getAttribute('data-ledger-key');
+        const row = this.getFilteredRows().find(item => this.getLedgerRowKey(item) === rowKey);
+        this.openLedgerEditDialog(row);
+        return;
+      }
       if (detailButton) {
         const rowKey = detailButton.getAttribute('data-ledger-key');
         const row = this.getFilteredRows().find(item => this.getLedgerRowKey(item) === rowKey);
@@ -823,16 +924,28 @@ const LedgerView = {
             statusText: '已入账',
             row,
             moduleFields: [
-              { label: '年月', value: row.month || '-' },
+              { label: '时间', value: row.transactionDate || '-' },
+              { label: '合作方ERP', value: row.partnerErp || '-' },
+              { label: '经销商', value: row.dealer || '-' },
+              { label: '客户门店号', value: row.customerStoreNo || '-' },
+              { label: '原始交易出码', value: row.rawTransactionCode || '-' },
+              { label: '客户门店名称', value: row.customerStoreName || '-' },
+              { label: 'TEAM', value: row.salesTeam || '-' },
+              { label: '区域', value: row.fullRegion || '-' },
+              { label: '营业所', value: row.salesOffice || '-' },
               { label: 'ACC', value: row.acc || '-' },
-              { label: '经销商名称', value: row.dealer || '-' },
-              { label: '门店编码', value: row.storeCode || '-' },
-              { label: '产品A码', value: row.productCode || row.barcode || '-' },
-              { label: '产品名称', value: row.productName || '-' },
+              { label: '好丽友交易处编码', value: row.storeCode || '-' },
+              { label: '好丽友交易处名称', value: row.storeName || '-' },
+              { label: '客户产品号', value: row.customerProductCode || '-' },
+              { label: '客户产品名称', value: row.customerProductName || '-' },
+              { label: '客户条形码', value: row.customerBarcode || '-' },
+              { label: '好丽友产品编码', value: row.productCode || '-' },
+              { label: '好丽友条形码', value: row.barcode || '-' },
+              { label: '好丽友产品名称', value: row.productName || '-' },
               { label: '销售数量', value: String(row.quantity || '-') },
               { label: '销售金额', value: `￥${row.amount || '-'}` },
-              { label: '所属区域', value: row.fullRegion || '-' },
-              { label: '所属营业所', value: row.salesOffice || '-' }
+              { label: '成本', value: `￥${row.cost || '-'}` },
+              { label: '零售单价', value: `￥${row.retailPrice || '-'}` }
             ]
           });
         }
@@ -847,6 +960,10 @@ const LedgerView = {
         return;
       }
       if (event.target.closest('#ledger-export-btn')) {
+        if (!this.hasLedgerPermission('导出')) {
+          Dialog.toast('当前账号无导出权限', 'warning');
+          return;
+        }
         this.exportCurrentRows();
         return;
       }

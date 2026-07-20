@@ -1,6 +1,10 @@
 const SettingsView = {
   users: [
     {
+      id: 'u-000', name: '王敏', account: 'wangmin.sales', phone: '13800010000',
+      role: '营业担当', status: '启用', lastLogin: '尚未登录'
+    },
+    {
       id: 'u-001',
       name: 'Aiden-HB',
       account: 'aiden_hb',
@@ -30,6 +34,11 @@ const SettingsView = {
   ],
   roles: [
     {
+      id: 'r-000', name: '营业担当', description: '处理所属营业Team被POS驳回的单据',
+      functions: ['文件收取/文件箱:查看', '文件收取/文件箱:单据详情', '文件收取/单门店已匹配数据:查看', '文件收取/单门店已匹配数据:编辑', '文件收取/单门店已匹配数据:单据详情', '文件收取/单门店未匹配数据:查看', '文件收取/单门店未匹配数据:编辑', '文件收取/单门店未匹配数据:单据详情', '质量检查/标准POS表:查看', '质量检查/标准POS表:编辑', '质量检查/标准POS表:提交复核', '质量检查/标准POS表:单据详情', '质量检查/异常数据:查看', '质量检查/异常数据:编辑', '质量检查/异常数据:提交复核', '质量检查/异常数据:单据详情'],
+      dataScope: '按组织范围', dataScopeValue: '华北Team', users: 1, status: '启用'
+    },
+    {
       id: 'r-001',
       name: '系统管理员',
       description: '拥有平台全部功能和全部数据权限',
@@ -46,22 +55,31 @@ const SettingsView = {
       functions: [
         '文件收取/文件箱:查看',
         '文件收取/文件箱:上传',
+        '文件收取/文件箱:重复处理（覆盖、忽略）',
+        '文件收取/文件箱:单据详情',
+        '文件收取/文件箱:删除',
         '文件收取/单门店已匹配数据:查看',
         '文件收取/单门店已匹配数据:编辑',
         '文件收取/单门店已匹配数据:质检',
-        '文件收取/单门店已匹配数据:通过',
-        '文件收取/单门店已匹配数据:驳回',
+        '文件收取/单门店已匹配数据:单据详情',
         '文件收取/单门店未匹配数据:查看',
         '文件收取/单门店未匹配数据:编辑',
         '文件收取/单门店未匹配数据:校验',
+        '文件收取/单门店未匹配数据:单据详情',
         '质量检查/标准POS表:查看',
+        '质量检查/标准POS表:编辑',
+        '质量检查/标准POS表:提交复核',
         '质量检查/标准POS表:通过',
+        '质量检查/标准POS表:单据详情',
+        '质量检查/标准POS表:删除',
         '质量检查/异常数据:查看',
+        '质量检查/异常数据:编辑',
+        '质量检查/异常数据:提交复核',
         '质量检查/异常数据:通过',
-        '质量检查/异常数据:驳回',
+        '质量检查/异常数据:单据详情',
         '台账与汇总/标准POS明细:查看',
-        '台账与汇总/销售汇总:查看',
-        '台账与汇总/门店汇总:查看'
+        '台账与汇总/标准POS明细:编辑',
+        '台账与汇总/标准POS明细:导出'
       ],
       dataScope: '按组织范围',
       dataScopeValue: '华北区域',
@@ -74,14 +92,18 @@ const SettingsView = {
       description: '仅管理所属营业所下经销商和门店数据',
       functions: [
         '文件收取/文件箱:查看',
+        '文件收取/文件箱:单据详情',
         '文件收取/单门店已匹配数据:查看',
         '文件收取/单门店已匹配数据:编辑',
+        '文件收取/单门店已匹配数据:单据详情',
         '文件收取/单门店未匹配数据:查看',
+        '文件收取/单门店未匹配数据:单据详情',
         '质量检查/标准POS表:查看',
+        '质量检查/标准POS表:单据详情',
         '质量检查/异常数据:查看',
+        '质量检查/异常数据:单据详情',
         '台账与汇总/标准POS明细:查看',
-        '台账与汇总/销售汇总:查看',
-        '台账与汇总/门店汇总:查看'
+        '台账与汇总/标准POS明细:编辑'
       ],
       dataScope: '按组织范围',
       dataScopeValue: '石家庄营业所',
@@ -95,47 +117,47 @@ const SettingsView = {
     {
       group: '文件收取',
       children: [
-        { name: '文件箱', actions: ['查看', '新建', '编辑', '上传', '导出'] },
-        { name: '单门店已匹配数据', actions: ['查看', '编辑', '质检', '通过', '驳回', '导出'] },
-        { name: '单门店未匹配数据', actions: ['查看', '编辑', '校验', '驳回', '导出'] }
+        { name: '文件箱', actions: ['查看', '上传', '重复处理（覆盖、忽略）', '单据详情', '删除'] },
+        { name: '单门店已匹配数据', actions: ['查看', '编辑', '质检', '单据详情'] },
+        { name: '单门店未匹配数据', actions: ['查看', '编辑', '校验', '驳回', '单据详情'] }
       ]
     },
     {
       group: '质量检查',
       children: [
-        { name: '标准POS表', actions: ['查看', '编辑', '通过', '删除', '导出'] },
-        { name: '异常数据', actions: ['查看', '编辑', '通过', '驳回', '删除', '导出'] }
+        { name: '标准POS表', actions: ['查看', '编辑', '提交复核', '通过', '驳回', '单据详情', '删除'] },
+        { name: '异常数据', actions: ['查看', '编辑', '提交复核', '通过', '驳回', '单据详情'] }
       ]
     },
     {
       group: '台账与汇总',
       children: [
-        { name: '标准POS明细', actions: ['查看', '编辑', '导出'] },
-        { name: '销售汇总', actions: ['查看', '导出'] },
-        { name: '门店汇总', actions: ['查看', '导出'] }
+        { name: '标准POS明细', actions: ['查看', '编辑', '导出'] }
       ]
     },
     {
       group: '系统设置',
       children: [
-        { name: '用户管理', actions: ['查看', '新建', '编辑', '禁用', '重置密码', '删除'] },
+        { name: '用户管理', actions: ['查看', '新建', '编辑', '启用/停用', '重置密码', '删除'] },
         { name: '角色权限', actions: ['查看', '新建', '编辑', '删除'] },
         { name: '系统日志', actions: ['查看', '导出'] }
       ]
     }
   ],
   orgOptions: {
-    region: ['华北区域', '华中区域', '东北区域', '华东区域', '西北区域', '华南区域'],
+    team: ['西北Team', '东北Team', '华北Team', '华东Team', '华南Team', '华中Team', '全国渠道Team'],
+    region: ['西北区域', '东北区域', '华北区域', '华东区域', '华南区域', '华中区域', '全国渠道区域'],
     office: ['石家庄营业所', '北京营业所', '呼和浩特营业所', '天津营业所'],
     dealer: ['河北聚昊商贸', '邯郸格耀商贸', '维多利商业', '益尚客商贸']
   },
   orgTree: {
-    华北区域: ['石家庄营业所', '北京营业所', '呼和浩特营业所', '天津营业所'],
-    华中区域: ['郑州营业所', '武汉营业所', '长沙营业所'],
-    东北区域: ['沈阳营业所', '长春营业所', '哈尔滨营业所'],
-    华东区域: ['上海营业所', '南京营业所', '杭州营业所'],
-    西北区域: ['西安营业所', '兰州营业所', '乌鲁木齐营业所'],
-    华南区域: ['广州营业所', '深圳营业所', '南宁营业所']
+    西北Team: { 西北区域: ['西安营业所', '兰州营业所', '乌鲁木齐营业所'] },
+    东北Team: { 东北区域: ['沈阳营业所', '长春营业所', '哈尔滨营业所'] },
+    华北Team: { 华北区域: ['石家庄营业所', '北京营业所', '呼和浩特营业所', '天津营业所'] },
+    华东Team: { 华东区域: ['上海营业所', '南京营业所', '杭州营业所'] },
+    华南Team: { 华南区域: ['广州营业所', '深圳营业所', '南宁营业所'] },
+    华中Team: { 华中区域: ['郑州营业所', '武汉营业所', '长沙营业所'] },
+    全国渠道Team: { 全国渠道区域: ['全国渠道营业所'] }
   },
   fieldTypes: ['时间', '组织', '门店', '产品', '数量', '金额'],
   fieldConfigs: [
@@ -389,6 +411,16 @@ const SettingsView = {
 
   getAllPermissionValues() {
     return this.modules.flatMap((module) => module.children.flatMap((child) => child.actions.map((action) => `${module.group}/${child.name}:${action}`)));
+  },
+
+  hasCurrentPermission(group, child, action) {
+    const actor = typeof Store !== 'undefined' ? Store.getState() : {};
+    if (actor.isAdmin) return true;
+    const role = this.roles.find((item) => item.name === actor.userRole);
+    if (!role) return false;
+    const functions = role.functions || [];
+    if (functions.includes('全部权限') || functions.includes('全部菜单')) return true;
+    return functions.includes(`${group}/${child}:${action}`);
   },
 
   getRoleFunctionValues(role) {
@@ -1151,7 +1183,7 @@ const SettingsView = {
               ${child.actions.map((action) => {
                 const value = `${module.group}/${child.name}:${action}`;
                 return `
-                  <label><input type="checkbox" name="functions" value="${value}" ${this.roleHasPermission(role, value) ? 'checked' : ''}>${action}</label>
+                  <label class="settings-permission-option" data-permission-action="${action}"><input type="checkbox" name="functions" value="${value}" data-permission-action="${action}" ${this.roleHasPermission(role, value) ? 'checked' : ''}>${action}</label>
                 `;
               }).join('')}
             </div>
@@ -1159,6 +1191,21 @@ const SettingsView = {
         `).join('')).join('')}
       </div>
     `;
+  },
+
+  syncRejectPermissionByDataScope() {
+    const scope = document.getElementById('settings-role-scope-type')?.value || '全部数据';
+    const restricted = scope === '按组织范围';
+    document.querySelectorAll('#settings-role-form input[name="functions"][data-permission-action="驳回"]').forEach((input) => {
+      const label = input.closest('.settings-permission-option');
+      if (restricted) input.checked = false;
+      input.disabled = restricted;
+      label?.classList.toggle('is-disabled', restricted);
+      if (label) {
+        label.title = restricted ? '按组织范围的角色不能执行驳回操作' : '';
+        label.setAttribute('aria-disabled', restricted ? 'true' : 'false');
+      }
+    });
   },
 
   openRoleDialog(role = null) {
@@ -1210,6 +1257,7 @@ const SettingsView = {
     this.bindModalClose(overlay);
     document.getElementById('settings-role-scope-type')?.addEventListener('change', (event) => {
       document.getElementById('settings-role-org-scope')?.classList.toggle('hidden', event.target.value === '全部数据');
+      this.syncRejectPermissionByDataScope();
     });
     document.getElementById('settings-org-scope-trigger')?.addEventListener('click', () => {
       document.getElementById('settings-org-scope-dropdown')?.classList.toggle('open');
@@ -1226,54 +1274,50 @@ const SettingsView = {
       const input = event.target.closest('input[type="checkbox"]');
       if (!input) return;
       if (input.dataset.orgType === 'all') {
-        document.querySelectorAll('.settings-org-tree input[data-org-type="region"], .settings-org-tree input[data-org-type="office"]').forEach((item) => {
+        document.querySelectorAll('.settings-org-tree input[data-org-type="team"], .settings-org-tree input[data-org-type="region"], .settings-org-tree input[data-org-type="office"]').forEach((item) => {
           item.checked = input.checked;
           item.indeterminate = false;
         });
-        const regions = [...document.querySelectorAll('.settings-org-region')];
-        regions.forEach((region, index) => region.classList.toggle('is-expanded', input.checked && index === 0));
         this.syncRoleOrgTree();
         return;
       }
+      if (input.dataset.orgType === 'team') {
+        const team = input.value;
+        document.querySelectorAll(`input[data-org-type="region"][data-team="${team}"], input[data-org-type="office"][data-team="${team}"]`).forEach((child) => {
+          child.checked = input.checked;
+          child.indeterminate = false;
+        });
+        this.activateRoleOrgTeam(team);
+      }
       if (input.dataset.orgType === 'region') {
-        const regionNode = input.closest('.settings-org-region');
-        regionNode?.querySelectorAll('input[data-org-type="office"]').forEach((office) => {
+        const region = input.value;
+        document.querySelectorAll(`input[data-org-type="office"][data-region="${region}"]`).forEach((office) => {
           office.checked = input.checked;
         });
-        document.querySelectorAll('.settings-org-region').forEach((node) => {
-          node.classList.toggle('is-expanded', node === regionNode && input.checked);
-        });
+        this.activateRoleOrgRegion(region);
       }
       this.syncRoleOrgTree();
     });
     document.querySelector('.settings-org-tree')?.addEventListener('click', (event) => {
-      const expandButton = event.target.closest('.settings-org-region-expand');
-      if (!expandButton) return;
+      const row = event.target.closest('.settings-org-nav-row');
+      if (!row || event.target.closest('input[type="checkbox"]')) return;
       event.preventDefault();
       event.stopPropagation();
-      const regionNode = expandButton.closest('.settings-org-region');
-      const regionInput = regionNode?.querySelector('input[data-org-type="region"]');
-      if (!regionNode || !regionInput) return;
-      if (!regionInput.checked) {
-        regionInput.checked = true;
-        regionNode.querySelectorAll('input[data-org-type="office"]').forEach((office) => {
-          office.checked = true;
-        });
-      }
-      document.querySelectorAll('.settings-org-region').forEach((node) => {
-        node.classList.toggle('is-expanded', node === regionNode);
-      });
-      this.syncRoleOrgTree();
+      if (row.dataset.team && !row.dataset.region) this.activateRoleOrgTeam(row.dataset.team);
+      if (row.dataset.region) this.activateRoleOrgRegion(row.dataset.region);
     });
     this.syncRoleOrgTree();
+    this.syncRejectPermissionByDataScope();
     document.getElementById('settings-role-form')?.addEventListener('submit', (event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
-      const functionValues = data.getAll('functions');
       const dataScope = data.get('dataScope');
+      const functionValues = data.getAll('functions').filter((permission) => {
+        return dataScope !== '按组织范围' || !String(permission).endsWith(':驳回');
+      });
       const selectedOrgValues = this.getSelectedRoleOrgValues();
       if (dataScope === '按组织范围' && selectedOrgValues.length === 0) {
-        Dialog.toast('请选择至少一个区域或营业所', 'warning');
+        Dialog.toast('请选择至少一个营业Team、区域或营业所', 'warning');
         return;
       }
       const nextRole = {
@@ -1309,15 +1353,10 @@ const SettingsView = {
               <input type="checkbox" data-org-type="all">
               <span>全选</span>
             </label>
-            <small>选择一级区域后显示对应营业所</small>
+            <small>按营业Team、区域、营业所三级选择</small>
           </div>
           <div class="settings-org-tree">
-            <div class="settings-org-region-list">
-              ${this.renderRoleOrgTree(selectedValues)}
-            </div>
-            <div class="settings-org-office-stage">
-              <div class="settings-org-office-empty">选择区域后显示营业所</div>
-            </div>
+            ${this.renderRoleOrgTree(selectedValues)}
           </div>
         </div>
       </div>
@@ -1326,65 +1365,59 @@ const SettingsView = {
 
   renderRoleOrgTree(selectedValues = []) {
     const selected = new Set(selectedValues);
-    let expandedAssigned = false;
-    return Object.entries(this.orgTree).map(([region, offices]) => {
-      const hasOfficeSelected = offices.some((office) => selected.has(office));
-      const regionSelected = selected.has(region) || hasOfficeSelected;
-      const expanded = regionSelected && !expandedAssigned;
-      if (expanded) expandedAssigned = true;
-      return `
-        <div class="settings-org-region ${regionSelected ? 'is-active' : ''} ${expanded ? 'is-expanded' : ''}">
-          <div class="settings-org-region-label">
-            <input type="checkbox" data-org-type="region" value="${region}" ${regionSelected ? 'checked' : ''}>
-            <span>${region}</span>
-            <button type="button" class="settings-org-region-expand" aria-label="展开${region}">
-              <i class="fa-solid fa-chevron-right"></i>
-            </button>
-          </div>
-          <div class="settings-org-offices">
-            <strong>${region}营业所</strong>
-            ${offices.map((office) => `
-              <label>
-                <input type="checkbox" data-org-type="office" value="${office}" ${regionSelected || selected.has(office) ? 'checked' : ''}>
-                <span>${office}</span>
-              </label>
-            `).join('')}
-          </div>
-        </div>
-      `;
+    const teams = Object.entries(this.orgTree);
+    let activeTeam = teams.find(([team, regions]) => selected.has(team) || selected.has(team.replace('Team', ' Team')) || Object.entries(regions).some(([region, offices]) => selected.has(region) || offices.some((office) => selected.has(office))))?.[0] || teams[0]?.[0];
+    let activeRegion = Object.keys(this.orgTree[activeTeam] || {}).find((region) => selected.has(region) || (this.orgTree[activeTeam][region] || []).some((office) => selected.has(office))) || Object.keys(this.orgTree[activeTeam] || {})[0];
+    const teamColumn = teams.map(([team, regions]) => {
+      const allOffices = Object.values(regions).flat();
+      const checked = selected.has(team) || selected.has(team.replace('Team', ' Team'));
+      const partial = !checked && (Object.keys(regions).some((region) => selected.has(region)) || allOffices.some((office) => selected.has(office)));
+      return `<div class="settings-org-nav-row ${team === activeTeam ? 'is-current' : ''}" data-team="${team}"><input type="checkbox" data-org-type="team" value="${team}" ${checked ? 'checked' : ''} ${partial ? 'data-initial-partial="true"' : ''}><span><i class="fa-regular fa-folder text-blue-300"></i>${team}</span><i class="fa-solid fa-chevron-right"></i></div>`;
     }).join('');
+    const regionColumn = teams.flatMap(([team, regions]) => Object.entries(regions).map(([region, offices]) => {
+      const teamChecked = selected.has(team) || selected.has(team.replace('Team', ' Team'));
+      const checked = teamChecked || selected.has(region);
+      const partial = !checked && offices.some((office) => selected.has(office));
+      return `<div class="settings-org-region-group ${team === activeTeam ? '' : 'hidden'}" data-team-group="${team}"><div class="settings-org-nav-row ${region === activeRegion ? 'is-current' : ''}" data-team="${team}" data-region="${region}"><input type="checkbox" data-org-type="region" data-team="${team}" value="${region}" ${checked ? 'checked' : ''} ${partial ? 'data-initial-partial="true"' : ''}><span><i class="fa-regular fa-folder text-blue-300"></i>${region}</span><i class="fa-solid fa-chevron-right"></i></div></div>`;
+    })).join('');
+    const officeColumn = teams.flatMap(([team, regions]) => Object.entries(regions).map(([region, offices]) => {
+      const parentChecked = selected.has(team) || selected.has(team.replace('Team', ' Team')) || selected.has(region);
+      return `<div class="settings-org-office-group ${(team === activeTeam && region === activeRegion) ? '' : 'hidden'}" data-office-group="${region}">${offices.map((office) => `<label class="settings-org-office-row"><input type="checkbox" data-org-type="office" data-team="${team}" data-region="${region}" value="${office}" ${(parentChecked || selected.has(office)) ? 'checked' : ''}><span>${office}</span></label>`).join('')}</div>`;
+    })).join('');
+    return `<div class="settings-org-column settings-org-team-column"><strong>营业Team</strong>${teamColumn}</div><div class="settings-org-column settings-org-region-column"><strong>区域</strong>${regionColumn}</div><div class="settings-org-column settings-org-office-column"><strong>营业所</strong>${officeColumn}</div>`;
+  },
+
+  activateRoleOrgTeam(team) {
+    document.querySelectorAll('.settings-org-team-column .settings-org-nav-row').forEach((row) => row.classList.toggle('is-current', row.dataset.team === team));
+    document.querySelectorAll('.settings-org-region-group').forEach((group) => group.classList.toggle('hidden', group.dataset.teamGroup !== team));
+    const firstRegionRow = document.querySelector(`.settings-org-region-group[data-team-group="${team}"] .settings-org-nav-row`);
+    const currentRegionRow = document.querySelector(`.settings-org-region-group[data-team-group="${team}"] .settings-org-nav-row.is-current`) || firstRegionRow;
+    document.querySelectorAll('.settings-org-region-column .settings-org-nav-row').forEach((row) => row.classList.remove('is-current'));
+    currentRegionRow?.classList.add('is-current');
+    if (currentRegionRow?.dataset.region) this.activateRoleOrgRegion(currentRegionRow.dataset.region);
+  },
+
+  activateRoleOrgRegion(region) {
+    const row = document.querySelector(`.settings-org-region-column .settings-org-nav-row[data-region="${region}"]`);
+    document.querySelectorAll('.settings-org-region-column .settings-org-nav-row').forEach((item) => item.classList.toggle('is-current', item === row));
+    document.querySelectorAll('.settings-org-office-group').forEach((group) => group.classList.toggle('hidden', group.dataset.officeGroup !== region));
   },
 
   syncRoleOrgTree() {
     const allRegionInputs = [...document.querySelectorAll('.settings-org-tree input[data-org-type="region"]')];
-    const allOfficeInputs = [...document.querySelectorAll('.settings-org-region input[data-org-type="office"]')];
-    document.querySelectorAll('.settings-org-region').forEach((regionNode) => {
-      const regionInput = regionNode.querySelector('input[data-org-type="region"]');
-      const officeInputs = [...regionNode.querySelectorAll('input[data-org-type="office"]')];
+    const allOfficeInputs = [...document.querySelectorAll('.settings-org-tree input[data-org-type="office"]')];
+    allRegionInputs.forEach((regionInput) => {
+      const officeInputs = [...document.querySelectorAll(`input[data-org-type="office"][data-region="${regionInput.value}"]`)];
       const checkedCount = officeInputs.filter((input) => input.checked).length;
-      if (regionInput) {
-        regionNode.classList.toggle('is-active', regionInput.checked || checkedCount > 0);
-        regionInput.checked = officeInputs.length > 0 && checkedCount === officeInputs.length;
-        regionInput.indeterminate = checkedCount > 0 && checkedCount < officeInputs.length;
-      }
+      regionInput.checked = officeInputs.length > 0 && checkedCount === officeInputs.length;
+      regionInput.indeterminate = checkedCount > 0 && checkedCount < officeInputs.length;
     });
-    const officeStage = document.querySelector('.settings-org-office-stage');
-    const expandedRegion = document.querySelector('.settings-org-region.is-expanded');
-    if (officeStage) {
-      const expandedOffices = expandedRegion?.querySelector('.settings-org-offices');
-      if (expandedOffices) {
-        officeStage.replaceChildren(expandedOffices.cloneNode(true));
-      } else {
-        officeStage.innerHTML = '<div class="settings-org-office-empty">选择区域后显示营业所</div>';
-      }
-      officeStage.querySelectorAll('input[data-org-type="office"]').forEach((clone) => {
-        clone.addEventListener('change', () => {
-          const source = expandedRegion?.querySelector(`input[data-org-type="office"][value="${clone.value}"]`);
-          if (source) source.checked = clone.checked;
-          this.syncRoleOrgTree();
-        });
-      });
-    }
+    document.querySelectorAll('input[data-org-type="team"]').forEach((teamInput) => {
+      const officeInputs = [...document.querySelectorAll(`input[data-org-type="office"][data-team="${teamInput.value}"]`)];
+      const checkedCount = officeInputs.filter((input) => input.checked).length;
+      teamInput.checked = officeInputs.length > 0 && checkedCount === officeInputs.length;
+      teamInput.indeterminate = checkedCount > 0 && checkedCount < officeInputs.length;
+    });
 
     const selected = this.getSelectedRoleOrgValues();
     const selectedRegions = allRegionInputs.filter((input) => input.checked && !input.indeterminate).length;
@@ -1411,13 +1444,18 @@ const SettingsView = {
 
   getSelectedRoleOrgValues() {
     const values = [];
-    document.querySelectorAll('.settings-org-region').forEach((regionNode) => {
-      const regionInput = regionNode.querySelector('input[data-org-type="region"]');
-      if (regionInput?.checked) {
-        values.push(regionInput.value);
+    document.querySelectorAll('input[data-org-type="team"]').forEach((teamInput) => {
+      if (teamInput?.checked && !teamInput.indeterminate) {
+        values.push(teamInput.value);
         return;
       }
-      regionNode.querySelectorAll('input[data-org-type="office"]:checked').forEach((office) => values.push(office.value));
+      document.querySelectorAll(`input[data-org-type="region"][data-team="${teamInput.value}"]`).forEach((regionInput) => {
+        if (regionInput?.checked && !regionInput.indeterminate) {
+          values.push(regionInput.value);
+          return;
+        }
+        document.querySelectorAll(`input[data-org-type="office"][data-region="${regionInput.value}"]:checked`).forEach((office) => values.push(office.value));
+      });
     });
     return values;
   },
@@ -1433,8 +1471,8 @@ const SettingsView = {
   renderScopeRuleGrid() {
     return `
       <div class="settings-rule-grid compact">
-        <div><strong>全部数据</strong><span>可查看平台内全部区域、营业所及其下属数据。</span></div>
-        <div><strong>按组织范围</strong><span>可按区域或营业所授权；选择区域时自动包含其下全部营业所。</span></div>
+        <div><strong>全部数据</strong><span>可查看平台内全部营业Team、区域、营业所及其下属数据。</span></div>
+        <div><strong>按组织范围</strong><span>可按营业Team、区域或营业所授权；选择上级时自动包含全部下级组织。</span></div>
       </div>
     `;
   }

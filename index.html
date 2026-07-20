@@ -9,7 +9,7 @@
   <!-- FontAwesome via CDN -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Custom Style -->
-  <link rel="stylesheet" href="style.css?v=20260708-ledger-search-combo-v1">
+  <link rel="stylesheet" href="style.css?v=20260720-three-column-org-v5">
   <!-- Tailwind Config -->
   <script>
     tailwind.config = {
@@ -108,6 +108,14 @@
               <i class="fa-solid fa-chevron-down user-chevron"></i>
             </button>
             <div id="user-menu-panel" class="user-menu-panel hidden">
+              <div class="px-3 py-2 text-[11px] font-bold text-[#86909c]">切换演示账号</div>
+              <button class="user-menu-item demo-account-switch" data-account="aiden.pos" type="button">
+                <i class="fa-solid fa-user-shield"></i><span>Aiden · POS担当</span>
+              </button>
+              <button class="user-menu-item demo-account-switch" data-account="wangmin.sales" type="button">
+                <i class="fa-solid fa-user"></i><span>王敏 · 营业担当</span>
+              </button>
+              <div class="my-1 border-t border-gray-100"></div>
               <button id="change-password-btn" class="user-menu-item" type="button">
                 <i class="fa-solid fa-key"></i>
                 <span>修改密码</span>
@@ -204,19 +212,19 @@
   <div id="overlay-container"></div>
 
   <!-- Scripts -->
-  <script src="js/core/store.js?v=20260707-account-binding"></script>
+  <script src="js/core/store.js?v=20260714-dual-account-workflow"></script>
   <script src="js/core/global-period.js?v=20260611-global-period"></script>
   <script src="js/core/i18n.js?v=20260630-inbox-status"></script>
   <script src="js/components/dialog.js?v=20260611-merge"></script>
   <script src="js/components/drawer.js?v=20260611-merge"></script>
   <script src="js/components/ai-assistant.js?v=20260626-ai-fab-drag"></script>
-  <script src="js/views/login.js?v=20260630-password-toggle"></script>
+  <script src="js/views/login.js?v=20260714-dual-account-workflow"></script>
   <script src="js/views/dashboard.js?v=20260707-qa-detail-preview"></script>
-  <script src="js/views/ingestion.js?v=20260713-parent-action-align-v17"></script>
-  <script src="js/views/qa.js?v=20260710-document-edit-whitelist-v1"></script>
-  <script src="js/views/ledger.js?v=20260708-ledger-placeholder-v1"></script>
-  <script src="js/views/settings.js?v=20260708-user-delete-confirm"></script>
-  <script src="js/core/app.js?v=20260707-remove-analytics"></script>
+    <script src="js/views/ingestion.js?v=20260720-fixed-reject-assignee-v10"></script>
+    <script src="js/views/qa.js?v=20260720-exception-approved-exit-v7"></script>
+  <script src="js/views/ledger.js?v=20260716-ledger-fields-v3"></script>
+  <script src="js/views/settings.js?v=20260720-three-column-org-v5"></script>
+  <script src="js/core/app.js?v=20260714-dual-account-workflow"></script>
 <script>
 (function () {
   const STATUS_OPTIONS = ['全部状态', '正常', '驳回', '待处理'];

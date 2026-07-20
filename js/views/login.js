@@ -135,10 +135,13 @@ const LoginView = {
         const account = accountInput?.value.trim() || '';
         const password = passwordInput?.value.trim() || '';
 
-        if (account === 'A123456' && password === '123456') {
+        const legacyLogin = account === 'A123456' && password === '123456';
+        const profile = Store.accounts[account];
+        if (legacyLogin || (profile && profile.password === password)) {
           errorMessage?.classList.add('hidden');
           this.persistRememberedCredential(account, password);
-          Store.setState({ isAuthenticated: true });
+          if (legacyLogin) Store.switchAccount('aiden.pos');
+          else Store.switchAccount(account);
           window.location.hash = '#dashboard';
           return;
         }
