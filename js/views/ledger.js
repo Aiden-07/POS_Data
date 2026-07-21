@@ -47,7 +47,7 @@ const LedgerView = {
 
   tableColumns: [
     { key: 'transactionDate', label: '时间', width: 'w-28', value: (item) => item.transactionDate },
-    { key: 'partnerErp', label: '合作方ERP', width: 'w-32', value: (item) => item.partnerErp },
+    { key: 'partnerErp', label: '合作方ERP', width: 'w-32', value: (item) => String(item.partnerErp || '-').replace(/\s*ERP\s*$/i, '') || '-' },
     { key: 'dealerName', label: '经销商', width: 'w-36', truncate: true, value: (item) => item.dealer },
     { key: 'customerStoreNo', label: '客户门店号', width: 'w-32', mono: true, value: (item) => item.customerStoreNo },
     { key: 'rawTransactionCode', label: '原始交易出码', width: 'w-36', mono: true, value: (item) => item.rawTransactionCode },
@@ -440,7 +440,7 @@ const LedgerView = {
       return {
         month: '2026年06月',
         transactionDate: `2026-06-${String((index % 28) + 1).padStart(2, '0')}`,
-        partnerErp: `${row.dealer.replace(/商贸|商业|集团|有限公司/g, '')}ERP`,
+        partnerErp: row.dealer.replace(/商贸|商业|集团|有限公司/g, ''),
         acc: accNames[index % accNames.length],
         dealer: row.dealer,
         salesTeam: row.salesTeam,
@@ -578,7 +578,6 @@ const LedgerView = {
         <button type="button" class="ledger-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-colors" data-ledger-key="${this.escapeHtml(this.getLedgerRowKey(item))}" title="单据详情">
           <i class="fa-solid fa-list-check"></i>
         </button>
-        ${this.hasLedgerPermission('编辑') ? `<button type="button" class="ledger-edit-btn px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 transition-colors" data-ledger-key="${this.escapeHtml(this.getLedgerRowKey(item))}" title="编辑"><i class="fa-regular fa-pen-to-square"></i></button>` : ''}
         </div>
       </td>
     `;
@@ -925,7 +924,7 @@ const LedgerView = {
             row,
             moduleFields: [
               { label: '时间', value: row.transactionDate || '-' },
-              { label: '合作方ERP', value: row.partnerErp || '-' },
+              { label: '合作方ERP', value: String(row.partnerErp || '-').replace(/\s*ERP\s*$/i, '') || '-' },
               { label: '经销商', value: row.dealer || '-' },
               { label: '客户门店号', value: row.customerStoreNo || '-' },
               { label: '原始交易出码', value: row.rawTransactionCode || '-' },

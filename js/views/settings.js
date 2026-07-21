@@ -78,7 +78,6 @@ const SettingsView = {
         '质量检查/异常数据:通过',
         '质量检查/异常数据:单据详情',
         '台账与汇总/标准POS明细:查看',
-        '台账与汇总/标准POS明细:编辑',
         '台账与汇总/标准POS明细:导出'
       ],
       dataScope: '按组织范围',
@@ -103,7 +102,6 @@ const SettingsView = {
         '质量检查/异常数据:查看',
         '质量检查/异常数据:单据详情',
         '台账与汇总/标准POS明细:查看',
-        '台账与汇总/标准POS明细:编辑'
       ],
       dataScope: '按组织范围',
       dataScopeValue: '石家庄营业所',
@@ -132,7 +130,7 @@ const SettingsView = {
     {
       group: '台账与汇总',
       children: [
-        { name: '标准POS明细', actions: ['查看', '编辑', '导出'] }
+        { name: '标准POS明细', actions: ['查看', '导出'] }
       ]
     },
     {

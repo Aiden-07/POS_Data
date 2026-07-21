@@ -108,6 +108,9 @@ const IngestionView = {
   renderMatchedWorkflowActions(row) {
     const isPos = this.isPosActor();
     const id = this.escapeHtml(row.id);
+    if (this.getMatchedQualityStatus(row) === '已质检') return `
+      ${this.hasIngestionPermission('单门店已匹配数据', '质检') ? `<button class="px-2 py-1 text-xs rounded text-gray-300 cursor-not-allowed" type="button" disabled title="该单据已完成质检，不可重复质检"><i class="fa-solid fa-check"></i></button>` : ''}
+      <button class="px-2 py-1 text-xs rounded text-gray-300 cursor-not-allowed" type="button" disabled title="该单据已完成质检，不可编辑"><i class="fa-solid fa-pen-to-square"></i></button>`;
     if (isPos && this.canEditMatchedRow(row)) return `
       ${this.hasIngestionPermission('单门店已匹配数据', '质检') ? `<button class="px-2 py-1 text-xs rounded action-btn text-green-600 hover:bg-green-50" data-action="approve" data-id="${id}" title="进入质量检查"><i class="fa-solid fa-check"></i></button>` : ''}
       <button class="px-2 py-1 text-xs rounded action-btn row-edit-btn text-amber-500 hover:bg-amber-50" data-action="edit" data-id="${id}" title="编辑"><i class="fa-solid fa-pen-to-square row-edit-icon"></i></button>`;
@@ -745,17 +748,19 @@ const IngestionView = {
     if (mode === 'stash') {
       return [
         { value: 'all', label: '全部' },
-        { value: 'rawStoreName', label: '原始门店名称' },
-        { value: 'rawStoreCode', label: '原始门店编码' }
+        { value: 'rawStoreName', label: '原始文件名' },
+        { value: 'rawStoreCode', label: '客户交易处编码' },
+        { value: 'storeName', label: '客户交易处名称' },
+        { value: 'storeCode', label: '客户门店号' }
       ];
     }
     if (mode === 'files') {
       return [
         { value: 'all', label: '全部' },
-        { value: 'rawStoreName', label: '原始门店名称' },
-        { value: 'rawStoreCode', label: '原始门店编码' },
-        { value: 'storeName', label: '门店名称' },
-        { value: 'storeCode', label: '门店编码' },
+        { value: 'rawStoreName', label: '原始文件名' },
+        { value: 'rawStoreCode', label: '客户交易处编码' },
+        { value: 'storeName', label: '客户交易处名称' },
+        { value: 'storeCode', label: '客户门店号' },
         { value: 'dealer', label: '经销商' },
         { value: 'acc', label: 'ACC名称' }
       ];
@@ -993,7 +998,7 @@ const IngestionView = {
             </div>
           </div>
           
-          <table class="w-full text-left text-sm text-[#4e5969]" id="ingestion-table">
+          <table class="w-full min-w-[2900px] text-left text-sm text-[#4e5969]" id="ingestion-table">
             <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
               <tr id="ingestion-table-head-row"></tr>
             </thead>
@@ -3595,9 +3600,6 @@ const IngestionView = {
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <button type="button" class="store-preview-edit-btn" title="${cn ? '编辑' : '편집'}">
-              <i class="fa-solid fa-pen-to-square"></i>
-            </button>
             <button type="button" class="inbox-preview-zoom-btn" title="${cn ? '全屏查看' : '전체 화면'}">
               <i class="fa-solid fa-expand"></i>
             </button>
@@ -4032,9 +4034,6 @@ const IngestionView = {
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <button type="button" class="store-preview-edit-btn" title="${cn ? '编辑' : '편집'}">
-              <i class="fa-solid fa-pen-to-square"></i>
-            </button>
             <button type="button" class="inbox-preview-zoom-btn" title="${cn ? '全屏查看' : '전체 화면'}">
               <i class="fa-solid fa-expand"></i>
             </button>
@@ -4150,6 +4149,81 @@ const IngestionView = {
     return version;
   },
 
+  getStoreDeliveryFields(row = {}, index = 0, options = {}) {
+    const dealer = options.dealer || row.customerDealer || row.dealer || '-';
+    const rawStoreCode = options.rawStoreCode || row.rawTradeCode || row.rawStoreCode || this.getRawStoreCode(row, index) || '-';
+    const customerStoreName = options.customerStoreName || row.customerStoreName || row.storeName || '-';
+    const customerStoreNo = row.customerStoreNo || row.customerStoreCode || row.storeCode || '-';
+    const originalFileName = row.originalFileName || row.fileName || row.storeName || '-';
+    const originalNameText = String(originalFileName || '-');
+    const extensionMatch = originalNameText.match(/(\.[^./\\]+)$/);
+    const extension = extensionMatch ? extensionMatch[1] : '.xlsx';
+    const originalBaseName = extensionMatch
+      ? originalNameText.slice(0, -extension.length)
+      : originalNameText;
+    const currentFileName = [originalBaseName, customerStoreName, rawStoreCode]
+      .filter(value => value && value !== '-')
+      .join('-') + extension;
+    const partnerErp = row.partnerErp || (dealer !== '-' ? String(dealer).replace(/商贸|商业|集团|有限公司/g, '') : '-');
+    return {
+      time: row.time || row.provideTime || row.receivedAt || row.month || this.getDisplayMonth(row),
+      partnerErp: String(partnerErp).replace(/\s*ERP\s*$/i, '') || '-',
+      originalFileName,
+      currentFileName,
+      customerStoreNo,
+      rawTradeCode: rawStoreCode,
+      customerStoreName,
+      salesTeam: String(row.salesTeam || row.team || '-').split(/\s*\/\s*/)[0] || '-',
+      region: row.region || row.customerRegion || '-',
+      salesOffice: row.salesOffice || row.customerSalesOffice || '-',
+      acc: options.acc || row.customerAcc || row.acc || '-',
+      orionTradeCode: row.orionStoreCode || row.matchedStoreCode || row.storeCode || '-',
+      orionTradeName: row.orionStoreName || row.matchedStoreName || customerStoreName,
+      judgment: row.judgmentNote || row.suggestion || row.aiNote || '-',
+      abnormalDescription: row.abnormalDescription || row.abnormalReason || row.rejectNote || row.aiNote || '-'
+    };
+  },
+
+  getOrionTradeMasterRecord(code = '') {
+    const normalizedCode = String(code || '').trim().toUpperCase();
+    if (!normalizedCode) return null;
+    const matchedRows = Array.isArray(this.data) ? this.data : [];
+    const standardRows = (typeof QAView !== 'undefined' && Array.isArray(QAView.standardData)) ? QAView.standardData : [];
+    const candidates = [...matchedRows, ...standardRows];
+    const matched = candidates.find((row, index) => [
+      row.orionStoreCode,
+      row.matchedStoreCode,
+      row.storeCode,
+      row.rawStoreCode,
+      this.getRawStoreCode(row, index)
+    ].some(value => String(value || '').trim().toUpperCase() === normalizedCode));
+    if (!matched) return null;
+    const index = candidates.indexOf(matched);
+    return {
+      code: normalizedCode,
+      name: matched.orionStoreName || matched.matchedStoreName || matched.customerStoreName || matched.storeName || '-',
+      salesTeam: String(matched.salesTeam || matched.team || '-').split(/\s*\/\s*/)[0] || '-',
+      region: matched.region || matched.customerRegion || '-',
+      salesOffice: matched.salesOffice || matched.customerSalesOffice || '-',
+      acc: matched.customerAcc || this.getAccName(matched.acc, index)
+    };
+  },
+
+  getTradeMasterEdits(record = {}) {
+    return {
+      orionStoreCode: record.code,
+      matchedStoreCode: record.code,
+      orionStoreName: record.name,
+      matchedStoreName: record.name,
+      salesTeam: record.salesTeam,
+      team: record.salesTeam,
+      region: record.region,
+      salesOffice: record.salesOffice,
+      acc: record.acc,
+      customerAcc: record.acc
+    };
+  },
+
   renderTableHeader() {
     const headerRow = document.getElementById('ingestion-table-head-row');
     if (!headerRow) return;
@@ -4159,19 +4233,23 @@ const IngestionView = {
       <th class="px-5 py-4 w-[60px] min-w-[60px] rounded-tl-lg sticky left-0 z-30 bg-[#f7f8fa]">
         <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-brand focus:ring-brand">
       </th>
-      <th class="px-4 py-4 w-[176px] min-w-[176px] sticky left-[60px] z-30 bg-[#f7f8fa]">${cn ? '年月' : '년월'}</th>
-      <th class="px-3 py-4 w-56 min-w-56 sticky left-[236px] z-30 bg-[#f7f8fa] shadow-[6px_0_10px_-10px_rgba(15,23,42,0.45)]">${cn ? '原始门店名称' : '원본 매장명'}</th>
+      <th class="px-4 py-4 min-w-40">${cn ? '时间' : '시간'}</th>
+      <th class="px-4 py-4 min-w-36">${cn ? '合作方ERP' : '파트너 ERP'}</th>
+      <th class="px-4 py-4 min-w-64">${cn ? '原始文件名' : '원본 파일명'}</th>
+      <th class="px-4 py-4 min-w-64">${cn ? '当前文件名' : '현재 파일명'}</th>
     `;
     headerRow.innerHTML = isOriginalStoreList
       ? `
         ${commonStart}
-        <th class="px-5 py-4 min-w-36">${cn ? '原始门店编码' : '원본 매장 코드'}</th>
-        <th class="px-5 py-4 min-w-48">${cn ? '门店名称' : '매장명'}</th>
-        <th class="px-5 py-4 min-w-40">${cn ? '门店编码' : '매장 코드'}</th>
-        <th class="px-5 py-4 min-w-36">${cn ? '经销商' : '대리점'}</th>
-        <th class="px-5 py-4 min-w-28">ACC名称</th>
-        <th class="px-5 py-4 min-w-32">${cn ? '本部' : '본부'}</th>
+        <th class="px-5 py-4 min-w-36">${cn ? '客户门店号' : '고객 매장 번호'}</th>
+        <th class="px-5 py-4 min-w-40">${cn ? '客户交易处编码' : '고객 거래처 코드'}</th>
+        <th class="px-5 py-4 min-w-48">${cn ? '客户交易处名称' : '고객 거래처명'}</th>
+        <th class="px-5 py-4 min-w-36">${cn ? '营业Team' : '영업 Team'}</th>
+        <th class="px-5 py-4 min-w-32">${cn ? '区域' : '지역'}</th>
         <th class="px-5 py-4 min-w-36">${cn ? '营业所' : '영업소'}</th>
+        <th class="px-5 py-4 min-w-24">ACC</th>
+        <th class="px-5 py-4 min-w-40">${cn ? '好丽友交易处编码' : '오리온 거래처 코드'}</th>
+        <th class="px-5 py-4 min-w-48">${cn ? '好丽友交易处名称' : '오리온 거래처명'}</th>
         <th class="px-5 py-4 min-w-32">${cn ? '最近操作人' : '최근 작업자'}</th>
         <th class="px-5 py-4 w-28 min-w-28 sticky right-[96px] z-20 bg-blue-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">${cn ? '状态' : '상태'}</th>
         <th class="px-5 py-4 w-24 min-w-24 rounded-tr-lg sticky right-0 z-20 bg-blue-50">
@@ -4183,20 +4261,19 @@ const IngestionView = {
       `
       : `
         ${commonStart}
-        <th class="px-5 py-4 min-w-36">${cn ? '原始门店编码' : '원본 매장 코드'}</th>
-        <th class="px-5 py-4 min-w-48">${cn ? '门店名称' : '매장명'}</th>
-        <th class="px-5 py-4 min-w-40">${cn ? '门店编码' : '매장 코드'}</th>
-        <th class="px-5 py-4 min-w-36">${cn ? '经销商' : '대리점'}</th>
-        <th class="px-5 py-4 min-w-28">ACC名称</th>
-        <th class="px-5 py-4 min-w-32">${cn ? '本部' : '본부'}</th>
+        <th class="px-5 py-4 min-w-36">${cn ? '客户门店号' : '고객 매장 번호'}</th>
+        <th class="px-5 py-4 min-w-40">${cn ? '客户交易处编码' : '고객 거래처 코드'}</th>
+        <th class="px-5 py-4 min-w-48">${cn ? '客户交易处名称' : '고객 거래처명'}</th>
+        <th class="px-5 py-4 min-w-36">${cn ? '营业Team' : '영업 Team'}</th>
+        <th class="px-5 py-4 min-w-32">${cn ? '区域' : '지역'}</th>
         <th class="px-5 py-4 min-w-36">${cn ? '营业所' : '영업소'}</th>
-        <th class="px-5 py-4 min-w-56">${cn ? '异常原因' : '이상 사유'}</th>
-      <th class="px-5 py-4">
-        <div class="flex items-center gap-1">
-          ${cn ? '处理人' : '처리자'}
-          <i class="fa-solid fa-circle-info text-xs text-[#86909c] cursor-help" title="${cn ? '处理人信息' : '처리자 정보'}"></i>
-        </div>
-      </th>
+        <th class="px-5 py-4 min-w-24">ACC</th>
+        <th class="px-5 py-4 min-w-40">${cn ? '好丽友交易处编码' : '오리온 거래처 코드'}</th>
+        <th class="px-5 py-4 min-w-48">${cn ? '好丽友交易处名称' : '오리온 거래처명'}</th>
+        <th class="px-5 py-4 min-w-64">${cn ? '异常说明' : '이상 설명'}</th>
+        <th class="px-5 py-4 min-w-36">${cn ? '当前责任人' : '현재 책임자'}</th>
+        <th class="px-5 py-4 min-w-32">${cn ? '最近操作人' : '최근 작업자'}</th>
+        <th class="px-5 py-4 min-w-28">${cn ? '状态' : '상태'}</th>
         <th class="px-5 py-4 w-24 min-w-24 rounded-tr-lg sticky right-0 z-20 bg-blue-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">
           <div class="flex items-center gap-1">
             ${cn ? '操作' : '조작'}
@@ -4282,6 +4359,12 @@ const IngestionView = {
       const acc = this.getAccName(row.acc, index);
       const headquarters = row.headquarters || row.region || '-';
       const salesOffice = row.salesOffice || '-';
+      const deliveryFields = this.getStoreDeliveryFields(row, index, {
+        rawStoreCode,
+        customerStoreName,
+        dealer,
+        acc
+      });
       
       // 从收件箱数据中获取来源邮件和来源附件信息
       const inboxData = this.getInboxData();
@@ -4307,47 +4390,23 @@ const IngestionView = {
       
       return `
         <tr class="hover:bg-slate-50 transition-colors group" data-id="${row.id}">
-          <td class="px-4 py-3 w-[60px] min-w-[60px] sticky left-0 z-10 bg-white group-hover:bg-slate-50">
+          <td class="px-4 py-3 w-[60px] min-w-[60px]">
             <input type="checkbox" class="row-cb rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" value="${row.id}" ${isActionLocked ? 'disabled' : ''}>
           </td>
-          <td class="px-4 py-3 w-[176px] min-w-[176px] text-[#4e5969] sticky left-[60px] z-10 bg-white group-hover:bg-slate-50">
-            <span>${this.escapeHtml(this.getDisplayMonth(row))}</span>
-          </td>
-          <td class="px-3 py-3 w-56 min-w-56 sticky left-[236px] z-10 bg-white group-hover:bg-slate-50 shadow-[6px_0_10px_-10px_rgba(15,23,42,0.45)]">
-            <div class="font-medium flex items-center gap-2" title="${this.escapeHtml(row.fileName)}">
-              <i class="fa-solid fa-file-excel text-green-600 flex-shrink-0"></i>
-              <button type="button" class="ingestion-row-preview-trigger row-edit-display row-filename-text truncate max-w-[220px] text-brand hover:text-blue-700 hover:underline transition-colors text-left" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '点击预览' : '미리보기'} ${this.escapeHtml(row.fileName)}">${this.escapeHtml(row.rawStoreName || row.fileName)}</button>
-              <input type="text" class="row-edit-input hidden w-full max-w-[220px] px-2 py-1 border border-gray-200 rounded text-sm font-medium text-slate-800 focus:outline-none focus:border-brand" data-edit-field="rawStoreName" value="${this.escapeHtml(row.rawStoreName || row.fileName)}">
-            </div>
-          </td>
-          <td class="px-5 py-3">
-            <span class="row-edit-display inline-flex items-center px-2 py-1 rounded-md bg-slate-50 text-slate-700 font-mono text-xs border border-slate-100">${this.escapeHtml(rawStoreCode)}</span>
-            <input type="text" class="row-edit-input hidden w-28 px-2 py-1 border border-gray-200 rounded text-sm font-mono text-slate-800 focus:outline-none focus:border-brand" data-edit-field="rawStoreCode" value="${this.escapeHtml(rawStoreCode)}">
-          </td>
-          <td class="px-5 py-3 font-medium text-[#1d2129]" title="${this.escapeHtml(customerStoreName)}">
-            <span class="row-edit-display">${this.escapeHtml(customerStoreName)}</span>
-            <input type="text" class="row-edit-input hidden w-40 px-2 py-1 border border-gray-200 rounded text-sm font-medium text-slate-800 focus:outline-none focus:border-brand" data-edit-field="storeName" value="${this.escapeHtml(customerStoreName)}">
-          </td>
-          <td class="px-5 py-3">
-            <span class="row-edit-display inline-flex items-center px-2 py-1 rounded-md bg-blue-50 text-brand font-mono text-xs border border-blue-100">${this.escapeHtml(customerStoreCode)}</span>
-            <input type="text" class="row-edit-input hidden w-28 px-2 py-1 border border-gray-200 rounded text-sm font-mono text-slate-800 focus:outline-none focus:border-brand" data-edit-field="storeCode" value="${this.escapeHtml(customerStoreCode)}">
-          </td>
-          <td class="px-5 py-3 text-[#4e5969]" title="${this.escapeHtml(dealer)}">
-            <span class="row-edit-display">${this.escapeHtml(dealer)}</span>
-            <input type="text" class="row-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm text-slate-800 focus:outline-none focus:border-brand" data-edit-field="dealer" value="${this.escapeHtml(dealer)}">
-          </td>
-          <td class="px-5 py-3 text-[#4e5969] font-medium">
-            <span>${this.escapeHtml(acc)}</span>
-          </td>
-          <td class="px-5 py-3 text-[#4e5969]">
-            <span>${this.escapeHtml(headquarters)}</span>
-          </td>
-          <td class="px-5 py-3 text-[#4e5969]">
-            <span>${this.escapeHtml(salesOffice)}</span>
-          </td>
-          ${isOriginalStoreList ? `
-            <td class="px-5 py-3 text-[#4e5969]">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
-          ` : `<td class="px-5 py-3">${this.escapeHtml(this.getLocalizedText(row.handler) || '-')}</td>`}
+          <td class="px-4 py-3 text-[#4e5969]">${this.escapeHtml(deliveryFields.time)}</td>
+          <td class="px-4 py-3"><span class="row-edit-display">${this.escapeHtml(deliveryFields.partnerErp)}</span><input type="text" class="row-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="partnerErp" value="${this.escapeHtml(deliveryFields.partnerErp === '-' ? '' : deliveryFields.partnerErp)}"></td>
+          <td class="px-4 py-3"><span class="truncate block max-w-[240px] text-[#4e5969]" title="${this.escapeHtml(deliveryFields.originalFileName)}"><i class="fa-solid fa-file-excel mr-2 text-green-600"></i>${this.escapeHtml(deliveryFields.originalFileName)}</span></td>
+          <td class="px-4 py-3"><button type="button" class="ingestion-row-preview-trigger truncate block max-w-[240px] text-brand hover:underline text-left" data-id="${row.id}" title="${this.escapeHtml(deliveryFields.currentFileName)}">${this.escapeHtml(deliveryFields.currentFileName)}</button></td>
+          <td class="px-5 py-3 font-mono">${this.escapeHtml(deliveryFields.customerStoreNo)}</td>
+          <td class="px-5 py-3 font-mono">${this.escapeHtml(deliveryFields.rawTradeCode)}</td>
+          <td class="px-5 py-3 font-medium text-[#1d2129]">${this.escapeHtml(deliveryFields.customerStoreName)}</td>
+          <td class="px-5 py-3">${this.escapeHtml(deliveryFields.salesTeam)}</td>
+          <td class="px-5 py-3">${this.escapeHtml(deliveryFields.region)}</td>
+          <td class="px-5 py-3">${this.escapeHtml(deliveryFields.salesOffice)}</td>
+          <td class="px-5 py-3 font-medium">${this.escapeHtml(deliveryFields.acc)}</td>
+          <td class="px-5 py-3 font-mono text-[#1d2129]"><span class="row-edit-display">${this.escapeHtml(deliveryFields.orionTradeCode)}</span><input type="text" class="row-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm font-mono bg-white focus:outline-none focus:border-brand" data-edit-field="orionStoreCode" value="${this.escapeHtml(deliveryFields.orionTradeCode === '-' ? '' : deliveryFields.orionTradeCode)}"></td>
+          <td class="px-5 py-3">${this.escapeHtml(deliveryFields.orionTradeName)}</td>
+          <td class="px-5 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
           ${isOriginalStoreList ? `
             <td class="px-5 py-3 sticky right-[96px] z-10 bg-white group-hover:bg-slate-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">
               <span class="inline-flex h-6 min-w-[64px] items-center justify-center gap-1 whitespace-nowrap px-2 rounded-full border text-xs font-semibold leading-none ${this.getMatchedQualityStatus(row) === '已质检' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'}"
@@ -4557,7 +4616,7 @@ const IngestionView = {
       const abnormalReason = this.getStashAbnormalReason(row);
       const customerStoreName = row.customerStoreName || '-';
       const customerStoreCode = row.customerStoreCode || '-';
-      const dealer = row.customerDealer || '-';
+      const dealer = row.customerDealer || row.dealer || '-';
       const acc = row.customerAcc || '-';
       const headquarters = row.customerHeadquarters || '-';
       const salesOffice = row.customerSalesOffice || '-';
@@ -4566,36 +4625,41 @@ const IngestionView = {
       const canPosReject = this.isPosActor() && this.hasFullDataScope() && this.hasIngestionPermission('单门店未匹配数据', '驳回') && ['待处理', 'POS担当待处理'].includes(stashStatus);
       const item = { row, index, key };
       const responsibility = this.getStashResponsibility(row, key);
+      const deliveryFields = this.getStoreDeliveryFields(row, index, {
+        rawStoreCode,
+        customerStoreName,
+        dealer,
+        acc
+      });
       const canEdit = this.canEditStashRow(item);
       const canSalesSubmit = !this.isPosActor() && canEdit;
       const canSelect = this.canSelectStashRow(item);
       const editReason = canEdit ? '编辑' : this.getStashEditDisabledReason(item);
       return `
       <tr class="group bg-white hover:bg-slate-50 transition-colors ${isRejected ? 'bg-red-50/30' : ''}" data-stash-key="${this.escapeHtml(key)}">
-        <td class="px-4 py-3 w-[60px] sticky left-0 z-10 bg-white group-hover:bg-slate-50"><input type="checkbox" class="row-cb-ingestion-stash rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" data-stash-key="${this.escapeHtml(key)}" title="${this.escapeHtml(canSelect ? '可选择处理' : editReason)}" ${canSelect ? '' : 'disabled'}></td>
-        <td class="px-4 py-3 w-[176px] text-[#4e5969] sticky left-[60px] z-10 bg-white group-hover:bg-slate-50">
-          <span>${this.escapeHtml(displayMonth)}</span>
+        <td class="px-4 py-3 w-[60px]"><input type="checkbox" class="row-cb-ingestion-stash rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" data-stash-key="${this.escapeHtml(key)}" title="${this.escapeHtml(canSelect ? '可选择处理' : editReason)}" ${canSelect ? '' : 'disabled'}></td>
+        <td class="px-4 py-3 text-[#4e5969]">${this.escapeHtml(deliveryFields.time || displayMonth)}</td>
+        <td class="px-4 py-3"><span class="stash-edit-display">${this.escapeHtml(deliveryFields.partnerErp)}</span><input type="text" class="stash-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="partnerErp" value="${this.escapeHtml(deliveryFields.partnerErp === '-' ? '' : deliveryFields.partnerErp)}"></td>
+        <td class="px-4 py-3">
+          <span class="font-medium text-[#4e5969] flex items-center gap-2" title="${this.escapeHtml(deliveryFields.originalFileName)}">
+            <i class="fa-solid fa-file-excel text-green-600"></i>
+            <span class="truncate max-w-[220px]">${this.escapeHtml(deliveryFields.originalFileName)}</span>
+          </span>
         </td>
-        <td class="px-3 py-3 w-56 sticky left-[236px] z-10 bg-white group-hover:bg-slate-50 shadow-[6px_0_10px_-10px_rgba(15,23,42,0.45)]">
-          <button type="button" class="stash-edit-display ingestion-stash-preview-trigger font-medium text-brand flex items-center gap-2 hover:text-blue-700 hover:underline transition-colors" data-index="${index}" data-email-id="${row.sourceEmailId || ''}" data-att-idx="${typeof row.sourceAttIdx === 'number' ? row.sourceAttIdx : ''}" title="预览 ${this.escapeHtml(row.storeName)}">
-            <i class="fa-solid fa-store text-brand"></i>
-            <span class="truncate max-w-[176px]">${this.escapeHtml(row.storeName)}</span>
-          </button>
-          <input type="text" class="stash-edit-input hidden w-full px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="storeName" value="${this.escapeHtml(row.storeName)}">
-        </td>
-        <td class="px-5 py-3 font-mono ${rawStoreCode === '-' ? 'text-[#86909c]' : 'text-[#1d2129]'}"><span class="stash-edit-display">${this.escapeHtml(rawStoreCode)}</span><input type="text" class="stash-edit-input hidden w-28 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="rawStoreCode" value="${this.escapeHtml(rawStoreCode)}"></td>
-        <td class="px-5 py-3"><span class="stash-edit-display ${customerStoreName === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(customerStoreName)}</span><input type="text" class="stash-edit-input hidden w-40 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="customerStoreName" value="${customerStoreName === '-' ? '' : this.escapeHtml(customerStoreName)}"></td>
-        <td class="px-5 py-3"><span class="stash-edit-display ${customerStoreCode === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(customerStoreCode)}</span><input type="text" class="stash-edit-input hidden w-32 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="customerStoreCode" value="${customerStoreCode === '-' ? '' : this.escapeHtml(customerStoreCode)}"></td>
-        <td class="px-5 py-3"><span class="stash-edit-display ${dealer === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(dealer)}</span><input type="text" class="stash-edit-input hidden w-32 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="customerDealer" value="${dealer === '-' ? '' : this.escapeHtml(dealer)}"></td>
-        <td class="px-5 py-3"><span class="${acc === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(acc)}</span></td>
-        <td class="px-5 py-3"><span class="${headquarters === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(headquarters)}</span></td>
-        <td class="px-5 py-3"><span class="${salesOffice === '-' ? 'text-[#86909c]' : ''}">${this.escapeHtml(salesOffice)}</span></td>
-        <td class="px-5 py-3 text-amber-700">
-          <div class="truncate max-w-[220px]" title="${this.escapeHtml(abnormalReason)}">${this.escapeHtml(abnormalReason)}</div>
-        </td>
-        <td class="px-5 py-3"><span class="inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${stashStatus === '营业担当处理中' ? 'border-blue-100 bg-blue-50 text-brand' : 'border-amber-100 bg-amber-50 text-amber-700'}">${this.escapeHtml(this.getStashDisplayStatus(key))}</span></td>
+        <td class="px-4 py-3"><button type="button" class="ingestion-stash-preview-trigger truncate block max-w-[240px] text-brand hover:text-blue-700 hover:underline text-left transition-colors" data-index="${index}" data-email-id="${row.sourceEmailId || ''}" data-att-idx="${typeof row.sourceAttIdx === 'number' ? row.sourceAttIdx : ''}" title="预览 ${this.escapeHtml(deliveryFields.currentFileName)}">${this.escapeHtml(deliveryFields.currentFileName)}</button></td>
+        <td class="px-5 py-3 font-mono">${this.escapeHtml(deliveryFields.customerStoreNo)}</td>
+        <td class="px-5 py-3 font-mono">${this.escapeHtml(deliveryFields.rawTradeCode)}</td>
+        <td class="px-5 py-3"><span>${this.escapeHtml(deliveryFields.customerStoreName)}</span></td>
+        <td class="px-5 py-3">${this.escapeHtml(deliveryFields.salesTeam)}</td>
+        <td class="px-5 py-3">${this.escapeHtml(deliveryFields.region)}</td>
+        <td class="px-5 py-3">${this.escapeHtml(deliveryFields.salesOffice)}</td>
+        <td class="px-5 py-3">${this.escapeHtml(deliveryFields.acc)}</td>
+        <td class="px-5 py-3 font-mono text-brand"><span class="stash-edit-display">${this.escapeHtml(deliveryFields.orionTradeCode)}</span><input type="text" class="stash-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm font-mono bg-white focus:outline-none focus:border-brand" data-edit-field="orionStoreCode" value="${this.escapeHtml(deliveryFields.orionTradeCode === '-' ? '' : deliveryFields.orionTradeCode)}"></td>
+        <td class="px-5 py-3">${this.escapeHtml(deliveryFields.orionTradeName)}</td>
+        <td class="px-5 py-3 text-amber-700"><div class="truncate max-w-[240px]" title="${this.escapeHtml(abnormalReason)}">${this.escapeHtml(abnormalReason)}</div></td>
         <td class="px-5 py-3 font-medium text-[#1d2129]">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
         <td class="px-5 py-3 text-[#4e5969]">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
+        <td class="px-5 py-3"><span class="inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${stashStatus === '营业担当处理中' ? 'border-blue-100 bg-blue-50 text-brand' : 'border-amber-100 bg-amber-50 text-amber-700'}">${this.escapeHtml(this.getStashDisplayStatus(key))}</span></td>
         <td class="px-5 py-3 sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">
           <div class="flex items-center gap-1">
             ${this.hasIngestionPermission('单门店未匹配数据', '单据详情') ? `<button type="button" class="ingestion-stash-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-colors" data-stash-key="${this.escapeHtml(key)}" title="单据详情">
@@ -4614,30 +4678,34 @@ const IngestionView = {
 
     container.innerHTML = `
       <div class="ingestion-stash-table-shell animate-[fadeIn_0.22s_ease-out] min-h-full bg-white">
-        <table class="ingestion-stash-wide-table w-full table-fixed min-w-[1900px] text-left text-sm text-[#4e5969]">
+        <table class="ingestion-stash-wide-table w-full table-fixed min-w-[2940px] text-left text-sm text-[#4e5969]">
           <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
             <tr>
               <th class="px-4 py-4 w-[60px] rounded-tl-lg sticky left-0 z-30 bg-[#f7f8fa]"><input type="checkbox" id="ingestion-stash-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>
-              <th class="px-4 py-4 w-[176px] sticky left-[60px] z-30 bg-[#f7f8fa]">年月</th>
-              <th class="px-3 py-4 w-56 sticky left-[236px] z-30 bg-[#f7f8fa] shadow-[6px_0_10px_-10px_rgba(15,23,42,0.45)]">原始门店名称</th>
-              <th class="px-5 py-4 w-36">原始门店编码</th>
-              <th class="px-5 py-4 w-48">门店名称</th>
-              <th class="px-5 py-4 w-40">门店编码</th>
-              <th class="px-5 py-4 w-36">经销商</th>
-              <th class="px-5 py-4 w-28">ACC</th>
-              <th class="px-5 py-4 w-32">本部</th>
+              <th class="px-4 py-4 w-40">时间</th>
+              <th class="px-4 py-4 w-36">合作方ERP</th>
+              <th class="px-4 py-4 w-64">原始文件名</th>
+              <th class="px-4 py-4 w-64">当前文件名</th>
+              <th class="px-5 py-4 w-36">客户门店号</th>
+              <th class="px-5 py-4 w-40">客户交易处编码</th>
+              <th class="px-5 py-4 w-48">客户交易处名称</th>
+              <th class="px-5 py-4 w-36">营业Team</th>
+              <th class="px-5 py-4 w-32">区域</th>
               <th class="px-5 py-4 w-36">营业所</th>
-              <th class="px-5 py-4 w-56">异常原因</th>
-              <th class="px-5 py-4 w-40">状态</th>
+              <th class="px-5 py-4 w-24">ACC</th>
+              <th class="px-5 py-4 w-40">好丽友交易处编码</th>
+              <th class="px-5 py-4 w-48">好丽友交易处名称</th>
+              <th class="px-5 py-4 w-64">异常说明</th>
               <th class="px-5 py-4 w-32">当前责任人</th>
               <th class="px-5 py-4 w-32">最近操作人</th>
+              <th class="px-5 py-4 w-32">状态</th>
               <th class="px-5 py-4 w-28 rounded-tr-lg sticky right-0 z-30 bg-[#f7f8fa] shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">操作</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
             ${rows.length === 0 ? `
               <tr>
-                <td colspan="15" class="px-4 py-16 text-center text-[#86909c]">
+                <td colspan="19" class="px-4 py-16 text-center text-[#86909c]">
                   <i class="fa-regular fa-folder-open text-3xl mb-3 block text-gray-300"></i>
                   暂无暂存数据
                 </td>
@@ -4836,18 +4904,44 @@ const IngestionView = {
           return;
         }
 
-        const storeNameInput = rowElement.querySelector('[data-edit-field="storeName"]');
-        if (!storeNameInput?.value.trim()) {
-          storeNameInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
-          storeNameInput?.focus();
-          Dialog.toast('请输入原始门店名称', 'warning');
+        const partnerErpInput = rowElement.querySelector('[data-edit-field="partnerErp"]');
+        const tradeCodeInput = rowElement.querySelector('[data-edit-field="orionStoreCode"]');
+        if (!partnerErpInput?.value.trim()) {
+          partnerErpInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
+          partnerErpInput?.focus();
+          Dialog.toast('请输入合作方ERP', 'warning');
+          return;
+        }
+        const tradeCode = tradeCodeInput?.value.trim().toUpperCase() || '';
+        if (!tradeCode) {
+          tradeCodeInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
+          tradeCodeInput?.focus();
+          Dialog.toast('请输入好丽友交易处编码', 'warning');
+          return;
+        }
+        const tradeRecord = this.getOrionTradeMasterRecord(tradeCode);
+        if (!tradeRecord) {
+          tradeCodeInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
+          tradeCodeInput?.focus();
+          Dialog.toast('未匹配到对应交易处，请检查编码', 'warning');
           return;
         }
         const edits = {};
         inputs.forEach(input => {
           if (input.dataset.editField && input.dataset.editField !== 'handler') edits[input.dataset.editField] = input.value.trim();
         });
+        edits.partnerErp = partnerErpInput.value.trim();
+        edits.orionStoreCode = tradeCode;
+        if (tradeCode !== String(deliveryFields.orionTradeCode || '').trim().toUpperCase()) {
+          Object.assign(edits, this.getTradeMasterEdits(tradeRecord));
+        }
         this.stashEdits.set(key, edits);
+        this.saveStashWorkflow(key, {
+          lastOperatorName: Store.getState().userName || '系统',
+          lastOperatorRole: Store.getState().userRole || '系统',
+          lastAction: '编辑单据',
+          lastOperatedAt: this.formatNowDateTime()
+        });
         this.renderStashTable();
         Dialog.toast('已保存', 'success');
       });
@@ -5439,11 +5533,49 @@ const IngestionView = {
             firstInput?.focus();
             firstInput?.select();
           } else {
+            if (!rowData || this.getMatchedQualityStatus(rowData) === '已质检' || !this.canEditMatchedRow(rowData)) {
+              Dialog.toast('该单据已完成质检或状态已变化，不可保存', 'warning');
+              this.renderTable();
+              return;
+            }
+            const partnerErpInput = row.querySelector('[data-edit-field="partnerErp"]');
+            const tradeCodeInput = row.querySelector('[data-edit-field="orionStoreCode"]');
+            if (!partnerErpInput?.value.trim()) {
+              partnerErpInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
+              partnerErpInput?.focus();
+              Dialog.toast('请输入合作方ERP', 'warning');
+              return;
+            }
+            const tradeCode = tradeCodeInput?.value.trim().toUpperCase() || '';
+            if (!tradeCode) {
+              tradeCodeInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
+              tradeCodeInput?.focus();
+              Dialog.toast('请输入好丽友交易处编码', 'warning');
+              return;
+            }
+            const tradeRecord = this.getOrionTradeMasterRecord(tradeCode);
+            if (!tradeRecord) {
+              tradeCodeInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
+              tradeCodeInput?.focus();
+              Dialog.toast('未匹配到对应交易处，请检查编码', 'warning');
+              return;
+            }
             const edits = {};
             editableInputs.forEach(input => {
               const field = input.dataset.editField;
               const value = input.value.trim();
               if (field && value) edits[field] = value;
+            });
+            edits.partnerErp = partnerErpInput.value.trim();
+            edits.orionStoreCode = tradeCode;
+            if (tradeCode !== String(this.getStoreDeliveryFields(rowData).orionTradeCode || '').trim().toUpperCase()) {
+              Object.assign(edits, this.getTradeMasterEdits(tradeRecord));
+            }
+            Object.assign(edits, {
+              lastOperatorName: Store.getState().userName || '系统',
+              lastOperatorRole: Store.getState().userRole || '系统',
+              lastAction: '编辑单据',
+              lastOperatedAt: this.formatNowDateTime()
             });
             if (edits.rawStoreCode) edits.storeCode = edits.rawStoreCode;
             
@@ -5462,6 +5594,7 @@ const IngestionView = {
               }
               return r;
             });
+            this.saveWorkflowState();
             
             // 保存并回到只读态
             icon.className = 'fa-solid fa-pen-to-square row-edit-icon';

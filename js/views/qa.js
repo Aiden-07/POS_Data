@@ -5,6 +5,7 @@ const QAView = {
   exceptionDisplayMode: 'detail',
   rejectedStoreCodes: new Set(),
   approvedStandardStoreCodes: new Set(),
+  standardProductEdits: new Map(),
   confidenceFilter: {
     preset: ''
   },
@@ -86,7 +87,10 @@ const QAView = {
       const res = await fetch('data/qa_conflicts_mock.json?v=20260611-qa-exception-reject-stash');
       this.data = await res.json();
       const saved = this.loadWorkflowState();
-      this.data.forEach((row) => Object.assign(row, saved[row.id] || {}));
+      this.data.forEach((row) => {
+        Object.assign(row, saved[row.id] || {});
+        if (!row.uploadUser) row.uploadUser = this.getRejectAssignee(this.getRejectTeam(row)).user;
+      });
       this.renderTable();
     } catch (e) {
       console.error('Failed to load QA data', e);
@@ -382,14 +386,14 @@ const QAView = {
               </button>
               <button type="button" id="qa-standard-display-toggle"
                 class="w-10 h-10 rounded-lg border border-blue-100 bg-blue-50 text-brand hover:bg-blue-100 hover:border-blue-200 transition-all flex items-center justify-center"
-                title="${this.standardDisplayMode === 'table' ? '表格' : '明细数据'}"
-                aria-label="${this.standardDisplayMode === 'table' ? '当前为表格展示，点击切换为明细数据' : '当前为明细数据展示，点击切换为表格'}">
+                title="${this.standardDisplayMode === 'table' ? '门店视图' : '产品视图'}"
+                aria-label="${this.standardDisplayMode === 'table' ? '当前为门店视图，点击切换为产品视图' : '当前为产品视图，点击切换为门店视图'}">
                 <i id="qa-standard-display-toggle-icon" class="fa-solid ${this.standardDisplayMode === 'table' ? 'fa-table-cells-large' : 'fa-list-ul'}"></i>
               </button>
               <button type="button" id="qa-exception-display-toggle"
                 class="hidden w-10 h-10 rounded-lg border border-blue-100 bg-blue-50 text-brand hover:bg-blue-100 hover:border-blue-200 transition-all flex items-center justify-center"
-                title="${this.exceptionDisplayMode === 'detail' ? '明细数据' : '文件数据'}"
-                aria-label="${this.exceptionDisplayMode === 'detail' ? '当前为明细数据展示，点击切换为文件数据' : '当前为文件数据展示，点击切换为明细数据'}">
+                title="${this.exceptionDisplayMode === 'detail' ? '产品视图' : '门店视图'}"
+                aria-label="${this.exceptionDisplayMode === 'detail' ? '当前为产品视图，点击切换为门店视图' : '当前为门店视图，点击切换为产品视图'}">
                 <i id="qa-exception-display-toggle-icon" class="fa-solid ${this.exceptionDisplayMode === 'detail' ? 'fa-list-ul' : 'fa-table-cells-large'}"></i>
               </button>
             </div>
@@ -607,7 +611,7 @@ const QAView = {
     }
     row.dataset.editing = 'true';
     const originalHtml = row.innerHTML;
-    const allowedDocumentFields = new Set(['storeName', 'storeCode', 'dealer']);
+    const allowedDocumentFields = new Set(['partnerErp', 'orionTradeCode', 'orionProductCode']);
     const editableCells = Array.from(row.querySelectorAll('[data-edit-field]'))
       .filter(cell => allowedDocumentFields.has(cell.dataset.editField));
     const actionCell = button.closest('td');
@@ -672,40 +676,40 @@ const QAView = {
         row.querySelectorAll('.qa-inline-input').forEach(input => {
           values[input.dataset.field] = input.value.trim();
         });
-        if (values.headquarters !== undefined && !values.salesOffice) {
-          if (typeof Dialog !== 'undefined') Dialog.toast('请选择营业所', 'warning');
+        if (Object.values(values).some(value => !value)) {
+          Dialog.toast('编辑字段不能为空', 'warning');
           return;
         }
-        if (values.salesOffice !== undefined && !values.dealer) {
-          if (typeof Dialog !== 'undefined') Dialog.toast('请选择经销商', 'warning');
+        const tradeRecord = values.orionTradeCode !== undefined ? this.getQaTradeMasterRecord(values.orionTradeCode) : null;
+        if (values.orionTradeCode !== undefined && !tradeRecord) {
+          Dialog.toast('好丽友交易处编码不存在，请输入有效编码', 'warning');
           return;
         }
-        editableCells.forEach((cell) => {
-          const field = cell.dataset.editField;
-          const value = values[field] || '-';
-          cell.dataset.editValue = value;
-          const displayValue = ['amount', 'cost', 'retailPrice'].includes(field) && value !== '-' && !String(value).startsWith('￥') ? `￥${value}` : value;
-          cell.innerHTML = field === 'storeName'
-            ? this.renderStorePreviewTrigger(button.dataset.scope, value, button.dataset.index, button.dataset.id)
-            : this.renderEditableText(displayValue, 'qa-inline-display', displayValue);
-        });
+        const productRecord = values.orionProductCode !== undefined ? this.getQaProductMasterRecord(values.orionProductCode) : null;
+        if (values.orionProductCode !== undefined && !productRecord) {
+          Dialog.toast('好丽友产品编码不存在，请输入有效编码', 'warning');
+          return;
+        }
+        const actor = Store?.getState?.() || {};
+        const operatedAt = new Date().toLocaleString();
         if (button.dataset.scope === 'exception') {
           const target = this.data.find(item => item.id === button.dataset.id);
           if (target) {
             const relatedRows = this.data.filter(item => item.id === target.id || (target.storeCode && item.storeCode === target.storeCode));
-            Object.entries(values).forEach(([field, value]) => {
-              relatedRows.forEach((item) => {
-                if (field === 'yearMonth') item.yearMonth = value;
-                else if (field === 'workflowStatus') item.workflowStatus = value;
-                else if (field === 'mainConflictType') item.conflictType = value;
-                else if (field === 'headquarters') {
-                  item.headquarters = value;
-                  item.salesTeam = this.normalizeHeadquarterToTeam(value);
-                  item.region = this.normalizeHeadquarterToRegion(value);
-                }
-                else item[field] = value;
-              });
+            relatedRows.forEach((item) => {
+              if (values.partnerErp !== undefined) item.partnerErp = values.partnerErp;
+              if (tradeRecord) this.applyQaTradeMaster(item, tradeRecord);
+              item.lastOperatorName = actor.userName || '系统';
+              item.lastOperatorRole = actor.userRole || '系统';
+              item.lastAction = '编辑单据';
+              item.lastOperatedAt = operatedAt;
             });
+            if (productRecord) Object.assign(target, {
+              orionProductCode: productRecord.code,
+              orionBarcode: productRecord.barcode,
+              orionProductName: productRecord.name
+            });
+            this.saveWorkflowState();
           }
           row.dataset.editing = 'false';
           if (typeof Dialog !== 'undefined') Dialog.toast('已保存当前行', 'success');
@@ -714,14 +718,22 @@ const QAView = {
         } else if (button.dataset.scope === 'standard') {
           const target = this.standardData[Number(button.dataset.index)];
           if (target) {
-            ['acc', 'dealer', 'storeCode', 'storeName', 'headquarters', 'salesOffice'].forEach(field => {
-              if (values[field] !== undefined) target[field] = values[field];
+            if (values.partnerErp !== undefined) target.partnerErp = values.partnerErp;
+            if (tradeRecord) this.applyQaTradeMaster(target, tradeRecord);
+            if (productRecord && row.dataset.productKey) this.standardProductEdits.set(row.dataset.productKey, {
+              orionProductCode: productRecord.code,
+              orionBarcode: productRecord.barcode,
+              orionProductName: productRecord.name
             });
-            if (values.headquarters !== undefined) {
-              target.salesTeam = this.normalizeHeadquarterToTeam(values.headquarters);
-              target.region = this.normalizeHeadquarterToRegion(values.headquarters);
-            }
+            this.saveStandardWorkflow(target, {
+              lastOperatorName: actor.userName || '系统', lastOperatorRole: actor.userRole || '系统',
+              lastAction: '编辑单据', lastOperatedAt: operatedAt
+            });
           }
+          row.dataset.editing = 'false';
+          if (typeof Dialog !== 'undefined') Dialog.toast('已保存当前行', 'success');
+          this.renderStandardTable();
+          return;
         }
         row.dataset.editing = 'false';
         if (actionCell) {
@@ -810,9 +822,180 @@ const QAView = {
     this.renderQaSearchFieldDropdown();
   },
 
+  formatQaStoreMonth(value = '') {
+    const match = String(value || '').match(/(\d{4})\D?(\d{1,2})/);
+    if (!match) return '2026年05月';
+    return `${match[1]}年${String(match[2]).padStart(2, '0')}月`;
+  },
+
+  formatQaProductDate(value = '', seed = 0) {
+    const match = String(value || '').match(/(\d{4})\D?(\d{1,2})(?:\D+(\d{1,2}))?/);
+    const year = match?.[1] || '2026';
+    const month = Number(match?.[2] || 5);
+    const day = match?.[3] ? Number(match[3]) : new Date(Number(year), month, 0).getDate();
+    return `${year}年${String(month).padStart(2, '0')}月${String(day).padStart(2, '0')}日`;
+  },
+
+  getQaBusinessFields(row = {}, index = 0) {
+    const dealer = row.dealer || '-';
+    const partnerErp = row.partnerErp || (dealer !== '-' ? String(dealer).replace(/有限公司|商贸|商业|集团/g, '') : '-');
+    const stableSeed = String(row.storeCode || row.storeName || index || 0)
+      .split('')
+      .reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    const tradeCode = row.orionTradeCode || row.matchedStoreCode || `C${String(9001000 + stableSeed % 9000).padStart(7, '0')}`;
+    return {
+      storeMonth: this.formatQaStoreMonth(row.yearMonth || row.month || '2026-05'),
+      productDate: this.formatQaProductDate(row.transactionDate || row.date || row.yearMonth || row.month || '2026-05', index),
+      partnerErp,
+      customerStoreNo: row.customerStoreNo || row.storeCode || '-',
+      dealer,
+      acc: this.getQaAccName(row, index),
+      tradeCode,
+      tradeName: row.orionTradeName || row.matchedStoreName || row.storeName || '-',
+      abnormalDescription: row.abnormalDescription || row.remark || row.aiJudgment || '-'
+    };
+  },
+
+  getQaProductFields(detail = {}, row = {}, index = 0) {
+    const barcode = detail.barcode || row.barcode || '-';
+    const productName = detail.productName || row.productName || '-';
+    return {
+      customerProductCode: detail.customerProductCode || row.customerProductCode || `CP${String(100000 + index).padStart(6, '0')}`,
+      customerProductName: detail.customerProductName || row.customerProductName || productName.replace(/^好丽友/, '') || '-',
+      customerBarcode: detail.customerBarcode || row.customerBarcode || barcode,
+      orionProductCode: detail.orionProductCode || row.orionProductCode || `A${String(6678000 + index * 37).padStart(7, '0')}`,
+      orionBarcode: detail.orionBarcode || row.orionBarcode || barcode,
+      orionProductName: detail.orionProductName || row.orionProductName || productName
+    };
+  },
+
+  getQaBusinessColumnWidth(header = '') {
+    return ({
+      时间: 128, 合作方ERP: 150, 客户门店号: 140, 经销商: 170, ACC: 110,
+      好丽友交易处编码: 170, 好丽友交易处名称: 220,
+      客户产品号: 150, 客户产品名称: 220, 客户条形码: 170,
+      好丽友产品编码: 170, 好丽友条形码: 170, 好丽友产品名称: 240,
+      销售数量: 110, 销售金额: 120, 销售成本: 120, 零售单价: 100,
+      异常说明: 280, 当前责任人: 130, 最近操作人: 130, 状态: 100, 操作: 150
+    })[header] || 144;
+  },
+
+  renderQaBusinessColGroup(headers = []) {
+    return `<colgroup><col style="width:48px">${headers.map(header => `<col style="width:${this.getQaBusinessColumnWidth(header)}px">`).join('')}</colgroup>`;
+  },
+
+  getQaBusinessTableWidth(headers = []) {
+    return 48 + headers.reduce((sum, header) => sum + this.getQaBusinessColumnWidth(header), 0);
+  },
+
+  getQaBusinessHeaderClass(header = '', index = 0, total = 0) {
+    const numeric = ['销售数量', '销售金额', '销售成本', '零售单价'].includes(header);
+    const centered = ['异常说明', '状态', '操作'].includes(header);
+    return `px-4 py-3 align-middle whitespace-nowrap ${numeric ? 'text-right tabular-nums' : centered ? 'text-center' : 'text-left'} ${index === total - 1 ? 'rounded-tr-lg' : ''}`;
+  },
+
+  formatQaMetric(value, decimals = 2) {
+    if (value === '' || value === null || value === undefined || value === '-') return '-';
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric.toFixed(decimals) : String(value);
+  },
+
+  getQaTradeMasterRecord(code = '') {
+    const normalized = String(code || '').trim().toUpperCase();
+    const index = this.standardData.findIndex((row, rowIndex) => this.getQaBusinessFields(row, rowIndex).tradeCode.toUpperCase() === normalized);
+    if (index < 0) return null;
+    const row = this.standardData[index];
+    const fields = this.getQaBusinessFields(row, index);
+    return { code: normalized, name: fields.tradeName, dealer: fields.dealer, acc: fields.acc, salesTeam: row.salesTeam, region: row.region, salesOffice: row.salesOffice };
+  },
+
+  getQaProductMasterRecord(code = '') {
+    const normalized = String(code || '').trim().toUpperCase();
+    const sample = this.standardData[0] || {};
+    for (const [index, detail] of this.getStandardPreviewRows(sample).entries()) {
+      const product = this.getQaProductFields(detail, sample, index);
+      if (String(product.orionProductCode).toUpperCase() === normalized) return { code: normalized, barcode: product.orionBarcode, name: product.orionProductName };
+    }
+    return null;
+  },
+
+  applyQaTradeMaster(target = {}, record = {}) {
+    Object.assign(target, {
+      orionTradeCode: record.code, orionTradeName: record.name,
+      dealer: record.dealer, acc: record.acc, salesTeam: record.salesTeam,
+      region: record.region, salesOffice: record.salesOffice
+    });
+  },
+
+  renderStandardBusinessViews(container) {
+    const rows = this.getFilteredStandardData();
+    const isProductView = this.standardDisplayMode === 'detail';
+    const body = isProductView
+      ? rows.flatMap(({ row, index }) => this.getStandardPreviewRows(row).map((detail, detailIndex) => {
+          const business = this.getQaBusinessFields(row, index);
+          const productEditKey = `${row.storeCode}:${detailIndex}`;
+          const product = this.getQaProductFields({ ...detail, ...(this.standardProductEdits.get(productEditKey) || {}) }, row, detailIndex);
+          const responsibility = this.getStandardResponsibility(row);
+          return `<tr class="hover:bg-slate-50 transition-colors" data-product-index="${detailIndex}" data-product-key="${this.escapeHtml(productEditKey)}">
+            <td class="px-4 py-3"><input type="checkbox" class="row-cb-qa-standard rounded border-gray-300 text-brand focus:ring-brand disabled:opacity-40" value="${this.escapeHtml(row.storeCode)}" ${this.canSelectStandard(row) ? '' : 'disabled'}></td>
+            <td class="px-4 py-3 whitespace-nowrap">${business.productDate}</td>
+            <td class="px-4 py-3" data-edit-field="partnerErp" data-edit-value="${this.escapeHtml(business.partnerErp)}">${this.escapeHtml(business.partnerErp)}</td>
+            <td class="px-4 py-3 font-mono">${this.escapeHtml(business.customerStoreNo)}</td>
+            <td class="px-4 py-3">${this.escapeHtml(business.dealer)}</td>
+            <td class="px-4 py-3">${this.escapeHtml(business.acc)}</td>
+            <td class="px-4 py-3 font-mono" data-edit-field="orionTradeCode" data-edit-value="${this.escapeHtml(business.tradeCode)}">${this.escapeHtml(business.tradeCode)}</td>
+            <td class="px-4 py-3 align-middle"><button type="button" class="qa-standard-preview-trigger block w-full max-w-full truncate text-left text-brand hover:underline" data-index="${index}" title="${this.escapeHtml(business.tradeName)}">${this.escapeHtml(business.tradeName)}</button></td>
+            <td class="px-4 py-3 font-mono">${this.escapeHtml(product.customerProductCode)}</td>
+            <td class="px-4 py-3 truncate" title="${this.escapeHtml(product.customerProductName)}">${this.escapeHtml(product.customerProductName)}</td>
+            <td class="px-4 py-3 font-mono">${this.escapeHtml(product.customerBarcode)}</td>
+            <td class="px-4 py-3 font-mono" data-edit-field="orionProductCode" data-edit-value="${this.escapeHtml(product.orionProductCode)}">${this.escapeHtml(product.orionProductCode)}</td>
+            <td class="px-4 py-3 font-mono">${this.escapeHtml(product.orionBarcode)}</td>
+            <td class="px-4 py-3 truncate" title="${this.escapeHtml(product.orionProductName)}">${this.escapeHtml(product.orionProductName)}</td>
+            <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(detail.quantity, 0))}</td>
+            <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(detail.amount))}</td>
+            <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(detail.cost))}</td>
+            <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(detail.retailPrice))}</td>
+            <td class="px-4 py-3 align-middle text-center text-[#86909c]"><span class="inline-flex min-h-6 items-center justify-center">-</span></td>
+            <td class="px-4 py-3 font-medium">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
+            <td class="px-4 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
+            <td class="px-4 py-3 text-center">${this.renderStandardStatusBadge(row)}</td>
+            <td class="px-4 py-3 text-center">${this.renderQaActionButtons({ scope: 'standard', index })}</td>
+          </tr>`;
+        }))
+      : rows.map(({ row, index }) => {
+          const business = this.getQaBusinessFields(row, index);
+          const responsibility = this.getStandardResponsibility(row);
+          return `<tr class="hover:bg-slate-50 transition-colors">
+            <td class="px-4 py-3"><input type="checkbox" class="row-cb-qa-standard rounded border-gray-300 text-brand focus:ring-brand disabled:opacity-40" value="${this.escapeHtml(row.storeCode)}" ${this.canSelectStandard(row) ? '' : 'disabled'}></td>
+            <td class="px-4 py-3 whitespace-nowrap">${business.storeMonth}</td>
+            <td class="px-4 py-3" data-edit-field="partnerErp" data-edit-value="${this.escapeHtml(business.partnerErp)}">${this.escapeHtml(business.partnerErp)}</td>
+            <td class="px-4 py-3 font-mono">${this.escapeHtml(business.customerStoreNo)}</td>
+            <td class="px-4 py-3">${this.escapeHtml(business.dealer)}</td>
+            <td class="px-4 py-3">${this.escapeHtml(business.acc)}</td>
+            <td class="px-4 py-3 font-mono" data-edit-field="orionTradeCode" data-edit-value="${this.escapeHtml(business.tradeCode)}">${this.escapeHtml(business.tradeCode)}</td>
+            <td class="px-4 py-3 align-middle"><button type="button" class="qa-standard-preview-trigger block w-full max-w-full truncate text-left text-brand hover:underline" data-index="${index}" title="${this.escapeHtml(business.tradeName)}">${this.escapeHtml(business.tradeName)}</button></td>
+            <td class="px-4 py-3 align-middle text-center text-[#86909c]"><span class="inline-flex min-h-6 items-center justify-center">-</span></td>
+            <td class="px-4 py-3 font-medium">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
+            <td class="px-4 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
+            <td class="px-4 py-3 text-center">${this.renderStandardStatusBadge(row)}</td>
+            <td class="px-4 py-3 text-center">${this.renderQaActionButtons({ scope: 'standard', index })}</td>
+          </tr>`;
+        });
+    const headers = isProductView
+      ? ['时间','合作方ERP','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','客户产品号','客户产品名称','客户条形码','好丽友产品编码','好丽友条形码','好丽友产品名称','销售数量','销售金额','销售成本','零售单价','异常说明','当前责任人','最近操作人','状态','操作']
+      : ['时间','合作方ERP','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','异常说明','当前责任人','最近操作人','状态','操作'];
+    const count = isProductView ? body.length : rows.length;
+    container.innerHTML = `<div class="animate-[fadeIn_0.22s_ease-out] flex min-h-0 flex-1 flex-col"><div class="min-h-0 flex-1 overflow-auto"><table class="table-fixed text-left text-sm text-[#4e5969]" style="width:${this.getQaBusinessTableWidth(headers)}px;min-width:100%;">${this.renderQaBusinessColGroup(headers)}<thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10"><tr><th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="qa-standard-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>${headers.map((header, index) => `<th class="${this.getQaBusinessHeaderClass(header, index, headers.length)}">${header}</th>`).join('')}</tr></thead><tbody id="qa-standard-tbody" class="divide-y divide-gray-100">${body.length ? body.join('') : `<tr><td colspan="${headers.length + 1}" class="px-4 py-16 text-center text-[#86909c]">暂无符合条件的${isProductView ? '产品' : '门店'}数据</td></tr>`}</tbody></table></div>${this.renderQaTableSummary(count)}</div>`;
+    this.bindStandardSelectionEvents();
+    this.bindStandardPreviewEvents();
+    this.bindQaInlineEditEvents();
+    this.updateStandardDisplayToggle();
+  },
+
   renderStandardTable() {
     const container = document.getElementById('qa-standard-container');
     if (!container) return;
+    return this.renderStandardBusinessViews(container);
     const rows = this.getFilteredStandardData();
     const modeClass = 'animate-[fadeIn_0.22s_ease-out]';
 
@@ -1294,14 +1477,21 @@ const QAView = {
 
   getExceptionResponsibility(row = {}) {
     const status = this.getExceptionStatus(row);
-    let currentOwnerType = row.currentOwnerType || (status === '营业担当处理中' ? 'sales' : 'pos');
-    let currentOwnerName = row.currentOwnerName;
-    if (!currentOwnerName) {
-      if (status === '已通过') currentOwnerName = '-';
-      else if (currentOwnerType === 'sales') currentOwnerName = row.currentOwnerTeam || this.getRejectTeam(row);
-      else currentOwnerName = 'POS担当';
+    if (status === '待处理') return { currentOwnerType: 'pos', currentOwnerName: 'POS担当', lastOperatorName: '系统' };
+    if (status === '营业担当处理中') {
+      const assignee = this.getRejectAssignee(row.currentOwnerTeam || this.getRejectTeam(row));
+      return {
+        currentOwnerType: 'sales',
+        currentOwnerName: row.currentOwnerUserName || assignee.user,
+        lastOperatorName: row.uploadUser || row.uploader || row.provider || assignee.user
+      };
     }
-    return { currentOwnerType, currentOwnerName, lastOperatorName: row.lastOperatorName || row.salesSubmittedBy || row.rejectedBy || row.approvedBy || '系统' };
+    if (status === 'POS担当待处理') return {
+      currentOwnerType: 'pos',
+      currentOwnerName: 'POS担当',
+      lastOperatorName: row.salesSubmittedBy || row.lastOperatorName || '营业担当'
+    };
+    return { currentOwnerType: 'none', currentOwnerName: '-', lastOperatorName: row.approvedBy || row.lastOperatorName || '系统' };
   },
 
   hasExceptionEditPermission() {
@@ -1557,9 +1747,64 @@ const QAView = {
     }).join('');
   },
 
+  renderExceptionBusinessViews(container) {
+    const filteredData = this.getFilteredExceptionData();
+    const isProductView = this.exceptionDisplayMode === 'detail';
+    const groupedRows = this.getGroupedExceptionRows(filteredData);
+    const sourceRows = isProductView ? filteredData : groupedRows;
+    const body = sourceRows.map((row, index) => {
+      const matched = this.standardData.find(item => item.storeCode === row.storeCode || item.storeName === row.storeName) || {};
+      const source = { ...matched, ...row, dealer: row.dealer || matched.dealer };
+      const business = this.getQaBusinessFields(source, index);
+      const status = this.getExceptionStatus(row);
+      const responsibility = this.getExceptionResponsibility(row);
+      const selectable = this.canSelectExceptionRow(row);
+      const id = isProductView ? row.id : row.representativeId;
+      const common = `
+        <td class="px-4 py-3"><input type="checkbox" class="row-cb-qa rounded border-gray-300 text-brand focus:ring-brand disabled:opacity-40" value="${this.escapeHtml(id)}" data-status="${status}" ${selectable ? '' : 'disabled'}></td>
+        <td class="px-4 py-3 whitespace-nowrap">${isProductView ? business.productDate : business.storeMonth}</td>
+        <td class="px-4 py-3" data-edit-field="partnerErp" data-edit-value="${this.escapeHtml(business.partnerErp)}">${this.escapeHtml(business.partnerErp)}</td>
+        <td class="px-4 py-3 font-mono">${this.escapeHtml(business.customerStoreNo)}</td>
+        <td class="px-4 py-3">${this.escapeHtml(business.dealer)}</td>
+        <td class="px-4 py-3">${this.escapeHtml(business.acc)}</td>
+        <td class="px-4 py-3 font-mono" data-edit-field="orionTradeCode" data-edit-value="${this.escapeHtml(business.tradeCode)}">${this.escapeHtml(business.tradeCode)}</td>
+        <td class="px-4 py-3 align-middle"><button type="button" class="qa-exception-preview-trigger block w-full max-w-full truncate text-left text-brand hover:underline" data-id="${this.escapeHtml(id)}" title="${this.escapeHtml(business.tradeName)}">${this.escapeHtml(business.tradeName)}</button></td>`;
+      const product = this.getQaProductFields(row, source, index);
+      const productCells = isProductView ? `
+        <td class="px-4 py-3 font-mono">${this.escapeHtml(product.customerProductCode)}</td>
+        <td class="px-4 py-3 truncate" title="${this.escapeHtml(product.customerProductName)}">${this.escapeHtml(product.customerProductName)}</td>
+        <td class="px-4 py-3 font-mono">${this.escapeHtml(product.customerBarcode)}</td>
+        <td class="px-4 py-3 font-mono" data-edit-field="orionProductCode" data-edit-value="${this.escapeHtml(product.orionProductCode)}">${this.escapeHtml(product.orionProductCode)}</td>
+        <td class="px-4 py-3 font-mono">${this.escapeHtml(product.orionBarcode)}</td>
+        <td class="px-4 py-3 truncate" title="${this.escapeHtml(product.orionProductName)}">${this.escapeHtml(product.orionProductName)}</td>
+        <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(row.quantity, 0))}</td>
+        <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(row.amount))}</td>
+        <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(row.cost))}</td>
+        <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(row.retailPrice))}</td>` : '';
+      const abnormal = row.remark || row.aiJudgment || row.abnormalDescription || '-';
+      return `<tr class="hover:bg-slate-50 transition-colors">${common}${productCells}
+        <td class="px-4 py-3 align-middle ${abnormal === '-' ? 'text-center text-[#86909c]' : 'text-left text-amber-700'}" title="${this.escapeHtml(abnormal)}"><span class="${abnormal === '-' ? 'inline-flex min-h-6 items-center justify-center' : 'block w-full truncate'}">${this.escapeHtml(abnormal)}</span></td>
+        <td class="px-4 py-3 font-medium">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
+        <td class="px-4 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
+        <td class="px-4 py-3 text-center">${this.getExceptionStatusBadge(status)}</td>
+        <td class="px-4 py-3 text-center">${this.renderQaActionButtons({ scope: 'exception', id, row, hideDetail: isProductView })}</td>
+      </tr>`;
+    });
+    const headers = isProductView
+      ? ['时间','合作方ERP','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','客户产品号','客户产品名称','客户条形码','好丽友产品编码','好丽友条形码','好丽友产品名称','销售数量','销售金额','销售成本','零售单价','异常说明','当前责任人','最近操作人','状态','操作']
+      : ['时间','合作方ERP','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','异常说明','当前责任人','最近操作人','状态','操作'];
+    container.innerHTML = `<div class="flex-1 min-h-0 overflow-auto"><table class="table-fixed text-left text-sm text-[#4e5969]" style="width:${this.getQaBusinessTableWidth(headers)}px;min-width:100%;">${this.renderQaBusinessColGroup(headers)}<thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10"><tr><th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="qa-exception-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>${headers.map((header, index) => `<th class="${this.getQaBusinessHeaderClass(header, index, headers.length)}">${header}</th>`).join('')}</tr></thead><tbody id="qa-tbody" class="divide-y divide-gray-100">${body.length ? body.join('') : `<tr><td colspan="${headers.length + 1}" class="px-4 py-16 text-center text-[#86909c]">暂无符合条件的${isProductView ? '产品' : '门店'}异常数据</td></tr>`}</tbody></table></div>${this.renderQaTableSummary(body.length)}`;
+    this.bindTableEvents();
+    this.bindExceptionEvents();
+    this.bindExceptionSelectionEvents();
+    this.bindQaInlineEditEvents();
+    this.updateExceptionDisplayToggle();
+  },
+
   renderExceptionTable() {
     const container = document.getElementById('qa-exception-container');
     if (!container) return;
+    return this.renderExceptionBusinessViews(container);
 
     const filteredData = this.getFilteredExceptionData();
     const isDetailMode = this.exceptionDisplayMode === 'detail';
@@ -1867,9 +2112,6 @@ const QAView = {
               <p class="text-xs text-[#86909c] mt-1">${row.storeName} · ${row.storeCode} · 点击编辑后可修改单元格</p>
             </div>
             <div class="flex items-center gap-2">
-              <button type="button" id="qa-standard-preview-edit" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-blue-50 hover:text-brand transition-colors" title="编辑">
-                <i class="fa-solid fa-pen-to-square"></i>
-              </button>
               <button type="button" id="qa-standard-preview-fullscreen" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="全屏">
                 <i class="fa-solid fa-expand"></i>
               </button>
@@ -1952,9 +2194,6 @@ const QAView = {
               <p class="text-xs text-[#86909c] mt-1">${row.storeName} · ${row.storeCode} · 左侧原始门店数据，右侧当前标准门店数据</p>
             </div>
             <div class="flex items-center gap-2">
-              <button type="button" id="qa-standard-preview-edit" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-blue-50 hover:text-brand transition-colors" title="编辑">
-                <i class="fa-solid fa-pen-to-square"></i>
-              </button>
               <button type="button" id="qa-standard-preview-fullscreen" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="全屏">
                 <i class="fa-solid fa-expand"></i>
               </button>
@@ -2030,9 +2269,6 @@ const QAView = {
               <p class="text-xs text-[#86909c] mt-1">${matched.storeName || '-'} · ${matched.storeCode || '-'} · 仅展示原始门店数据</p>
             </div>
             <div class="flex items-center gap-2">
-              <button type="button" id="qa-standard-preview-edit" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-blue-50 hover:text-brand transition-colors" title="编辑">
-                <i class="fa-solid fa-pen-to-square"></i>
-              </button>
               <button type="button" id="qa-standard-preview-fullscreen" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="全屏">
                 <i class="fa-solid fa-expand"></i>
               </button>
@@ -2097,9 +2333,6 @@ const QAView = {
               <p class="text-xs text-[#86909c] mt-1">${matched.storeName || '-'} · ${matched.storeCode || '-'} · 左侧原始数据，右侧异常数据</p>
             </div>
             <div class="flex items-center gap-2">
-              <button type="button" id="qa-standard-preview-edit" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-blue-50 hover:text-brand transition-colors" title="编辑">
-                <i class="fa-solid fa-pen-to-square"></i>
-              </button>
               <button type="button" id="qa-standard-preview-fullscreen" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="全屏">
                 <i class="fa-solid fa-expand"></i>
               </button>
@@ -2465,7 +2698,7 @@ const QAView = {
       this.rejectedStoreCodes.add(row.storeCode);
       this.updateExceptionStoreStatus(row, '营业担当处理中', {
         rejectNote,
-        currentOwnerName: rejectAssignee.label,
+        currentOwnerName: rejectAssignee.user,
         currentOwnerTeam: rejectAssignee.team,
         currentOwnerUserName: rejectAssignee.user,
         rejectedBy: Store.getState().userName || 'POS担当',
@@ -2764,8 +2997,8 @@ const QAView = {
     const icon = document.getElementById('qa-standard-display-toggle-icon');
     if (!button || !icon) return;
     const isTableMode = this.standardDisplayMode === 'table';
-    button.title = isTableMode ? '表格' : '明细数据';
-    button.setAttribute('aria-label', isTableMode ? '当前为表格展示，点击切换为明细数据' : '当前为明细数据展示，点击切换为表格');
+    button.title = isTableMode ? '门店视图' : '产品视图';
+    button.setAttribute('aria-label', isTableMode ? '当前为门店视图，点击切换为产品视图' : '当前为产品视图，点击切换为门店视图');
     icon.className = `fa-solid ${isTableMode ? 'fa-table-cells-large' : 'fa-list-ul'}`;
   },
 
@@ -2774,8 +3007,8 @@ const QAView = {
     const icon = document.getElementById('qa-exception-display-toggle-icon');
     if (!button || !icon) return;
     const isDetailMode = this.exceptionDisplayMode === 'detail';
-    button.title = isDetailMode ? '明细数据' : '文件数据';
-    button.setAttribute('aria-label', isDetailMode ? '当前为明细数据展示，点击切换为文件数据' : '当前为文件数据展示，点击切换为明细数据');
+    button.title = isDetailMode ? '产品视图' : '门店视图';
+    button.setAttribute('aria-label', isDetailMode ? '当前为产品视图，点击切换为门店视图' : '当前为门店视图，点击切换为产品视图');
     icon.className = `fa-solid ${isDetailMode ? 'fa-list-ul' : 'fa-table-cells-large'}`;
   },
   
