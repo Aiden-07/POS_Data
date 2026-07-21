@@ -2004,14 +2004,18 @@ const IngestionView = {
     detailRow.querySelectorAll('.inbox-att-detail-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
+        if (!self.hasIngestionPermission('文件箱', '查看') || !self.hasIngestionPermission('文件箱', '单据详情')) {
+          Dialog.toast('当前账号无单据详情权限', 'warning');
+          return;
+        }
         const emailId = btn.getAttribute('data-email-id');
         const attIdx = Number(btn.getAttribute('data-att-idx') || 0);
         const inboxItem = self.getInboxData().find(d => String(d.id) === String(emailId));
         const attachment = inboxItem?.attachments?.[attIdx];
         if (!inboxItem || !attachment) return;
         self.openDocumentDetail({
-          moduleName: self.getCurrentLang() === 'cn' ? '文件收取 - 收件箱' : '파일 수집 - 받은 편지함',
-          currentNode: self.getCurrentLang() === 'cn' ? '收件箱附件' : '받은 편지함 첨부',
+          moduleName: self.getCurrentLang() === 'cn' ? '文件收取 - 文件箱' : '파일 수집 - 받은 편지함',
+          currentNode: self.getCurrentLang() === 'cn' ? '文件箱附件' : '받은 편지함 첨부',
           title: attachment.name,
           nameLabel: self.getCurrentLang() === 'cn' ? '文件名称' : '파일명',
           statusText: attachment.status || inboxItem.statusText || '-',
@@ -2027,7 +2031,12 @@ const IngestionView = {
           attachment,
           attachmentIndex: attIdx,
           moduleFields: [
-            { label: self.getCurrentLang() === 'cn' ? '来源方式' : '출처 방식', value: attachment.sourceMethod || '-' },
+            { label: self.getCurrentLang() === 'cn' ? '单据标题' : '문서 제목', value: inboxItem.emailSubject || '-' },
+            { label: self.getCurrentLang() === 'cn' ? '上传用户' : '업로드 사용자', value: inboxItem.provider || '-' },
+            { label: self.getCurrentLang() === 'cn' ? '年月' : '년월', value: inboxItem.month || '-' },
+            { label: self.getCurrentLang() === 'cn' ? '附件名称' : '첨부 파일명', value: attachment.name || '-' },
+            { label: self.getCurrentLang() === 'cn' ? '文件版本' : '파일 버전', value: `V${attachment.version || 1}` },
+            { label: self.getCurrentLang() === 'cn' ? '上传时间' : '업로드 시간', value: attachment.uploadedAt || inboxItem.provideTime || '-' },
             { label: self.getCurrentLang() === 'cn' ? '异常说明' : '이상 설명', value: attachment.rejectReason || '-' }
           ]
         });
@@ -2212,7 +2221,8 @@ const IngestionView = {
       ? [{ attachment: options.attachment, index: typeof options.attachmentIndex === 'number' ? options.attachmentIndex : sourceAttachments.indexOf(options.attachment) }]
       : sourceAttachments.map((attachment, index) => ({ attachment, index }));
     if (!attachments.length) {
-      return `<div class="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-[#86909c]">${cn ? '暂无原始文件' : '원본 파일 없음'}</div>`;
+      const sourceName = String(inboxItem.emailSubject || 'POS原始数据').replace(/\.(xlsx|xls|csv|zip)$/i, '');
+      return this.renderFallbackSourceFile(`${sourceName}.xlsx`);
     }
 
     return attachments.map(({ attachment, index }) => {
@@ -2270,6 +2280,23 @@ const IngestionView = {
     `;
   },
 
+  getRequiredSourceFileName(context = {}, row = {}) {
+    const directName = context.sourceFileName
+      || row.sourceFileName
+      || row.originalFileName
+      || row.fileName
+      || row.currentFileName;
+    if (directName) return directName;
+    const partner = String(row.partnerErp || row.dealer || row.customerDealer || 'POS数据')
+      .replace(/\s*ERP\s*$/i, '')
+      .trim() || 'POS数据';
+    const store = row.customerStoreName || row.storeName || row.orionStoreName || '门店数据';
+    const code = row.customerStoreNo || row.storeCode || row.orionStoreCode || '';
+    const period = row.month || row.yearMonth || row.transactionDate || '';
+    const baseName = [partner, store, code, period].filter(value => value && value !== '-').join('-');
+    return `${baseName || 'POS原始数据'}.xlsx`;
+  },
+
   findDocumentSource(row = {}) {
     const inboxData = this.getInboxData();
     if (row.sourceEmailId) {
@@ -2288,12 +2315,13 @@ const IngestionView = {
       const body = String(item.emailBody || '');
       const attachments = item.attachments || [];
       return subject.includes(name) || body.includes(name) || attachments.some(att => String(att.name || '').includes(name));
-    }) || inboxData[0];
-    const attachmentIndex = Math.max(0, (inboxItem?.attachments || []).findIndex(att => String(att.name || '').includes(name)));
+    });
+    const matchedIndex = (inboxItem?.attachments || []).findIndex(att => String(att.name || '').includes(name));
+    const attachmentIndex = matchedIndex >= 0 ? matchedIndex : undefined;
     return {
       inboxItem,
-      attachment: inboxItem?.attachments?.[attachmentIndex >= 0 ? attachmentIndex : 0],
-      attachmentIndex: attachmentIndex >= 0 ? attachmentIndex : 0
+      attachment: typeof attachmentIndex === 'number' ? inboxItem?.attachments?.[attachmentIndex] : undefined,
+      attachmentIndex
     };
   },
 
@@ -2305,14 +2333,96 @@ const IngestionView = {
     return 'success';
   },
 
-  createLifecycleLog(node, status, action, time = '-', tone = '') {
+  createLifecycleLog(node, status, action, time = '-', tone = '', operator = '') {
     return {
       node,
       status,
       action,
       time,
-      tone: tone || this.getLifecycleLogTone(status)
+      tone: tone || this.getLifecycleLogTone(status),
+      operator,
+      timeSource: time && time !== '-' ? 'ACTUAL' : ''
     };
+  },
+
+  parseLifecycleDate(value) {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return new Date(value.getTime());
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    const text = String(value || '').trim();
+    if (!text || text === '-') return null;
+    const normalized = text
+      .replace(/年|\//g, '-')
+      .replace(/月/g, '-')
+      .replace(/日/g, '')
+      .replace(/\s+/g, ' ');
+    const parsed = new Date(normalized);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+    const monthMatch = normalized.match(/^(\d{4})-(\d{1,2})-?$/);
+    if (monthMatch) return new Date(Number(monthMatch[1]), Number(monthMatch[2]) - 1, 15, 9, 0, 0);
+    return null;
+  },
+
+  formatLifecycleDate(value) {
+    const date = value instanceof Date ? value : this.parseLifecycleDate(value);
+    if (!date) return '-';
+    const pad = (number) => String(number).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  },
+
+  getLifecycleBaseTime(context = {}) {
+    const row = context.row || {};
+    const inboxItem = context.inboxItem;
+    const attachment = context.attachment;
+    const directCandidates = [
+      attachment?.uploadedAt,
+      inboxItem?.provideTime,
+      row.receivedAt,
+      row.uploadedAt,
+      row.createdAt,
+      row.updatedAt,
+      row.transactionDate,
+      row.month,
+      row.yearMonth
+    ];
+    for (const candidate of directCandidates) {
+      const parsed = this.parseLifecycleDate(candidate);
+      if (parsed) return parsed;
+    }
+
+    const periodText = String(this.getDisplayMonth?.(row) || this.getCurrentDisplayMonth?.() || '2026年05月');
+    const periodMatch = periodText.match(/(20\d{2})\D+(\d{1,2})/);
+    const year = periodMatch ? Number(periodMatch[1]) : 2026;
+    const month = periodMatch ? Number(periodMatch[2]) - 1 : 4;
+    const identity = String(row.id || row.storeCode || row.storeName || context.sourceFileName || 'document');
+    const seed = [...identity].reduce((total, char) => (total * 31 + char.charCodeAt(0)) % 720, 0);
+    return new Date(year, month, 15, 9 + Math.floor(seed / 60), seed % 60, 0);
+  },
+
+  getLifecycleNodeStepSeconds(log = {}) {
+    const node = String(log.node || '');
+    if (node === '数据流转' || node === '版本切换') return 10;
+    if (/收取|上传|重传/.test(node)) return 30;
+    if (/校验|检查|复核/.test(node)) return 60;
+    if (/拆分|匹配|生成|入库/.test(node)) return 60;
+    if (/修改|处理|驳回|提交|解决|通过/.test(node)) return 30;
+    return 30;
+  },
+
+  resolveLifecycleLogTimes(logs = [], context = {}) {
+    if (!Array.isArray(logs) || !logs.length) return logs;
+    let cursor = this.getLifecycleBaseTime(context);
+    return logs.map((log, index) => {
+      const actual = this.parseLifecycleDate(log.time);
+      if (actual) {
+        cursor = actual;
+        return { ...log, time: this.formatLifecycleDate(actual), timeSource: log.timeSource || 'ACTUAL' };
+      }
+      if (index > 0) cursor = new Date(cursor.getTime() + this.getLifecycleNodeStepSeconds(log) * 1000);
+      return { ...log, time: this.formatLifecycleDate(cursor), timeSource: 'SIMULATED' };
+    });
   },
 
   getSingleStoreExcelName(name = '', storeName = '') {
@@ -2530,6 +2640,11 @@ const IngestionView = {
 
   renderDocumentSplitResultSection(groups = []) {
     const cn = this.getCurrentLang() === 'cn';
+    const splitGroups = groups.filter(group =>
+      Array.isArray(group?.versions)
+      && group.versions.some(version => Array.isArray(version?.rows) && version.rows.length > 1)
+    );
+    if (!splitGroups.length) return '';
     const statusClass = (row = {}) => {
       if (row.tone === 'danger' || /驳回|失败/.test(row.status || '')) return 'bg-red-50 text-red-600 border-red-100';
       if (row.tone === 'warning' || /未匹配|重复|待处理/.test(row.status || '')) return 'bg-amber-50 text-amber-700 border-amber-100';
@@ -2551,11 +2666,10 @@ const IngestionView = {
             </span>
             <h4 class="text-sm font-extrabold text-[#1d2129]">${cn ? '拆分结果' : '분할 결과'}</h4>
           </div>
-          <span class="text-xs font-medium text-[#86909c]">${cn ? '单门店单 Excel' : '매장별 Excel'}</span>
+          <span class="text-xs font-medium text-[#86909c]">${cn ? '多门店 Excel 拆分' : '다중 매장 Excel 분할'}</span>
         </div>
-        ${groups.length ? `
-          <div class="space-y-4">
-            ${groups.map((group, groupIndex) => {
+        <div class="space-y-4">
+            ${splitGroups.map((group, groupIndex) => {
               const currentIndex = Math.max(0, group.versions.findIndex(version => version.state === '当前版本'));
               const activeIndex = currentIndex >= 0 ? currentIndex : group.versions.length - 1;
               return `
@@ -2633,7 +2747,6 @@ const IngestionView = {
               `;
             }).join('')}
           </div>
-        ` : `<div class="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-7 text-center text-sm text-[#86909c]">${cn ? '暂无拆分结果' : '분할 결과 없음'}</div>`}
       </section>
     `;
   },
@@ -2658,6 +2771,150 @@ const IngestionView = {
       context.logAction
     ].filter(Boolean).join(' ');
     return String(statusText).includes('待处理') && /重复|覆盖|忽略|A门店|B门店/.test(reason);
+  },
+
+  getLifecycleExceptionSource(row = {}) {
+    if (typeof QAView === 'undefined' || !Array.isArray(QAView.data)) return null;
+    const candidates = QAView.data.filter((item) => row.storeCode
+      ? item.storeCode === row.storeCode
+      : item.storeName && item.storeName === row.storeName);
+    return candidates.find((item) => item.approvedBy || item.workflowStatus === '已通过') || null;
+  },
+
+  buildUpstreamLifecycleLogs(context = {}, options = {}) {
+    const logs = [];
+    const row = context.row || {};
+    const inboxItem = context.inboxItem;
+    const attachment = context.attachment;
+    const provideTime = inboxItem?.provideTime || row.createdAt || row.updatedAt || '-';
+    const updateTime = row.updatedAt || row.qualityUpdatedAt || row.lastOperatedAt || provideTime;
+    const fromUnmatched = row.matchSource === 'from-unmatched'
+      || row.entrySource === 'UNMATCHED_VALIDATED'
+      || row.sourceModule === 'INGESTION_UNMATCHED';
+
+    logs.push(this.createLifecycleLog(
+      '文件收取',
+      '已接收',
+      '文件子单据已进入文件箱',
+      provideTime,
+      'info',
+      row.uploadedBy || inboxItem?.provider || '系统'
+    ));
+    logs.push(this.createLifecycleLog(
+      '文件校验',
+      '正常',
+      '文件结构、格式与内容校验通过',
+      row.fileValidatedAt || provideTime,
+      'success',
+      '系统'
+    ));
+
+    if (attachment?.isMultiStore || row.sourceEmailId || options.includeSplit) {
+      logs.push(this.createLifecycleLog(
+        '单门店拆分',
+        '已完成',
+        '文件已按门店拆分为独立的单门店数据',
+        row.splitAt || provideTime,
+        'success',
+        '系统'
+      ));
+    }
+
+    if (fromUnmatched) {
+      logs.push(this.createLifecycleLog(
+        '门店匹配',
+        '未匹配',
+        row.initialMatchReason || '原始门店信息未匹配到客户门店主数据',
+        row.initialMatchedAt || provideTime,
+        'warning',
+        '系统'
+      ));
+      logs.push(this.createLifecycleLog(
+        '数据流转',
+        '已进入',
+        '文件箱 → 单门店未匹配数据',
+        row.unmatchedEnteredAt || provideTime,
+        'info',
+        '系统'
+      ));
+      if (row.rejectNote || row.salesSubmitNote || row.matchCorrectionNote) {
+        logs.push(this.createLifecycleLog(
+          '数据修正',
+          '已处理',
+          row.matchCorrectionNote || row.salesSubmitNote || row.rejectNote || '已补全或修正门店映射信息',
+          row.salesSubmittedAt || row.lastOperatedAt || updateTime,
+          'info',
+          row.salesSubmittedBy || row.lastOperatorName || '营业担当'
+        ));
+      }
+      logs.push(this.createLifecycleLog(
+        '提交校验',
+        '待校验',
+        row.salesSubmitNote || '修正后的门店信息已提交校验',
+        row.salesSubmittedAt || row.promotedAt || updateTime,
+        'info',
+        row.salesSubmittedBy || row.lastOperatorName || '营业担当'
+      ));
+      logs.push(this.createLifecycleLog(
+        '门店校验',
+        '已通过',
+        '修正后的门店信息已通过主数据校验',
+        row.promotedAt || updateTime,
+        'success',
+        row.promotedBy || 'POS担当'
+      ));
+      logs.push(this.createLifecycleLog(
+        '数据流转',
+        '已进入',
+        '单门店未匹配数据 → 单门店已匹配数据',
+        row.promotedAt || updateTime,
+        'success',
+        row.promotedBy || 'POS担当'
+      ));
+    } else {
+      logs.push(this.createLifecycleLog(
+        '门店匹配',
+        '已匹配',
+        '原始门店已匹配到客户门店主数据',
+        row.matchedAt || provideTime,
+        'success',
+        '系统'
+      ));
+      logs.push(this.createLifecycleLog(
+        '数据流转',
+        '已进入',
+        '文件箱 → 单门店已匹配数据',
+        row.matchedAt || provideTime,
+        'success',
+        '系统'
+      ));
+    }
+
+    return logs;
+  },
+
+  appendQualityLifecycleLogs(logs, row = {}, route = '标准POS', options = {}) {
+    const updateTime = row.qualityUpdatedAt || row.updatedAt || row.lastOperatedAt || '-';
+    logs.push(this.createLifecycleLog(
+      '质量检查',
+      options.exception ? '发现异常' : '已通过',
+      options.exception
+        ? (row.aiJudgment || row.aiNote || '质量检查发现字段级、数据级或产品级异常')
+        : (row.aiNote || '规则与AI校验通过'),
+      updateTime,
+      options.exception ? 'warning' : 'success',
+      '系统'
+    ));
+    logs.push(this.createLifecycleLog(
+      '数据流转',
+      '已进入',
+      options.exception
+        ? '单门店已匹配数据 → 异常数据'
+        : `质量检查 → ${route}`,
+      updateTime,
+      options.exception ? 'warning' : 'success',
+      '系统'
+    ));
   },
 
   buildDocumentDetailLogs(context = {}) {
@@ -2731,28 +2988,73 @@ const IngestionView = {
     };
 
     if (/台账|汇总/.test(moduleName || currentNode)) {
-      logs.push(this.createLifecycleLog('标准POS', '已通过', '标准POS单据已通过质量检查', updateTime));
-      logs.push(this.createLifecycleLog('台账入库', '已入库', '已同步进入台账与汇总', updateTime));
+      logs.push(...this.buildUpstreamLifecycleLogs(context));
+      const exceptionSource = this.getLifecycleExceptionSource(row);
+      this.appendQualityLifecycleLogs(logs, row, '标准POS表', { exception: Boolean(exceptionSource) });
+      if (exceptionSource) {
+        logs.push(this.createLifecycleLog('异常处理', '处理中', exceptionSource.aiJudgment || '异常数据已进入处理流程', exceptionSource.createdAt || updateTime, 'warning', '系统'));
+        if (exceptionSource.salesSubmittedBy) logs.push(this.createLifecycleLog('提交复核', '待复核', exceptionSource.salesSubmitNote || '营业担当已提交处理结果', exceptionSource.salesSubmittedAt || updateTime, 'info', exceptionSource.salesSubmittedBy));
+        logs.push(this.createLifecycleLog('异常整单通过', '已通过', '全部异常项处理完成并通过POS复核', exceptionSource.approvedAt || updateTime, 'success', exceptionSource.approvedBy || 'POS担当'));
+        logs.push(this.createLifecycleLog('标准POS生成', '已完成', '根据异常处理后的数据生成标准POS', exceptionSource.approvedAt || updateTime, 'success', '系统'));
+        logs.push(this.createLifecycleLog('数据流转', '已进入', '异常数据 → 标准POS表', exceptionSource.approvedAt || updateTime, 'success', exceptionSource.approvedBy || 'POS担当'));
+      } else {
+        logs.push(this.createLifecycleLog('标准POS生成', '已完成', '质检通过后生成标准POS', updateTime, 'success', '系统'));
+      }
+      logs.push(this.createLifecycleLog('标准POS复核', '已通过', '标准POS已通过复核', row.approvedAt || updateTime, 'success', row.approvedBy || row.lastOperatorName || 'POS担当'));
+      logs.push(this.createLifecycleLog('数据流转', '已进入', '标准POS表 → 标准POS明细', row.ledgerCreatedAt || updateTime, 'success', '系统'));
+      logs.push(this.createLifecycleLog('台账入库', '已入账', '标准POS数据通过后已同步进入台账', row.ledgerCreatedAt || updateTime, 'success', row.lastOperatorName || '系统'));
       return logs;
     }
 
     if (/异常数据/.test(moduleName || currentNode)) {
-      logs.push(this.createLifecycleLog('异常处理', statusText, context.logAction || '等待处理人确认并提交处理结果', updateTime));
+      logs.push(...this.buildUpstreamLifecycleLogs(context));
+      this.appendQualityLifecycleLogs(logs, row, '异常数据', { exception: true });
+      logs.push(this.createLifecycleLog('异常处理', '待处理', '异常数据已生成，当前责任人为POS担当', row.createdAt || provideTime, 'warning', '系统'));
+      if (/处理中|待复核/.test(statusText) || row.rejectedBy) {
+        logs.push(this.createLifecycleLog('异常驳回', '处理中', row.rejectNote || 'POS担当已驳回至营业担当处理', row.rejectedAt || updateTime, 'warning', row.rejectedBy || 'POS担当'));
+      }
+      if (/待复核/.test(statusText) || row.salesSubmittedBy) {
+        logs.push(this.createLifecycleLog('提交复核', '待复核', row.salesSubmitNote || '营业担当已提交POS复核', row.salesSubmittedAt || updateTime, 'info', row.salesSubmittedBy || '营业担当'));
+      }
+      if (/已通过/.test(statusText) || row.approvedBy) {
+        logs.push(this.createLifecycleLog('异常整单通过', '已通过', '全部异常项处理完成并通过POS复核', row.approvedAt || updateTime, 'success', row.approvedBy || 'POS担当'));
+        logs.push(this.createLifecycleLog('标准POS生成', '已完成', '根据异常处理后的数据生成标准POS', row.approvedAt || updateTime, 'success', '系统'));
+        logs.push(this.createLifecycleLog('数据流转', '已进入', '异常数据 → 标准POS表', row.approvedAt || updateTime, 'success', row.approvedBy || 'POS担当'));
+      }
       return logs;
     }
 
     if (/质量检查|标准POS/.test(moduleName || currentNode)) {
-      logs.push(this.createLifecycleLog(
-        '标准POS',
-        '已生成',
-        row.aiNote || 'POS表数据完整，校验合规，AI未发现异常',
-        updateTime,
-        'success'
-      ));
+      logs.push(...this.buildUpstreamLifecycleLogs(context));
+      const exceptionSource = this.getLifecycleExceptionSource(row);
+      this.appendQualityLifecycleLogs(logs, row, '标准POS表', { exception: Boolean(exceptionSource) });
+      if (exceptionSource) {
+        logs.push(this.createLifecycleLog('异常处理', '处理中', exceptionSource.aiJudgment || '异常数据已进入处理流程', exceptionSource.createdAt || provideTime, 'warning', '系统'));
+        if (exceptionSource.rejectedBy) logs.push(this.createLifecycleLog('异常驳回', '处理中', exceptionSource.rejectNote || 'POS担当已驳回营业处理', exceptionSource.rejectedAt || updateTime, 'warning', exceptionSource.rejectedBy));
+        if (exceptionSource.salesSubmittedBy) logs.push(this.createLifecycleLog('提交复核', '待复核', exceptionSource.salesSubmitNote || '营业担当已提交处理结果', exceptionSource.salesSubmittedAt || updateTime, 'info', exceptionSource.salesSubmittedBy));
+        logs.push(this.createLifecycleLog('异常整单通过', '已通过', '全部异常项处理完成并通过POS复核', exceptionSource.approvedAt || updateTime, 'success', exceptionSource.approvedBy || 'POS担当'));
+        logs.push(this.createLifecycleLog('标准POS生成', '已完成', '根据异常处理后的数据生成标准POS', exceptionSource.approvedAt || updateTime, 'success', '系统'));
+        logs.push(this.createLifecycleLog('数据流转', '已进入', '异常数据 → 标准POS表', exceptionSource.approvedAt || updateTime, 'success', exceptionSource.approvedBy || 'POS担当'));
+      } else {
+        logs.push(this.createLifecycleLog('标准POS生成', '已完成', '质检通过后生成标准POS', row.createdAt || provideTime, 'success', '系统'));
+      }
+      logs.push(this.createLifecycleLog('标准POS', '待通过', row.aiNote || '标准POS数据已生成，等待POS担当通过', row.createdAt || provideTime, 'warning', '系统'));
+      if (/处理中|待复核/.test(statusText) || row.rejectedBy) {
+        logs.push(this.createLifecycleLog('标准POS驳回', '处理中', row.rejectNote || 'POS担当已驳回至营业担当处理', row.rejectedAt || updateTime, 'warning', row.rejectedBy || 'POS担当'));
+      }
+      if (/待复核/.test(statusText) || row.salesSubmittedBy) {
+        logs.push(this.createLifecycleLog('提交复核', '待复核', row.salesSubmitNote || '营业担当已提交POS复核', row.salesSubmittedAt || updateTime, 'info', row.salesSubmittedBy || '营业担当'));
+      }
+      if (/已通过/.test(statusText) || row.approvedBy) {
+        logs.push(this.createLifecycleLog('标准POS复核', '已通过', 'POS担当已通过当前单据', row.approvedAt || updateTime, 'success', row.approvedBy || 'POS担当'));
+      }
       return logs;
     }
 
     if (/暂存|未匹配/.test(moduleName || currentNode)) {
+      logs.push(...this.buildUpstreamLifecycleLogs({ ...context, row: { ...row, matchSource: 'from-unmatched' } }).filter((log) =>
+        !['提交校验', '门店校验'].includes(log.node)
+        && !String(log.action || '').includes('单门店未匹配数据 → 单门店已匹配数据')));
       const rawStoreCode = row.rawStoreCode || row.storeCode || '-';
       const initialFailureReason = rawStoreCode === '-'
         ? '原始门店编码缺失，未找到对应客户门店'
@@ -2762,31 +3064,17 @@ const IngestionView = {
         || row.reason
         || '门店组织关系仍不完整，缺少客户门店编码、本部或营业所信息';
 
-      logs.push(this.createLifecycleLog(
-        '门店匹配',
-        '未匹配',
-        '原始门店未匹配到客户门店',
-        updateTime,
-        'warning'
-      ));
-      logs.push(this.createLifecycleLog(
-        '门店校验',
-        '失败',
-        initialFailureReason,
-        updateTime,
-        'danger'
-      ));
-      logs.push(this.createLifecycleLog(
-        '门店校验',
-        '失败',
-        latestFailureReason,
-        updateTime,
-        'danger'
-      ));
+      logs.push(this.createLifecycleLog('未匹配数据', '待处理', initialFailureReason, row.createdAt || provideTime, 'warning', '系统'));
+      if (/处理中|待复核/.test(statusText) || row.rejectedBy) {
+        logs.push(this.createLifecycleLog('POS驳回', '处理中', row.rejectNote || latestFailureReason, row.rejectedAt || updateTime, 'warning', row.rejectedBy || 'POS担当'));
+      }
+      if (/待复核/.test(statusText) || row.salesSubmittedBy) {
+        logs.push(this.createLifecycleLog('提交复核', '待复核', row.salesSubmitNote || '营业担当已提交门店匹配结果', row.salesSubmittedAt || updateTime, 'info', row.salesSubmittedBy || '营业担当'));
+      }
       return logs;
     }
 
-    if (/文件收取|收件箱/.test(moduleName || currentNode) && attachment) {
+    if (/文件箱|收件箱/.test(moduleName || currentNode) && attachment) {
       if (attachment.isHistorical) {
         const version = attachment.version || 1;
         logs.push(this.createLifecycleLog('文件收取', '已接收', `V${version} 原始Excel已进入文件箱`, provideTime, 'info'));
@@ -2940,65 +3228,37 @@ const IngestionView = {
       return logs;
     }
 
-    if (/文件收取|原始门店|已匹配|归档/.test(moduleName || currentNode)) {
-      const isMatchedDataModule = /原始门店|已匹配/.test(moduleName || currentNode) && !/归档/.test(moduleName || currentNode);
+    if (/文件收取|原始门店|已匹配/.test(moduleName || currentNode)) {
+      const isMatchedDataModule = /原始门店|已匹配/.test(moduleName || currentNode);
       if (isMatchedDataModule) {
-        const fromUnmatched = row.matchSource === 'from-unmatched' || String(row.id || '').startsWith('stash-promoted-');
-        if (fromUnmatched) {
-          logs.push(this.createLifecycleLog(
-            '门店匹配',
-            '未匹配',
-            '原始门店未匹配到客户门店',
-            updateTime,
-            'warning'
-          ));
-          logs.push(this.createLifecycleLog(
-            '门店校验',
-            '通过',
-            '门店信息已补全并通过校验',
-            updateTime,
-            'success'
-          ));
-        } else {
-          logs.push(this.createLifecycleLog(
-            '门店匹配',
-            '已匹配',
-            '原始门店已匹配到客户门店',
-            updateTime,
-            'success'
-          ));
-        }
-
+        logs.push(...this.buildUpstreamLifecycleLogs(context));
+        logs.push(this.createLifecycleLog('已匹配数据', '待质检', '门店匹配完成，等待质量检查', row.matchedAt || provideTime, 'warning', '系统'));
         if (/质检中|质量校验中/.test(statusText)) {
-          addQualityCheck('质检中');
-        } else if (/已同步|已通过|正常/.test(statusText)) {
-          addQualityCheck('已完成');
+          logs.push(this.createLifecycleLog('质量检查', '质检中', '系统正在执行质量检查', updateTime, 'info', row.lastOperatorName || 'POS担当'));
+        } else if (/已质检|已同步|已通过|正常/.test(statusText)) {
+          logs.push(this.createLifecycleLog('质量检查', '已质检', row.aiNote || '质量检查已完成', row.approvedAt || updateTime, 'success', row.approvedBy || row.lastOperatorName || 'POS担当'));
           const logRoute = row.logRoute || row.qualityRoute || this.getQualityRoute(row);
           logs.push(this.createLifecycleLog(
-            logRoute,
+            '质检结果',
             '已同步',
             logRoute === '异常表' ? '已同步至异常表中' : `已同步至${logRoute}`,
             updateTime,
             'success'
           ));
-        } else {
-          addQualityCheck('待质检', '等待进入质量检查');
         }
         return logs;
       }
 
       if (inboxItem) addFileReceived();
-      addFileCheck(/归档/.test(moduleName || currentNode) ? '已归档' : '正常');
-      if (!/归档/.test(moduleName || currentNode)) {
-        addStoreMatch(/待|质检中|已同步|已通过|正常/.test(statusText) ? '已匹配' : '待处理');
-        if (/质检中|质量校验中/.test(statusText)) {
-          addQualityCheck('质检中');
-        } else if (/已同步|已通过/.test(statusText)) {
-          addQualityCheck('已完成');
-          logs.push(this.createLifecycleLog(this.getQualityRoute(row), '已同步', `已同步至${this.getQualityRoute(row)}`, updateTime));
-        } else {
-          addQualityCheck('未开始');
-        }
+      addFileCheck('正常');
+      addStoreMatch(/待|质检中|已同步|已通过|正常/.test(statusText) ? '已匹配' : '待处理');
+      if (/质检中|质量校验中/.test(statusText)) {
+        addQualityCheck('质检中');
+      } else if (/已同步|已通过/.test(statusText)) {
+        addQualityCheck('已完成');
+        logs.push(this.createLifecycleLog(this.getQualityRoute(row), '已同步', `已同步至${this.getQualityRoute(row)}`, updateTime));
+      } else {
+        addQualityCheck('未开始');
       }
       return logs;
     }
@@ -3055,6 +3315,33 @@ const IngestionView = {
     return logs;
   },
 
+  isCurrentModuleLifecycleLog(log = {}, context = {}) {
+    const moduleName = `${context.moduleName || ''} ${context.currentNode || ''}`;
+    const node = log.node || '';
+    const action = log.action || '';
+    if (/文件箱|收件箱/.test(moduleName)) return true;
+    if (/未匹配/.test(moduleName)) {
+      return ['未匹配数据', '数据修正', '提交校验', '门店校验', 'POS驳回', '提交复核'].includes(node)
+        || (node === '数据流转' && action.includes('未匹配数据'));
+    }
+    if (/已匹配|原始门店/.test(moduleName)) {
+      return ['已匹配数据', '质量检查', '质检结果'].includes(node)
+        || (node === '数据流转' && (action.includes('已匹配数据') || action.includes('质量检查')));
+    }
+    if (/异常数据/.test(moduleName)) {
+      return ['异常处理', '异常驳回', '异常项解决', '提交复核', '异常整单通过'].includes(node)
+        || (node === '数据流转' && action.includes('异常数据'));
+    }
+    if (/标准POS|质量检查/.test(moduleName)) {
+      return ['标准POS生成', '标准POS', '标准POS驳回', '标准POS复核', '提交复核'].includes(node)
+        || (node === '数据流转' && action.includes('标准POS表'));
+    }
+    if (/台账|汇总/.test(moduleName)) {
+      return node === '台账入库' || (node === '数据流转' && action.includes('标准POS明细'));
+    }
+    return true;
+  },
+
   openDocumentDetail(context = {}) {
     if (typeof Drawer === 'undefined') return;
     const cn = this.getCurrentLang() === 'cn';
@@ -3071,14 +3358,21 @@ const IngestionView = {
       info: 'bg-blue-50 text-brand border-blue-100',
       muted: 'bg-slate-50 text-slate-500 border-slate-100'
     };
-    const logs = this.buildDocumentDetailLogs({ ...context, inboxItem });
-    const splitGroups = this.buildDocumentSplitGroups({
-      ...context,
-      inboxItem,
-      attachment: sourceAttachment,
-      attachmentIndex: sourceAttachmentIndex,
-      row
-    });
+    const logs = this.resolveLifecycleLogTimes(
+      this.buildDocumentDetailLogs({ ...context, inboxItem, attachment: sourceAttachment }),
+      { ...context, inboxItem, attachment: sourceAttachment, row }
+    );
+    const canShowAllInboxSplits = Boolean(context.inboxItem && !context.attachment && /文件箱$|收件箱$|받은 편지함$/.test(context.currentNode || ''));
+    const splitGroups = sourceAttachment || canShowAllInboxSplits
+      ? this.buildDocumentSplitGroups({
+          ...context,
+          inboxItem,
+          attachment: sourceAttachment,
+          attachmentIndex: sourceAttachmentIndex,
+          row
+        })
+      : [];
+    const requiredSourceFileName = this.getRequiredSourceFileName(context, row);
     const content = `
       <div class="space-y-5">
         <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
@@ -3091,19 +3385,26 @@ const IngestionView = {
           <div class="space-y-2.5">
             ${context.sourceFileName || row.sourceFileName
               ? this.renderFallbackSourceFile(context.sourceFileName || row.sourceFileName)
-              : inboxItem
+              : inboxItem && Array.isArray(inboxItem.attachments) && inboxItem.attachments.length
                 ? this.renderInboxSourceAttachments(inboxItem, { attachment: sourceAttachment, attachmentIndex: sourceAttachmentIndex })
-                : `<div class="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-[#86909c]">${cn ? '暂无原始文件' : '원본 파일 없음'}</div>`}
+                : this.renderFallbackSourceFile(requiredSourceFileName)}
           </div>
         </section>
 
         ${this.renderDocumentSplitResultSection(splitGroups)}
 
         <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
-          <h4 class="text-sm font-extrabold text-[#1d2129] mb-4">${cn ? '状态日志流转' : '상태 로그 흐름'}</h4>
+          <div class="mb-1 flex items-center justify-between gap-3">
+            <h4 class="text-sm font-extrabold text-[#1d2129]">${cn ? '单据日志' : '문서 로그'}</h4>
+            <div class="inline-flex rounded-lg border border-gray-200 bg-slate-50 p-0.5 text-xs">
+              <button type="button" class="document-lifecycle-filter rounded-md bg-white px-2.5 py-1 font-semibold text-brand shadow-sm" data-log-scope="all">${cn ? '全部日志' : '전체 로그'}</button>
+              <button type="button" class="document-lifecycle-filter rounded-md px-2.5 py-1 font-semibold text-[#86909c]" data-log-scope="current">${cn ? '当前模块' : '현재 모듈'}</button>
+            </div>
+          </div>
+          <p class="mb-4 text-xs text-[#86909c]">${cn ? '累计展示当前子单据从文件收取至当前模块的完整数据流向' : '현재 파일의 전체 데이터 흐름을 표시합니다'}</p>
           <div class="space-y-3">
             ${logs.map((log, index) => `
-              <div class="flex gap-3">
+              <div class="document-lifecycle-log flex gap-3" data-current-module="${this.isCurrentModuleLifecycleLog(log, context) ? 'true' : 'false'}">
                 <div class="flex flex-col items-center">
                   <span class="w-7 h-7 rounded-full bg-blue-50 text-brand flex items-center justify-center text-xs font-bold">${index + 1}</span>
                   ${index < logs.length - 1 ? '<span class="flex-1 w-px bg-gray-200 my-1"></span>' : ''}
@@ -3114,7 +3415,10 @@ const IngestionView = {
                     <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border ${logToneClass[log.tone] || logToneClass.muted}">${this.escapeHtml(log.status)}</span>
                   </div>
                   <div class="mt-1 text-sm leading-6 text-[#4e5969]">${this.escapeHtml(log.action)}</div>
-                  <div class="mt-1 text-xs text-[#86909c]">${this.escapeHtml(log.time)}</div>
+                  <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#86909c]">
+                    <span>${this.escapeHtml(log.time)}</span>
+                    ${log.operator ? `<span>操作人：${this.escapeHtml(log.operator)}</span>` : ''}
+                  </div>
                 </div>
               </div>
             `).join('')}
@@ -3170,6 +3474,22 @@ const IngestionView = {
       });
     });
 
+    overlay.querySelectorAll('.document-lifecycle-filter').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const scope = btn.dataset.logScope || 'all';
+        overlay.querySelectorAll('.document-lifecycle-filter').forEach((item) => {
+          const active = item.dataset.logScope === scope;
+          item.classList.toggle('bg-white', active);
+          item.classList.toggle('text-brand', active);
+          item.classList.toggle('shadow-sm', active);
+          item.classList.toggle('text-[#86909c]', !active);
+        });
+        overlay.querySelectorAll('.document-lifecycle-log').forEach((item) => {
+          item.classList.toggle('hidden', scope === 'current' && item.dataset.currentModule !== 'true');
+        });
+      });
+    });
+
     overlay.querySelectorAll('.store-split-preview-btn').forEach(btn => {
       btn.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -3199,13 +3519,20 @@ const IngestionView = {
   openInboxDocumentDetail(inboxItem) {
     if (inboxItem) {
       this.openDocumentDetail({
-        moduleName: this.getCurrentLang() === 'cn' ? '文件收取 - 收件箱' : '파일 수집 - 받은 편지함',
-        currentNode: this.getCurrentLang() === 'cn' ? '收件箱' : '받은 편지함',
+        moduleName: this.getCurrentLang() === 'cn' ? '文件收取 - 文件箱' : '파일 수집 - 받은 편지함',
+        currentNode: this.getCurrentLang() === 'cn' ? '文件箱' : '받은 편지함',
         title: inboxItem.emailSubject,
         nameLabel: this.getCurrentLang() === 'cn' ? '单据标题' : '문서 제목',
         statusText: inboxItem.statusText,
         row: { sourceEmailId: inboxItem.id },
-        inboxItem
+        inboxItem,
+        moduleFields: [
+          { label: '单据标题', value: inboxItem.emailSubject || '-' },
+          { label: '上传用户', value: inboxItem.provider || '-' },
+          { label: '年月', value: inboxItem.month || '-' },
+          { label: '附件数', value: inboxItem.attachmentCount ?? (inboxItem.attachments || []).length },
+          { label: '上传时间', value: inboxItem.provideTime || '-' }
+        ]
       });
       return;
     }
@@ -4804,31 +5131,45 @@ const IngestionView = {
         const key = trigger.dataset.stashKey;
         const item = this.getFilteredStashRows().find(row => row.key === key);
         if (!item) return;
+        if (!this.hasIngestionPermission('单门店未匹配数据', '查看') || !this.hasIngestionPermission('单门店未匹配数据', '单据详情')) {
+          Dialog.toast('当前账号无单据详情权限', 'warning');
+          return;
+        }
         const row = item.row || {};
         const displayMonth = row.month || this.getCurrentDisplayMonth();
         const rawStoreCode = this.getStashRawStoreCode(row, item.index);
+        const workflow = this.getStashWorkflow(key);
         const responsibility = this.getStashResponsibility(row, key);
+        const deliveryFields = this.getStoreDeliveryFields(row, item.index, {
+          rawStoreCode,
+          customerStoreName: row.customerStoreName || row.storeName || '-',
+          dealer: row.customerDealer || row.dealer || '-',
+          acc: row.customerAcc || row.acc || '-'
+        });
         this.openDocumentDetail({
-          moduleName: '文件收取 - 暂存数据',
-          currentNode: '暂存数据',
+          moduleName: '文件收取 - 单门店未匹配数据',
+          currentNode: '单门店未匹配数据',
           title: row.storeName || '暂存单据',
           nameLabel: '原始门店名称',
           statusText: this.getStashDisplayStatus(key),
-          row,
+          row: { ...row, ...workflow },
           moduleFields: [
-            { label: '年月', value: displayMonth },
-            { label: '原始门店名称', value: row.storeName || '-' },
-            { label: '原始门店编码', value: rawStoreCode },
-            { label: '门店名称', value: row.customerStoreName || '-' },
-            { label: '门店编码', value: row.customerStoreCode || '-' },
-            { label: '经销商', value: row.customerDealer || '-' },
-            { label: 'ACC', value: row.customerAcc || '-' },
-            { label: '本部', value: row.customerHeadquarters || '-' },
-            { label: '营业所', value: row.customerSalesOffice || '-' },
-            { label: '异常原因', value: this.getStashAbnormalReason(row) },
+            { label: '时间', value: deliveryFields.time || displayMonth },
+            { label: '合作方ERP', value: deliveryFields.partnerErp },
+            { label: '原始文件名', value: deliveryFields.originalFileName },
+            { label: '当前文件名', value: deliveryFields.currentFileName },
+            { label: '客户门店号', value: deliveryFields.customerStoreNo },
+            { label: '客户交易处编码', value: deliveryFields.rawTradeCode },
+            { label: '客户交易处名称', value: deliveryFields.customerStoreName },
+            { label: '营业Team', value: deliveryFields.salesTeam },
+            { label: '区域', value: deliveryFields.region },
+            { label: '营业所', value: deliveryFields.salesOffice },
+            { label: 'ACC', value: deliveryFields.acc },
+            { label: '好丽友交易处编码', value: deliveryFields.orionTradeCode },
+            { label: '好丽友交易处名称', value: deliveryFields.orionTradeName },
+            { label: '异常说明', value: this.getStashAbnormalReason(row) },
             { label: '当前责任人', value: responsibility.currentOwnerName || '-' },
-            { label: '最近操作人', value: responsibility.lastOperatorName || '-' },
-            { label: 'AI判断', value: row.aiNote || '-' }
+            { label: '最近操作人', value: responsibility.lastOperatorName || '-' }
           ]
         });
       });
@@ -5069,6 +5410,8 @@ const IngestionView = {
 
   buildPromotedStashRow(item, index) {
     const row = item.row || {};
+    const workflow = this.getStashWorkflow(item.key);
+    const promotedAt = this.formatNowDateTime();
     const fileName = row.storeName || `暂存数据-${index + 1}.xlsx`;
     const storeName = fileName.replace(/\.(xlsx|xls|csv|zip)$/i, '');
     return {
@@ -5086,6 +5429,17 @@ const IngestionView = {
       salesOffice: row.salesOffice || '石家庄营业所',
       dealer: row.dealer || '河北聚昊商贸',
       matchSource: 'from-unmatched',
+      entrySource: 'UNMATCHED_VALIDATED',
+      sourceModule: 'INGESTION_UNMATCHED',
+      initialMatchReason: this.getStashAbnormalReason(row),
+      rejectNote: workflow.rejectNote || row.rejectNote || '',
+      salesSubmitNote: workflow.salesSubmitNote || row.salesSubmitNote || '',
+      salesSubmittedBy: workflow.salesSubmittedBy || row.salesSubmittedBy || '',
+      salesSubmittedAt: workflow.salesSubmittedAt || row.salesSubmittedAt || '',
+      lastOperatorName: workflow.lastOperatorName || row.lastOperatorName || 'POS担当',
+      matchCorrectionNote: workflow.salesSubmitNote || row.salesSubmitNote || '已补全或修正门店映射信息',
+      promotedAt,
+      promotedBy: Store.getState().userName || 'POS担当',
       sourceEmailId: row.sourceEmailId,
       sourceAttIdx: row.sourceAttIdx,
       remark: ''
@@ -5478,23 +5832,36 @@ const IngestionView = {
         if (action === 'detail') {
           if (!rowData) return;
           const isArchive = this.activeDataMode === 'archive';
+          if (!isArchive && (!this.hasIngestionPermission('单门店已匹配数据', '查看') || !this.hasIngestionPermission('单门店已匹配数据', '单据详情'))) {
+            Dialog.toast('当前账号无单据详情权限', 'warning');
+            return;
+          }
           const responsibility = this.getMatchedResponsibility(rowData);
+          const deliveryFields = this.getStoreDeliveryFields(rowData, this.data.indexOf(rowData));
           this.openDocumentDetail({
-            moduleName: isArchive ? '文件收取 - 归档（非POS表）' : '文件收取 - 原始门店数据列表',
-            currentNode: isArchive ? '归档（非POS表）' : '原始门店数据列表',
+            moduleName: isArchive ? '文件收取 - 归档（非POS表）' : '文件收取 - 单门店已匹配数据',
+            currentNode: isArchive ? '归档（非POS表）' : '单门店已匹配数据',
             title: rowData.storeName || rowData.fileName,
             nameLabel: '门店名称',
             statusText: isArchive ? '已归档' : this.getRoleDisplayStatus(rowData),
             row: rowData,
             moduleFields: [
-              { label: '年月', value: this.getDisplayMonth(rowData) },
-              { label: '门店编码', value: rowData.storeCode || '-' },
-              { label: '营业Team', value: this.getLocalizedText(rowData.team) || '-' },
+              { label: '时间', value: deliveryFields.time },
+              { label: '合作方ERP', value: deliveryFields.partnerErp },
+              { label: '原始文件名', value: deliveryFields.originalFileName },
+              { label: '当前文件名', value: deliveryFields.currentFileName },
+              { label: '客户门店号', value: deliveryFields.customerStoreNo },
+              { label: '客户交易处编码', value: deliveryFields.rawTradeCode },
+              { label: '客户交易处名称', value: deliveryFields.customerStoreName },
+              { label: '营业Team', value: deliveryFields.salesTeam },
+              { label: '区域', value: deliveryFields.region },
+              { label: '营业所', value: deliveryFields.salesOffice },
+              { label: 'ACC', value: deliveryFields.acc },
+              { label: '好丽友交易处编码', value: deliveryFields.orionTradeCode },
+              { label: '好丽友交易处名称', value: deliveryFields.orionTradeName },
               { label: '当前责任人', value: isArchive ? (this.getLocalizedText(rowData.handler) || '-') : responsibility.currentOwnerName },
               { label: '最近操作人', value: isArchive ? '-' : responsibility.lastOperatorName },
-              { label: '所属区域', value: rowData.region || '-' },
-              { label: '所属营业所', value: rowData.salesOffice || '-' },
-              { label: '所属经销商', value: rowData.dealer || '-' }
+              { label: '判断说明', value: deliveryFields.judgment }
             ]
           });
           return;

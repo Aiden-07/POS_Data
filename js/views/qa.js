@@ -105,9 +105,10 @@ const QAView = {
   saveWorkflowState() {
     const state = {};
     this.data.forEach((row) => {
-      if (!row.workflowStatus) return;
+      if (!row.workflowStatus && !row.exceptionResolutionStatus) return;
       state[row.id] = {
         workflowStatus: row.workflowStatus, rejectNote: row.rejectNote || '',
+        exceptionResolutionStatus: row.exceptionResolutionStatus || '', resolvedBy: row.resolvedBy || '', resolvedAt: row.resolvedAt || '',
         rejectedBy: row.rejectedBy || '', rejectedAt: row.rejectedAt || '',
         salesSubmitNote: row.salesSubmitNote || '', salesSubmittedBy: row.salesSubmittedBy || '',
         salesSubmittedAt: row.salesSubmittedAt || '', approvedBy: row.approvedBy || '', approvedAt: row.approvedAt || '',
@@ -1451,6 +1452,7 @@ const QAView = {
   },
 
   getExceptionStatus(row) {
+    if (row?.exceptionResolutionStatus === '已解决') return '已解决';
     if (row?.workflowStatus) return row.workflowStatus;
     if (this.rejectedStoreCodes.has(row.storeCode)) return '营业担当处理中';
     return '待处理';
@@ -1462,6 +1464,8 @@ const QAView = {
       营业担当处理中: 'bg-blue-50 text-brand border-blue-100',
       POS担当待处理: 'bg-violet-50 text-violet-700 border-violet-100',
       已通过: 'bg-green-50 text-green-700 border-green-100'
+      ,已解决: 'bg-green-50 text-green-700 border-green-100'
+      ,待整单通过: 'bg-cyan-50 text-cyan-700 border-cyan-100'
     };
     const displayStatus = this.getExceptionDisplayStatus(status);
     return `<span class="inline-flex h-6 min-w-[72px] items-center justify-center rounded-full border px-2 text-xs font-semibold whitespace-nowrap ${classMap[status] || classMap.待处理}">${displayStatus}</span>`;
@@ -1511,7 +1515,7 @@ const QAView = {
   getExceptionActions(row = {}) {
     const status = this.getExceptionStatus(row);
     const isPos = this.isPosActor();
-    if (status === '已通过') {
+    if (status === '已通过' || status === '已解决') {
       return { canEdit: false, buttons: [] };
     }
     if (isPos && status === '待处理') {
@@ -1519,7 +1523,7 @@ const QAView = {
         canEdit: this.hasQaPermission('异常数据', '编辑'),
         buttons: [
           ...(this.hasFullDataScope() && this.hasQaPermission('异常数据', '驳回') ? [{ action: 'reject', title: '驳回给营业', icon: 'fa-solid fa-reply', className: 'text-red-500 hover:bg-red-50' }] : []),
-          ...(this.hasQaPermission('异常数据', '通过') ? [{ action: 'approve', title: '通过', icon: 'fa-solid fa-check', className: 'text-green-600 hover:bg-green-50' }] : [])
+          ...(this.hasQaPermission('异常数据', '通过') ? [{ action: 'approve', title: '异常项通过', icon: 'fa-solid fa-check', className: 'text-green-600 hover:bg-green-50' }] : [])
         ]
       };
     }
@@ -1536,7 +1540,7 @@ const QAView = {
         canEdit: this.hasQaPermission('异常数据', '编辑'),
         buttons: [
           ...(this.hasFullDataScope() && this.hasQaPermission('异常数据', '驳回') ? [{ action: 'reject', title: '再次驳回给营业', icon: 'fa-solid fa-reply', className: 'text-red-500 hover:bg-red-50' }] : []),
-          ...(this.hasQaPermission('异常数据', '通过') ? [{ action: 'approve', title: '通过', icon: 'fa-solid fa-check', className: 'text-green-600 hover:bg-green-50' }] : [])
+          ...(this.hasQaPermission('异常数据', '通过') ? [{ action: 'approve', title: '异常项通过', icon: 'fa-solid fa-check', className: 'text-green-600 hover:bg-green-50' }] : [])
         ]
       };
     }
@@ -1615,15 +1619,47 @@ const QAView = {
     };
   },
 
-  getFilteredExceptionData() {
+  getExceptionBatchKey(row = {}) {
+    return row.storeCode || row.storeName || row.id || '';
+  },
+
+  getExceptionBatchRows(rowOrKey = {}) {
+    const key = typeof rowOrKey === 'string' ? rowOrKey : this.getExceptionBatchKey(rowOrKey);
+    return this.data.filter((item) => this.getExceptionBatchKey(item) === key);
+  },
+
+  getExceptionBatchSummary(row = {}) {
+    const rows = this.getExceptionBatchRows(row);
+    const unresolvedRows = rows.filter((item) => item.exceptionResolutionStatus !== '已解决');
+    const statuses = unresolvedRows.map((item) => this.getExceptionStatus(item));
+    const status = unresolvedRows.length === 0
+      ? '待整单通过'
+      : statuses.includes('POS担当待处理')
+        ? 'POS担当待处理'
+        : statuses.includes('营业担当处理中')
+          ? '营业担当处理中'
+          : '待处理';
+    const owners = [...new Set(unresolvedRows.map((item) => this.getExceptionResponsibility(item).currentOwnerName).filter((name) => name && name !== '-'))];
+    const operators = [...new Set(unresolvedRows.map((item) => this.getExceptionResponsibility(item).lastOperatorName).filter((name) => name && name !== '-'))];
+    return {
+      rows,
+      unresolvedRows,
+      unresolvedCount: unresolvedRows.length,
+      status,
+      currentOwnerName: unresolvedRows.length ? (owners.join('、') || 'POS担当') : 'POS担当',
+      lastOperatorName: operators.join('、') || '系统'
+    };
+  },
+
+  getFilteredExceptionData({ includeResolved = false, ignoreStatus = false } = {}) {
     // 异常页签只展示尚未闭环的数据。复核通过后数据进入标准 POS 表，
     // 内部保留“已通过”用于审计，但不再作为异常列表的页面状态。
-    let filteredData = this.data.filter((row) => this.getExceptionStatus(row) !== '已通过');
+    let filteredData = this.data.filter((row) => this.getExceptionStatus(row) !== '已通过' && (includeResolved || row.exceptionResolutionStatus !== '已解决'));
     if (this.exceptionTypeFilter) {
       filteredData = filteredData.filter((row) => row.conflictType === this.exceptionTypeFilter);
     }
     
-    if (this.statusFilter) {
+    if (this.statusFilter && !ignoreStatus) {
       filteredData = filteredData.filter(row => this.getExceptionDisplayStatus(this.getExceptionStatus(row)) === this.statusFilter);
     }
     filteredData = filteredData.filter(row => this.matchesQaSearch(row));
@@ -1660,7 +1696,8 @@ const QAView = {
         region: matched.region || `${first.acc || '所属'}区域`,
         salesOffice: matched.salesOffice || '-',
         dealer: matched.dealer || first.dealer || '-',
-        representativeId: first.id
+        representativeId: first.id,
+        batchSummary: this.getExceptionBatchSummary(first)
       };
     });
   },
@@ -1747,18 +1784,35 @@ const QAView = {
     }).join('');
   },
 
+  renderExceptionBatchActionButtons(row = {}) {
+    const summary = row.batchSummary || this.getExceptionBatchSummary(row);
+    const id = this.escapeHtml(row.representativeId || row.id || '');
+    const canPass = this.isPosActor() && this.hasQaPermission('异常数据', '通过') && summary.unresolvedCount === 0;
+    const canReject = this.isPosActor() && this.hasFullDataScope() && this.hasQaPermission('异常数据', '驳回')
+      && summary.unresolvedCount > 0 && ['待处理', 'POS担当待处理'].includes(summary.status);
+    return `<div class="flex items-center justify-center gap-1">
+      ${this.hasQaPermission('异常数据', '单据详情') ? `<button type="button" class="qa-exception-document-detail-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-id="${id}" title="单据详情"><i class="fa-solid fa-list-check"></i></button>` : ''}
+      <button type="button" class="px-2 py-1 text-xs rounded action-btn ${canReject ? 'text-red-500 hover:bg-red-50' : 'text-gray-300 cursor-not-allowed'}" data-action="reject-batch" data-id="${id}" title="${canReject ? '驳回该门店未解决异常' : '当前状态不可驳回'}" ${canReject ? '' : 'disabled'}><i class="fa-solid fa-reply"></i></button>
+      <button type="button" class="px-2 py-1 text-xs rounded action-btn ${canPass ? 'text-green-600 hover:bg-green-50' : 'text-gray-300 cursor-not-allowed'}" data-action="approve-batch" data-id="${id}" title="${canPass ? '整单通过并流入标准POS表' : `仍有${summary.unresolvedCount}条未解决异常`}" ${canPass ? '' : 'disabled'}><i class="fa-solid fa-check-double"></i></button>
+    </div>`;
+  },
+
   renderExceptionBusinessViews(container) {
-    const filteredData = this.getFilteredExceptionData();
     const isProductView = this.exceptionDisplayMode === 'detail';
-    const groupedRows = this.getGroupedExceptionRows(filteredData);
+    const filteredData = this.getFilteredExceptionData({ includeResolved: !isProductView, ignoreStatus: !isProductView });
+    let groupedRows = this.getGroupedExceptionRows(filteredData);
+    if (!isProductView && this.statusFilter) {
+      groupedRows = groupedRows.filter((row) => this.getExceptionDisplayStatus(row.batchSummary.status) === this.statusFilter);
+    }
     const sourceRows = isProductView ? filteredData : groupedRows;
     const body = sourceRows.map((row, index) => {
       const matched = this.standardData.find(item => item.storeCode === row.storeCode || item.storeName === row.storeName) || {};
       const source = { ...matched, ...row, dealer: row.dealer || matched.dealer };
       const business = this.getQaBusinessFields(source, index);
-      const status = this.getExceptionStatus(row);
-      const responsibility = this.getExceptionResponsibility(row);
-      const selectable = this.canSelectExceptionRow(row);
+      const batchSummary = !isProductView ? row.batchSummary : null;
+      const status = batchSummary?.status || this.getExceptionStatus(row);
+      const responsibility = batchSummary ? batchSummary : this.getExceptionResponsibility(row);
+      const selectable = isProductView ? this.canSelectExceptionRow(row) : false;
       const id = isProductView ? row.id : row.representativeId;
       const common = `
         <td class="px-4 py-3"><input type="checkbox" class="row-cb-qa rounded border-gray-300 text-brand focus:ring-brand disabled:opacity-40" value="${this.escapeHtml(id)}" data-status="${status}" ${selectable ? '' : 'disabled'}></td>
@@ -1782,17 +1836,21 @@ const QAView = {
         <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(row.cost))}</td>
         <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(row.retailPrice))}</td>` : '';
       const abnormal = row.remark || row.aiJudgment || row.abnormalDescription || '-';
-      return `<tr class="hover:bg-slate-50 transition-colors">${common}${productCells}
+      const unresolvedCell = isProductView ? '' : `<td class="px-4 py-3 text-center font-semibold tabular-nums ${batchSummary.unresolvedCount ? 'text-red-600' : 'text-green-600'}">${batchSummary.unresolvedCount}</td>`;
+      const actions = isProductView
+        ? this.renderQaActionButtons({ scope: 'exception', id, row, hideDetail: false })
+        : this.renderExceptionBatchActionButtons(row);
+      return `<tr class="hover:bg-slate-50 transition-colors">${common}${productCells}${unresolvedCell}
         <td class="px-4 py-3 align-middle ${abnormal === '-' ? 'text-center text-[#86909c]' : 'text-left text-amber-700'}" title="${this.escapeHtml(abnormal)}"><span class="${abnormal === '-' ? 'inline-flex min-h-6 items-center justify-center' : 'block w-full truncate'}">${this.escapeHtml(abnormal)}</span></td>
         <td class="px-4 py-3 font-medium">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
         <td class="px-4 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
         <td class="px-4 py-3 text-center">${this.getExceptionStatusBadge(status)}</td>
-        <td class="px-4 py-3 text-center">${this.renderQaActionButtons({ scope: 'exception', id, row, hideDetail: isProductView })}</td>
+        <td class="px-4 py-3 text-center">${actions}</td>
       </tr>`;
     });
     const headers = isProductView
       ? ['时间','合作方ERP','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','客户产品号','客户产品名称','客户条形码','好丽友产品编码','好丽友条形码','好丽友产品名称','销售数量','销售金额','销售成本','零售单价','异常说明','当前责任人','最近操作人','状态','操作']
-      : ['时间','合作方ERP','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','异常说明','当前责任人','最近操作人','状态','操作'];
+      : ['时间','合作方ERP','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','未解决','异常说明','当前责任人','最近操作人','状态','操作'];
     container.innerHTML = `<div class="flex-1 min-h-0 overflow-auto"><table class="table-fixed text-left text-sm text-[#4e5969]" style="width:${this.getQaBusinessTableWidth(headers)}px;min-width:100%;">${this.renderQaBusinessColGroup(headers)}<thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10"><tr><th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="qa-exception-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>${headers.map((header, index) => `<th class="${this.getQaBusinessHeaderClass(header, index, headers.length)}">${header}</th>`).join('')}</tr></thead><tbody id="qa-tbody" class="divide-y divide-gray-100">${body.length ? body.join('') : `<tr><td colspan="${headers.length + 1}" class="px-4 py-16 text-center text-[#86909c]">暂无符合条件的${isProductView ? '产品' : '门店'}异常数据</td></tr>`}</tbody></table></div>${this.renderQaTableSummary(body.length)}`;
     this.bindTableEvents();
     this.bindExceptionEvents();
@@ -2481,6 +2539,15 @@ const QAView = {
         const index = Number(trigger.dataset.index);
         const row = this.standardData[index];
         if (!row || typeof IngestionView === 'undefined' || typeof IngestionView.openDocumentDetail !== 'function') return;
+        if (!this.hasQaPermission('标准POS表', '查看') || !this.hasQaPermission('标准POS表', '单据详情')) {
+          Dialog.toast('当前账号无单据详情权限', 'warning');
+          return;
+        }
+        const productIndex = Number(trigger.closest('tr')?.dataset.productIndex);
+        const productDetail = this.standardDisplayMode === 'detail' && Number.isFinite(productIndex)
+          ? this.getStandardPreviewRows(row)[productIndex]
+          : null;
+        const product = productDetail ? this.getQaProductFields(productDetail, row, productIndex) : null;
         IngestionView.openDocumentDetail({
           moduleName: '质量检查 - 标准POS表',
           currentNode: '标准POS表',
@@ -2490,6 +2557,7 @@ const QAView = {
           sourceFileName: this.getStandardSourceFileName(index, row),
           row: {
             ...row,
+            ...this.getStandardWorkflow(row),
             sourceFileName: this.getStandardSourceFileName(index, row),
             updatedAt: row.updatedAt || this.getStandardSourceTime(index)
           },
@@ -2504,7 +2572,15 @@ const QAView = {
             { label: 'ACC', value: this.getQaAccName(row, index) },
             { label: '本部', value: this.getHeadquarter(row) || '-' },
             { label: '营业所', value: row.salesOffice || '-' },
-            { label: '经销商', value: row.dealer || '-' }
+            { label: '经销商', value: row.dealer || '-' },
+            ...(product ? [
+              { label: '客户产品号', value: product.customerProductCode || '-' },
+              { label: '客户产品名称', value: product.customerProductName || '-' },
+              { label: '客户条形码', value: product.customerBarcode || '-' },
+              { label: '好丽友产品编码', value: product.orionProductCode || '-' },
+              { label: '好丽友条形码', value: product.orionBarcode || '-' },
+              { label: '好丽友产品名称', value: product.orionProductName || '-' }
+            ] : [])
           ]
         });
       });
@@ -2565,10 +2641,15 @@ const QAView = {
         event.stopPropagation();
         const row = this.data.find((item) => item.id === trigger.dataset.id);
         if (!row || typeof IngestionView === 'undefined' || typeof IngestionView.openDocumentDetail !== 'function') return;
+        if (!this.hasQaPermission('异常数据', '查看') || !this.hasQaPermission('异常数据', '单据详情')) {
+          Dialog.toast('当前账号无单据详情权限', 'warning');
+          return;
+        }
         const standardIndex = this.standardData.findIndex((item) => item.storeCode === row.storeCode || item.storeName === row.storeName);
         const sourceIndex = standardIndex >= 0 ? standardIndex : 0;
         const sourceFileName = this.getStandardSourceFileName(sourceIndex, row);
         const responsibility = this.getExceptionResponsibility(row);
+        const product = this.exceptionDisplayMode === 'detail' ? this.getQaProductFields(row, row) : null;
         IngestionView.openDocumentDetail({
           moduleName: '质量检查 - 异常数据',
           currentNode: '异常数据',
@@ -2585,12 +2666,26 @@ const QAView = {
             { label: '门店编码', value: row.storeCode || '-' },
             { label: '当前责任人', value: responsibility.currentOwnerName || '-' },
             { label: '最近操作人', value: responsibility.lastOperatorName || '-' },
+            { label: '驳回原因', value: row.rejectNote || '-' },
+            { label: '营业处理说明', value: row.salesSubmitNote || '-' },
             { label: '异常类型', value: row.conflictType || '-' },
             { label: 'AI判断', value: row.aiJudgment || '-' },
             { label: 'ACC', value: this.getQaAccName(row) },
             { label: '本部', value: this.getHeadquarter(row) || '-' },
             { label: '营业所', value: row.salesOffice || '-' },
-            { label: '经销商', value: row.dealer || '-' }
+            { label: '经销商', value: row.dealer || '-' },
+            ...(product ? [
+              { label: '客户产品号', value: product.customerProductCode || '-' },
+              { label: '客户产品名称', value: product.customerProductName || '-' },
+              { label: '客户条形码', value: product.customerBarcode || '-' },
+              { label: '好丽友产品编码', value: product.orionProductCode || '-' },
+              { label: '好丽友条形码', value: product.orionBarcode || '-' },
+              { label: '好丽友产品名称', value: product.orionProductName || '-' },
+              { label: '销售数量', value: row.quantity ?? '-' },
+              { label: '销售金额', value: row.amount ?? '-' },
+              { label: '销售成本', value: row.cost ?? '-' },
+              { label: '零售单价', value: row.retailPrice ?? '-' }
+            ] : [])
           ]
         });
       });

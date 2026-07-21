@@ -575,9 +575,9 @@ const LedgerView = {
     return `${cells}
       <td class="px-4 py-3">
         <div class="flex items-center gap-1">
-        <button type="button" class="ledger-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-colors" data-ledger-key="${this.escapeHtml(this.getLedgerRowKey(item))}" title="单据详情">
+        ${this.hasLedgerPermission('单据详情') ? `<button type="button" class="ledger-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-colors" data-ledger-key="${this.escapeHtml(this.getLedgerRowKey(item))}" title="单据详情">
           <i class="fa-solid fa-list-check"></i>
-        </button>
+        </button>` : '<span class="text-xs text-[#86909c]">—</span>'}
         </div>
       </td>
     `;
@@ -912,6 +912,10 @@ const LedgerView = {
         return;
       }
       if (detailButton) {
+        if (!this.hasLedgerPermission('查看') || !this.hasLedgerPermission('单据详情')) {
+          Dialog.toast('当前账号无单据详情权限', 'warning');
+          return;
+        }
         const rowKey = detailButton.getAttribute('data-ledger-key');
         const row = this.getFilteredRows().find(item => this.getLedgerRowKey(item) === rowKey);
         if (row && typeof IngestionView !== 'undefined' && typeof IngestionView.openDocumentDetail === 'function') {
