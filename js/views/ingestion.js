@@ -1140,6 +1140,7 @@ const IngestionView = {
       for (let i = 0; i < attachmentCount; i++) {
         let status = '正常';
         let rejectReason = '-';
+        const isHandanMultiStoreCopy = idx === 2 && (i === 0 || i === 1);
         
         if (abnormalCfg) {
           if (abnormalCfg.type === 'all') {
@@ -1157,7 +1158,7 @@ const IngestionView = {
           }
         }
 
-        if ((idx === 2 && i === 0) || (idx === 3 && i === 1)) {
+        if (isHandanMultiStoreCopy || (idx === 3 && i === 1)) {
           status = '待处理';
           rejectReason = '该文件解析后发现“A门店、B门店”与原始门店数据列表中有重复';
         }
@@ -1166,8 +1167,8 @@ const IngestionView = {
           rejectReason = '系统正在解析并校验该附件';
         }
         
-        const isMultiStoreAttachment = (idx === 1 || idx === 2 || idx === 4) && i === 0;
-        if (idx === 2 && i === 0) {
+        const isMultiStoreAttachment = ((idx === 1 || idx === 4) && i === 0) || isHandanMultiStoreCopy || (idx === 3 && i === 1);
+        if (isHandanMultiStoreCopy) {
           status = '待处理';
           rejectReason = '无门店名称/门店编码';
         }
@@ -1175,9 +1176,10 @@ const IngestionView = {
           rejectReason = '无门店名称/门店编码';
         }
         attachments.push({
-          name: (isZip && i === 0) || (idx === 2 && i === 0)
-            ? `${storeNameCN}-销售明细包.zip`
+          name: (isZip && i === 0) || isHandanMultiStoreCopy
+            ? `${storeNameCN}${isHandanMultiStoreCopy && i === 1 ? '-2' : ''}-销售明细包.zip`
             : `${storeNameCN}${i > 0 ? '-' + (i + 1) : ''}-销售明细.xlsx`,
+          sourceGroupId: isHandanMultiStoreCopy ? `handan-multistore-${i}` : undefined,
           isMultiStore: isMultiStoreAttachment,
           splitStores: idx === 1 && i === 0
             ? [
@@ -1185,7 +1187,21 @@ const IngestionView = {
                 { storeName: '多客隆沁河路', status: '已匹配' },
                 { storeName: '多客隆黄河大道', status: '未匹配' }
               ]
-            : idx === 2 && i === 0
+            : idx === 3 && i === 1
+              ? [
+                  { storeName: '韩百商场A店', status: '重复', reason: '与历史门店数据重复' },
+                  { storeName: '韩百商场B店', status: '重复', reason: '与历史门店数据重复' },
+                  { storeName: '韩百商场C店', status: '已匹配', reason: '已匹配门店主数据' }
+                ]
+            : idx === 2 && i === 1
+              ? [
+                  { sourceFileName: '邯郸格耀直营网点销售明细.xlsx', storeName: '邯郸格耀人民路', status: '重复', reason: '与历史门店数据重复' },
+                  { sourceFileName: '邯郸格耀直营网点销售明细.xlsx', storeName: '邯郸格耀滏东店', status: '重复', reason: '与历史门店数据重复' },
+                  { sourceFileName: '邯郸格耀直营网点销售明细.xlsx', storeName: '邯郸格耀中华店', status: '已匹配', reason: '已匹配门店主数据' },
+                  { sourceFileName: '邯郸格耀商超门店销售明细.xlsx', storeName: '邯郸格耀万达店', status: '重复', reason: '与历史门店数据重复' },
+                  { sourceFileName: '邯郸格耀商超门店销售明细.xlsx', storeName: '邯郸格耀新世纪店', status: '已匹配', reason: '已匹配门店主数据' }
+                ]
+            : isHandanMultiStoreCopy
               ? [
                   { storeName: '邯郸格耀人民路', status: '重复' },
                   { storeName: '邯郸格耀滏东店', status: '重复' },
@@ -1198,14 +1214,28 @@ const IngestionView = {
                   { storeName: '', fileName: '待识别门店-销售明细.xlsx', status: '驳回', reason: '无门店名称/门店编码' }
                 ]
               : [],
-          initialSplitStores: idx === 2 && i === 0
+          initialSplitStores: idx === 2 && i === 1
             ? [
-                { storeName: '邯郸格耀人民路', status: '已匹配' },
-                { storeName: '邯郸格耀滏东店', status: '已匹配' },
+                { sourceFileName: '邯郸格耀直营网点销售明细.xlsx', storeName: '邯郸格耀人民路', status: '已匹配', reason: '已匹配门店主数据' },
+                { sourceFileName: '邯郸格耀直营网点销售明细.xlsx', storeName: '邯郸格耀滏东店', status: '已匹配', reason: '已匹配门店主数据' },
+                { sourceFileName: '邯郸格耀直营网点销售明细.xlsx', storeName: '邯郸格耀中华店', status: '驳回', reason: '门店编码缺失，无法匹配门店主数据' },
+                { sourceFileName: '邯郸格耀商超门店销售明细.xlsx', storeName: '邯郸格耀万达店', status: '已匹配', reason: '已匹配门店主数据' },
+                { sourceFileName: '邯郸格耀商超门店销售明细.xlsx', storeName: '邯郸格耀新世纪店', status: '驳回', reason: '门店编码缺失，无法匹配门店主数据' }
+              ]
+            : isHandanMultiStoreCopy
+            ? [
+                { storeName: '邯郸格耀人民路', status: '已匹配', reason: '已匹配门店主数据' },
+                { storeName: '邯郸格耀滏东店', status: '已匹配', reason: '已匹配门店主数据' },
                 { storeName: '', fileName: '待识别门店-销售明细.xlsx', status: '驳回', reason: '无门店名称/门店编码' }
               ]
-            : [],
-          repeatMultiStoreFlow: idx === 2 && i === 0,
+            : idx === 3 && i === 1
+              ? [
+                  { storeName: '韩百商场A店', status: '已匹配', reason: '已匹配门店主数据' },
+                  { storeName: '韩百商场B店', status: '已匹配', reason: '已匹配门店主数据' },
+                  { storeName: '韩百商场C店', status: '驳回', reason: '门店编码缺失，无法匹配门店主数据' }
+                ]
+              : [],
+          repeatMultiStoreFlow: isHandanMultiStoreCopy || (idx === 3 && i === 1),
           status,
           rejectReason,
           sourceMethod: sourceMethods[(idx + i) % sourceMethods.length]
@@ -2381,6 +2411,7 @@ const IngestionView = {
       inboxItem?.provideTime,
       row.receivedAt,
       row.uploadedAt,
+      row.uploadTime,
       row.createdAt,
       row.updatedAt,
       row.transactionDate,
@@ -2417,6 +2448,10 @@ const IngestionView = {
     return logs.map((log, index) => {
       const actual = this.parseLifecycleDate(log.time);
       if (actual) {
+        if (index > 0 && actual.getTime() <= cursor.getTime()) {
+          cursor = new Date(cursor.getTime() + this.getLifecycleNodeStepSeconds(log) * 1000);
+          return { ...log, time: this.formatLifecycleDate(cursor), timeSource: 'NORMALIZED' };
+        }
         cursor = actual;
         return { ...log, time: this.formatLifecycleDate(actual), timeSource: log.timeSource || 'ACTUAL' };
       }
@@ -2455,6 +2490,9 @@ const IngestionView = {
         const splitStoreName = split.storeName || `待识别门店${index + 1}`;
         return {
           fileName: split.fileName || this.getSingleStoreExcelName(`${splitStoreName}-销售明细.xlsx`, splitStoreName),
+          sourceFileName: split.sourceFileName || attachment.sourceExcelName || String(attachment.name || '多门店销售明细.zip')
+            .replace(/-?销售明细包\.zip$/i, '-多门店销售明细.xlsx')
+            .replace(/\.zip$/i, '.xlsx'),
           storeName: split.storeName || '—',
           storeCode: split.storeCode || split.rawStoreCode || '—',
           status,
@@ -2751,6 +2789,239 @@ const IngestionView = {
     `;
   },
 
+  renderDocumentSourceTree({ sourceRows = [], inboxItem = null } = {}) {
+    const statusClass = (row = {}) => {
+      if (row.tone === 'danger' || /驳回|失败/.test(row.status || '')) return 'bg-red-50 text-red-600 border-red-100';
+      if (row.tone === 'warning' || /未匹配|重复|待处理/.test(row.status || '')) return 'bg-amber-50 text-amber-700 border-amber-100';
+      return 'bg-green-50 text-green-700 border-green-100';
+    };
+    const reasonText = (row = {}) => row.reason || (
+      row.status === '已匹配' ? '已匹配门店主数据'
+        : row.status === '未匹配' ? '未匹配到门店主数据'
+          : row.status === '重复' ? '历史版本中该门店数据已流转'
+            : row.status === '驳回' ? '拆分数据不满足流转条件' : '-'
+    );
+    const renderPanel = (sourceRow, sourceFile, panelKey) => `
+      <div class="document-source-split-panel hidden border-t border-blue-100 bg-blue-50/30 px-5 py-4" data-panel="${panelKey}">
+        <div class="max-h-[270px] overflow-auto rounded-xl border border-gray-100 bg-white">
+          <div class="min-w-[560px]">
+            <div class="sticky top-0 grid grid-cols-[minmax(0,1.35fr)_minmax(0,0.9fr)_80px_minmax(0,1.1fr)] gap-3 bg-slate-50 px-4 py-2 text-[11px] font-semibold text-[#86909c]">
+              <span>拆分文件</span><span>识别门店</span><span>匹配状态</span><span>处理说明</span>
+            </div>
+            <div class="divide-y divide-gray-100">
+              ${sourceFile.rows.map(row => `
+                <div class="grid grid-cols-[minmax(0,1.35fr)_minmax(0,0.9fr)_80px_minmax(0,1.1fr)] items-center gap-3 px-4 py-3 text-xs">
+                  <button type="button" class="store-split-preview-btn min-w-0 flex items-center gap-2 text-left text-brand hover:underline"
+                    data-preview-kind="${this.escapeHtml(row.previewKind || '')}" data-row-id="${this.escapeHtml(row.rowId || '')}"
+                    data-stash-key="${this.escapeHtml(row.stashKey || '')}" data-email-id="${this.escapeHtml(row.emailId || inboxItem?.id || '')}"
+                    data-att-idx="${typeof row.attachmentIndex === 'number' ? row.attachmentIndex : sourceRow.attachmentIndex}"
+                    data-zip-index="${typeof row.zipIndex === 'number' ? row.zipIndex : 0}" title="${this.escapeHtml(row.fileName)}">
+                    <i class="fa-solid fa-file-excel shrink-0 text-green-600"></i><span class="truncate">${this.escapeHtml(row.fileName)}</span>
+                  </button>
+                  <span class="truncate font-medium text-[#4e5969]">${this.escapeHtml(row.storeName)}</span>
+                  <span class="justify-self-start rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClass(row)}">${this.escapeHtml(row.status)}</span>
+                  <span class="leading-5 text-[#4e5969]">${this.escapeHtml(reasonText(row))}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      </div>`;
+    const renderExcel = (sourceRow, sourceFile, index, depth = 1) => {
+      const panelKey = `${sourceRow.key}-excel-${index}`;
+      const isMultiStore = sourceFile.rows.length > 1;
+      return `
+        <div class="document-source-table-row grid grid-cols-[minmax(0,1.5fr)_145px_90px_86px] items-center gap-4 px-5 py-3" data-source-key="${panelKey}">
+          <div class="min-w-0 flex items-center gap-2" style="padding-left:${depth * 24}px">
+            <span class="text-gray-300">└</span><i class="fa-solid fa-file-excel shrink-0 text-green-600"></i>
+            <span class="min-w-0 flex-1 truncate text-sm font-semibold text-[#1d2129]" title="${this.escapeHtml(sourceFile.fileName)}">${this.escapeHtml(sourceFile.fileName)}</span>
+            ${isMultiStore ? '<span class="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600">多门店</span>' : '<span class="shrink-0 rounded bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-500">单门店</span>'}
+          </div><span></span><span></span>
+          <span>${isMultiStore ? `<button type="button" class="document-source-split-toggle rounded-lg px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-blue-50" data-target="${panelKey}" aria-expanded="false"><span class="document-source-split-label">查看</span><i class="fa-solid fa-chevron-down ml-1 text-[10px]"></i></button>` : '<span class="text-xs text-[#86909c]">-</span>'}</span>
+        </div>
+        ${isMultiStore ? renderPanel(sourceRow, sourceFile, panelKey) : ''}`;
+    };
+    return `
+      <section class="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-gray-100"><span class="h-7 w-7 rounded-lg bg-blue-50 text-brand flex items-center justify-center"><i class="fa-solid fa-file-lines text-xs"></i></span><h4 class="text-sm font-extrabold text-[#1d2129]">原始文件</h4></div>
+        <div class="overflow-x-auto"><div class="min-w-[620px]">
+          <div class="grid grid-cols-[minmax(0,1.5fr)_145px_90px_86px] gap-4 bg-slate-50 px-5 py-2.5 text-xs font-semibold text-[#86909c]"><span>原始文件名称</span><span>上传时间</span><span>上传用户</span><span>拆分结果</span></div>
+          <div class="divide-y divide-gray-100">
+            ${sourceRows.map((sourceRow, rowIndex) => {
+              const isZip = /\.zip$/i.test(sourceRow.fileName || '');
+              const treeKey = `source-tree-${rowIndex}`;
+              const fileMap = sourceRow.rows.reduce((map, row) => {
+                const name = row.sourceFileName || String(sourceRow.fileName).replace(/-?销售明细包\.zip$/i, '-多门店销售明细.xlsx').replace(/\.zip$/i, '.xlsx');
+                if (!map.has(name)) map.set(name, []);
+                map.get(name).push(row);
+                return map;
+              }, new Map());
+              const files = [...fileMap.entries()].map(([fileName, rows], index) => ({ fileName, rows, index }));
+              const nestedZipName = String(sourceRow.fileName).replace(/\.zip$/i, '-内部资料.zip');
+              return `<div class="document-source-table-group">
+                <div class="grid grid-cols-[minmax(0,1.5fr)_145px_90px_86px] items-center gap-4 px-5 py-3.5">
+                  ${isZip ? `<button type="button" class="document-source-tree-toggle min-w-0 flex items-center gap-3 text-left" data-tree-target="${treeKey}" aria-expanded="false"><i class="fa-solid fa-chevron-right w-3 text-[10px] text-[#86909c]"></i><span class="h-8 w-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center"><i class="fa-solid fa-file-zipper"></i></span><span class="min-w-0"><span class="block truncate text-sm font-semibold text-brand">${this.escapeHtml(sourceRow.fileName)}</span><span class="text-[11px] text-[#86909c]">ZIP · ${files.length}个文件</span></span></button>` : `<button type="button" class="doc-fallback-source-trigger min-w-0 flex items-center gap-3 text-left"><i class="fa-solid fa-file-excel text-green-600"></i><span class="truncate text-sm font-semibold text-brand">${this.escapeHtml(sourceRow.fileName)}</span></button>`}
+                  <span class="text-xs text-[#4e5969]">${this.escapeHtml(sourceRow.uploadedAt)}</span><span class="text-xs font-medium text-[#4e5969]">${this.escapeHtml(sourceRow.uploadUser)}</span><span class="text-xs text-[#86909c]">-</span>
+                </div>
+                ${isZip ? `<div class="document-source-tree-children hidden border-t border-gray-100 bg-slate-50/40" data-tree="${treeKey}">${files.length ? renderExcel(sourceRow, files[0], 0, 1) : '<div class="px-10 py-4 text-xs text-[#86909c]">压缩包内无可识别文件</div>'}${files.length > 1 ? `<div class="document-source-nested-zip"><div class="grid grid-cols-[minmax(0,1.5fr)_145px_90px_86px] items-center gap-4 px-5 py-3"><button type="button" class="document-source-tree-toggle flex min-w-0 items-center gap-2 text-left text-sm font-semibold text-[#4e5969]" style="padding-left:24px" data-tree-target="${treeKey}-nested" aria-expanded="false"><i class="fa-solid fa-chevron-right w-3 text-[10px]"></i><i class="fa-solid fa-file-zipper text-amber-500"></i><span class="truncate">${this.escapeHtml(nestedZipName)}</span></button><span></span><span></span><span class="text-xs text-[#86909c]">-</span></div><div class="document-source-tree-children hidden" data-tree="${treeKey}-nested">${files.slice(1).map((file, index) => renderExcel(sourceRow, file, index + 1, 2)).join('')}</div></div>` : ''}</div>` : (files[0] ? renderExcel(sourceRow, files[0], 0, 0) : '')}
+              </div>`;
+            }).join('')}
+          </div>
+          <div class="document-source-split-shared-container hidden border-t border-blue-100"></div>
+        </div></div>
+      </section>`;
+  },
+
+  renderDocumentSourceTable(context = {}, groups = [], fallbackFileName = '') {
+    const inboxItem = context.inboxItem;
+    const row = context.row || {};
+    const fallbackUploadedAt = this.formatLifecycleDate(
+      context.attachment?.uploadedAt
+      || inboxItem?.provideTime
+      || row.receivedAt
+      || row.uploadedAt
+      || row.uploadTime
+      || row.createdAt
+      || row.updatedAt
+      || row.qualityUpdatedAt
+      || this.getLifecycleBaseTime(context)
+    );
+    const reasonText = (row = {}) => row.reason || (
+      row.status === '已匹配' ? '已匹配门店主数据'
+        : row.status === '未匹配' ? '未匹配到门店主数据'
+          : row.status === '重复' ? '历史版本中该门店数据已流转'
+            : row.status === '驳回' ? '拆分数据不满足流转条件'
+              : '-'
+    );
+    const statusClass = (row = {}) => {
+      if (row.tone === 'danger' || /驳回|失败/.test(row.status || '')) return 'bg-red-50 text-red-600 border-red-100';
+      if (row.tone === 'warning' || /未匹配|重复|待处理/.test(row.status || '')) return 'bg-amber-50 text-amber-700 border-amber-100';
+      return 'bg-green-50 text-green-700 border-green-100';
+    };
+    const sourceRows = groups.length ? groups.flatMap((group, groupIndex) =>
+      group.versions.map((version, versionIndex) => ({
+        key: `source-${groupIndex}-${versionIndex}`,
+        fileName: group.fileName,
+        attachmentIndex: version.attachmentIndex,
+        uploadedAt: version.uploadedAt || inboxItem?.provideTime || fallbackUploadedAt,
+        uploadUser: inboxItem?.provider || '李娜',
+        version,
+        rows: version.rows || []
+      }))
+    ) : [{
+      key: 'source-fallback',
+      fileName: fallbackFileName || 'POS原始数据.xlsx',
+      attachmentIndex: typeof context.attachmentIndex === 'number' ? context.attachmentIndex : 0,
+      uploadedAt: context.attachment?.uploadedAt || inboxItem?.provideTime || fallbackUploadedAt,
+      uploadUser: inboxItem?.provider || '李娜',
+      version: null,
+      rows: []
+    }];
+
+    return this.renderDocumentSourceTree({ sourceRows, inboxItem });
+
+    return `
+      <section class="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-gray-100">
+          <span class="h-7 w-7 rounded-lg bg-blue-50 text-brand flex items-center justify-center">
+            <i class="fa-solid fa-file-lines text-xs"></i>
+          </span>
+          <h4 class="text-sm font-extrabold text-[#1d2129]">原始文件</h4>
+        </div>
+        <div class="overflow-x-auto">
+          <div class="min-w-[620px]">
+            <div class="grid grid-cols-[minmax(0,1.5fr)_145px_90px_100px] items-center gap-4 bg-slate-50 px-5 py-2.5 text-xs font-semibold text-[#86909c]">
+              <span>原始文件名称</span>
+              <span>上传时间</span>
+              <span>上传用户</span>
+              <span>拆分结果</span>
+            </div>
+            <div class="divide-y divide-gray-100">
+              ${sourceRows.map(sourceRow => {
+                const splitCount = sourceRow.rows.length;
+                const isMultiStore = splitCount > 1;
+                const extension = sourceRow.fileName.match(/\.([^.]+)$/)?.[1]?.toUpperCase() || 'FILE';
+                const sourceFileMap = sourceRow.rows.reduce((result, row) => {
+                  const sourceFileName = row.sourceFileName || String(sourceRow.fileName || '多门店销售明细.zip')
+                    .replace(/-?销售明细包\.zip$/i, '-多门店销售明细.xlsx')
+                    .replace(/\.zip$/i, '.xlsx');
+                  if (!result.has(sourceFileName)) result.set(sourceFileName, []);
+                  result.get(sourceFileName).push(row);
+                  return result;
+                }, new Map());
+                const sourceFiles = [...sourceFileMap.entries()].map(([fileName, rows], index) => ({ fileName, rows, index }));
+                return `
+                  <div class="document-source-table-group">
+                    <div class="document-source-table-row grid grid-cols-[minmax(0,1.5fr)_145px_90px_100px] items-center gap-4 px-5 py-3.5 transition-colors" data-source-key="${sourceRow.key}">
+                      ${inboxItem ? `
+                        <button type="button" class="doc-source-attachment-trigger min-w-0 flex items-center gap-3 text-left" data-email-id="${this.escapeHtml(inboxItem.id)}" data-att-idx="${sourceRow.attachmentIndex}">
+                          <span class="h-8 w-8 shrink-0 rounded-lg bg-green-50 text-green-600 flex items-center justify-center"><i class="fa-solid fa-file-excel text-sm"></i></span>
+                          <span class="min-w-0">
+                            <span class="flex min-w-0 items-center gap-2">
+                              <span class="truncate text-sm font-semibold text-brand hover:underline" title="${this.escapeHtml(sourceRow.fileName)}">${this.escapeHtml(sourceRow.fileName)}</span>
+                              ${isMultiStore ? '<span class="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600">多门店</span>' : ''}
+                            </span>
+                            <span class="mt-0.5 block text-[11px] font-medium text-[#86909c]">${this.escapeHtml(extension)}</span>
+                          </span>
+                        </button>
+                      ` : `
+                        <button type="button" class="doc-fallback-source-trigger min-w-0 flex items-center gap-3 text-left">
+                          <span class="h-8 w-8 shrink-0 rounded-lg bg-green-50 text-green-600 flex items-center justify-center"><i class="fa-solid fa-file-excel text-sm"></i></span>
+                          <span class="min-w-0"><span class="block truncate text-sm font-semibold text-brand hover:underline">${this.escapeHtml(sourceRow.fileName)}</span><span class="mt-0.5 block text-[11px] text-[#86909c]">${this.escapeHtml(extension)}</span></span>
+                        </button>
+                      `}
+                      <span class="text-xs text-[#4e5969]">${this.escapeHtml(sourceRow.uploadedAt)}</span>
+                      <span class="truncate text-xs font-medium text-[#4e5969]" title="${this.escapeHtml(sourceRow.uploadUser)}">${this.escapeHtml(sourceRow.uploadUser)}</span>
+                      ${isMultiStore ? `
+                        <button type="button" class="document-source-split-toggle inline-flex w-fit items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-blue-50" data-target="${sourceRow.key}" data-count="${splitCount}" aria-expanded="false">
+                          <span class="document-source-split-label">查看</span><i class="fa-solid fa-chevron-down text-[10px]"></i>
+                        </button>
+                      ` : '<span class="text-sm text-[#86909c]">-</span>'}
+                    </div>
+                    ${isMultiStore ? `
+                      <div class="document-source-split-panel hidden border-t border-blue-100 bg-blue-50/30 px-5 py-4" data-panel="${sourceRow.key}">
+                        ${sourceFiles.map(sourceFile => {
+                          return `
+                            <div class="document-split-source-panel ${sourceFile.index === 0 ? '' : 'hidden'}" data-group="${sourceRow.key}" data-source-index="${sourceFile.index}">
+                              <div class="max-h-[270px] overflow-auto rounded-xl border border-gray-100 bg-white">
+                                <div class="min-w-[560px]">
+                                  <div class="sticky top-0 grid grid-cols-[minmax(0,1.35fr)_minmax(0,0.9fr)_80px_minmax(0,1.1fr)] gap-3 bg-slate-50 px-4 py-2 text-[11px] font-semibold text-[#86909c]">
+                                    <span>拆分文件</span><span>识别门店</span><span>匹配状态</span><span>处理说明</span>
+                                  </div>
+                                  <div class="divide-y divide-gray-100">
+                                    ${sourceFile.rows.map(row => `
+                                      <div class="grid grid-cols-[minmax(0,1.35fr)_minmax(0,0.9fr)_80px_minmax(0,1.1fr)] items-center gap-3 px-4 py-3 text-xs">
+                                        <button type="button" class="store-split-preview-btn min-w-0 flex items-center gap-2 text-left text-brand hover:underline"
+                                          data-preview-kind="${this.escapeHtml(row.previewKind || '')}" data-row-id="${this.escapeHtml(row.rowId || '')}"
+                                          data-stash-key="${this.escapeHtml(row.stashKey || '')}" data-email-id="${this.escapeHtml(row.emailId || inboxItem?.id || '')}"
+                                          data-att-idx="${typeof row.attachmentIndex === 'number' ? row.attachmentIndex : sourceRow.attachmentIndex}"
+                                          data-zip-index="${typeof row.zipIndex === 'number' ? row.zipIndex : 0}" title="${this.escapeHtml(row.fileName)}">
+                                          <i class="fa-solid fa-file-excel shrink-0 text-green-600"></i><span class="truncate">${this.escapeHtml(row.fileName)}</span>
+                                        </button>
+                                        <span class="truncate font-medium text-[#4e5969]" title="${this.escapeHtml(row.storeName)}">${this.escapeHtml(row.storeName)}</span>
+                                        <span class="justify-self-start rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClass(row)}">${this.escapeHtml(row.status)}</span>
+                                        <span class="leading-5 text-[#4e5969]">${this.escapeHtml(reasonText(row))}</span>
+                                      </div>
+                                    `).join('')}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          `;
+                        }).join('')}
+                      </div>
+                    ` : ''}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+            <div class="document-source-split-shared-container hidden"></div>
+          </div>
+        </div>
+      </section>
+    `;
+  },
+
   getFileCheckLogStatus(statusText = '') {
     const text = String(statusText || '');
     if (/校验中|检验中/.test(text)) return '校验中';
@@ -2786,7 +3057,7 @@ const IngestionView = {
     const row = context.row || {};
     const inboxItem = context.inboxItem;
     const attachment = context.attachment;
-    const provideTime = inboxItem?.provideTime || row.createdAt || row.updatedAt || '-';
+    const provideTime = inboxItem?.provideTime || attachment?.uploadedAt || row.uploadTime || row.createdAt || row.updatedAt || '-';
     const updateTime = row.updatedAt || row.qualityUpdatedAt || row.lastOperatedAt || provideTime;
     const fromUnmatched = row.matchSource === 'from-unmatched'
       || row.entrySource === 'UNMATCHED_VALIDATED'
@@ -2796,10 +3067,30 @@ const IngestionView = {
       '文件收取',
       '已接收',
       '文件子单据已进入文件箱',
-      provideTime,
+      attachment?.uploadedAt || provideTime,
       'info',
       row.uploadedBy || inboxItem?.provider || '系统'
     ));
+    if (attachment && this.isDuplicateAttachment(attachment)) {
+      const uploadedAt = this.parseLifecycleDate(attachment.uploadedAt || provideTime);
+      const recordedHandledAt = this.parseLifecycleDate(attachment.duplicateHandledAt);
+      const timeSeed = [...String(attachment.name || '')]
+        .reduce((total, char) => (total + char.charCodeAt(0)) % 600, 0);
+      const simulatedHandledAt = uploadedAt
+        ? new Date(uploadedAt.getTime() + (6 * 60 + 35 + timeSeed) * 1000)
+        : updateTime;
+      const handledAt = recordedHandledAt && (!uploadedAt || recordedHandledAt.getTime() > uploadedAt.getTime())
+        ? recordedHandledAt
+        : simulatedHandledAt;
+      logs.push(this.createLifecycleLog(
+        '重复处理',
+        '已处理',
+        '重复 → 覆盖',
+        handledAt,
+        'success',
+        attachment.duplicateHandledBy || inboxItem?.provider || row.lastOperatorName || '操作用户'
+      ));
+    }
     logs.push(this.createLifecycleLog(
       '文件校验',
       '正常',
@@ -2848,7 +3139,7 @@ const IngestionView = {
         ));
       }
       logs.push(this.createLifecycleLog(
-        '提交校验',
+        '提交复核',
         '待校验',
         row.salesSubmitNote || '修正后的门店信息已提交校验',
         row.salesSubmittedAt || row.promotedAt || updateTime,
@@ -2856,7 +3147,7 @@ const IngestionView = {
         row.salesSubmittedBy || row.lastOperatorName || '营业担当'
       ));
       logs.push(this.createLifecycleLog(
-        '门店校验',
+        'POS复核',
         '已通过',
         '修正后的门店信息已通过主数据校验',
         row.promotedAt || updateTime,
@@ -2895,6 +3186,17 @@ const IngestionView = {
 
   appendQualityLifecycleLogs(logs, row = {}, route = '标准POS', options = {}) {
     const updateTime = row.qualityUpdatedAt || row.updatedAt || row.lastOperatedAt || '-';
+    const checkedAt = this.parseLifecycleDate(updateTime);
+    const submittedAt = row.qualitySubmittedAt
+      || (checkedAt ? new Date(checkedAt.getTime() - 60 * 1000) : updateTime);
+    logs.push(this.createLifecycleLog(
+      '提交质量检查',
+      '已提交',
+      '当前门店数据已提交质量检查',
+      submittedAt,
+      'info',
+      row.qualitySubmittedBy || row.approvedBy || row.lastOperatorName || 'POS担当'
+    ));
     logs.push(this.createLifecycleLog(
       '质量检查',
       options.exception ? '发现异常' : '已通过',
@@ -2930,7 +3232,7 @@ const IngestionView = {
     const moduleName = context.moduleName || '';
     const currentNode = context.currentNode || '';
     const statusText = context.statusText || row.status || attachment?.status || '-';
-    const provideTime = inboxItem?.provideTime || row.updatedAt || row.createdAt || '-';
+    const provideTime = inboxItem?.provideTime || attachment?.uploadedAt || row.uploadTime || row.updatedAt || row.createdAt || '-';
     const updateTime = row.updatedAt || provideTime;
     const fileStatus = this.getFileCheckLogStatus(statusText);
 
@@ -2938,8 +3240,8 @@ const IngestionView = {
       logs.push(this.createLifecycleLog(
         '文件收取',
         '已接收',
-        inboxItem ? '文件已进入文件箱，等待系统校验' : '文件已进入文件箱',
-        provideTime,
+        '文件已进入文件箱',
+        attachment?.uploadedAt || provideTime,
         'info'
       ));
     };
@@ -2993,7 +3295,10 @@ const IngestionView = {
       this.appendQualityLifecycleLogs(logs, row, '标准POS表', { exception: Boolean(exceptionSource) });
       if (exceptionSource) {
         logs.push(this.createLifecycleLog('异常处理', '处理中', exceptionSource.aiJudgment || '异常数据已进入处理流程', exceptionSource.createdAt || updateTime, 'warning', '系统'));
-        if (exceptionSource.salesSubmittedBy) logs.push(this.createLifecycleLog('提交复核', '待复核', exceptionSource.salesSubmitNote || '营业担当已提交处理结果', exceptionSource.salesSubmittedAt || updateTime, 'info', exceptionSource.salesSubmittedBy));
+        if (exceptionSource.salesSubmittedBy) {
+          logs.push(this.createLifecycleLog('数据修正', '已处理', exceptionSource.salesSubmitNote || '异常数据已修正', exceptionSource.salesSubmittedAt || updateTime, 'info', exceptionSource.salesSubmittedBy));
+          logs.push(this.createLifecycleLog('提交复核', '待复核', '异常数据处理结果已提交复核', exceptionSource.salesSubmittedAt || updateTime, 'info', exceptionSource.salesSubmittedBy));
+        }
         logs.push(this.createLifecycleLog('异常整单通过', '已通过', '全部异常项处理完成并通过POS复核', exceptionSource.approvedAt || updateTime, 'success', exceptionSource.approvedBy || 'POS担当'));
         logs.push(this.createLifecycleLog('标准POS生成', '已完成', '根据异常处理后的数据生成标准POS', exceptionSource.approvedAt || updateTime, 'success', '系统'));
         logs.push(this.createLifecycleLog('数据流转', '已进入', '异常数据 → 标准POS表', exceptionSource.approvedAt || updateTime, 'success', exceptionSource.approvedBy || 'POS担当'));
@@ -3014,7 +3319,8 @@ const IngestionView = {
         logs.push(this.createLifecycleLog('异常驳回', '处理中', row.rejectNote || 'POS担当已驳回至营业担当处理', row.rejectedAt || updateTime, 'warning', row.rejectedBy || 'POS担当'));
       }
       if (/待复核/.test(statusText) || row.salesSubmittedBy) {
-        logs.push(this.createLifecycleLog('提交复核', '待复核', row.salesSubmitNote || '营业担当已提交POS复核', row.salesSubmittedAt || updateTime, 'info', row.salesSubmittedBy || '营业担当'));
+        logs.push(this.createLifecycleLog('数据修正', '已处理', row.salesSubmitNote || '异常数据已修正', row.salesSubmittedAt || updateTime, 'info', row.salesSubmittedBy || '营业担当'));
+        logs.push(this.createLifecycleLog('提交复核', '待复核', '异常数据处理结果已提交复核', row.salesSubmittedAt || updateTime, 'info', row.salesSubmittedBy || '营业担当'));
       }
       if (/已通过/.test(statusText) || row.approvedBy) {
         logs.push(this.createLifecycleLog('异常整单通过', '已通过', '全部异常项处理完成并通过POS复核', row.approvedAt || updateTime, 'success', row.approvedBy || 'POS担当'));
@@ -3031,7 +3337,10 @@ const IngestionView = {
       if (exceptionSource) {
         logs.push(this.createLifecycleLog('异常处理', '处理中', exceptionSource.aiJudgment || '异常数据已进入处理流程', exceptionSource.createdAt || provideTime, 'warning', '系统'));
         if (exceptionSource.rejectedBy) logs.push(this.createLifecycleLog('异常驳回', '处理中', exceptionSource.rejectNote || 'POS担当已驳回营业处理', exceptionSource.rejectedAt || updateTime, 'warning', exceptionSource.rejectedBy));
-        if (exceptionSource.salesSubmittedBy) logs.push(this.createLifecycleLog('提交复核', '待复核', exceptionSource.salesSubmitNote || '营业担当已提交处理结果', exceptionSource.salesSubmittedAt || updateTime, 'info', exceptionSource.salesSubmittedBy));
+        if (exceptionSource.salesSubmittedBy) {
+          logs.push(this.createLifecycleLog('数据修正', '已处理', exceptionSource.salesSubmitNote || '异常数据已修正', exceptionSource.salesSubmittedAt || updateTime, 'info', exceptionSource.salesSubmittedBy));
+          logs.push(this.createLifecycleLog('提交复核', '待复核', '异常数据处理结果已提交复核', exceptionSource.salesSubmittedAt || updateTime, 'info', exceptionSource.salesSubmittedBy));
+        }
         logs.push(this.createLifecycleLog('异常整单通过', '已通过', '全部异常项处理完成并通过POS复核', exceptionSource.approvedAt || updateTime, 'success', exceptionSource.approvedBy || 'POS担当'));
         logs.push(this.createLifecycleLog('标准POS生成', '已完成', '根据异常处理后的数据生成标准POS', exceptionSource.approvedAt || updateTime, 'success', '系统'));
         logs.push(this.createLifecycleLog('数据流转', '已进入', '异常数据 → 标准POS表', exceptionSource.approvedAt || updateTime, 'success', exceptionSource.approvedBy || 'POS担当'));
@@ -3043,7 +3352,8 @@ const IngestionView = {
         logs.push(this.createLifecycleLog('标准POS驳回', '处理中', row.rejectNote || 'POS担当已驳回至营业担当处理', row.rejectedAt || updateTime, 'warning', row.rejectedBy || 'POS担当'));
       }
       if (/待复核/.test(statusText) || row.salesSubmittedBy) {
-        logs.push(this.createLifecycleLog('提交复核', '待复核', row.salesSubmitNote || '营业担当已提交POS复核', row.salesSubmittedAt || updateTime, 'info', row.salesSubmittedBy || '营业担当'));
+        logs.push(this.createLifecycleLog('数据修正', '已处理', row.salesSubmitNote || '标准POS数据已修正', row.salesSubmittedAt || updateTime, 'info', row.salesSubmittedBy || '营业担当'));
+        logs.push(this.createLifecycleLog('提交复核', '待复核', '标准POS处理结果已提交复核', row.salesSubmittedAt || updateTime, 'info', row.salesSubmittedBy || '营业担当'));
       }
       if (/已通过/.test(statusText) || row.approvedBy) {
         logs.push(this.createLifecycleLog('标准POS复核', '已通过', 'POS担当已通过当前单据', row.approvedAt || updateTime, 'success', row.approvedBy || 'POS担当'));
@@ -3075,6 +3385,30 @@ const IngestionView = {
     }
 
     if (/文件箱|收件箱/.test(moduleName || currentNode) && attachment) {
+      // 文件箱详情只展示人工动作：上传，以及人工确认后的重复数据处理。
+      addFileReceived();
+      if (this.isDuplicateAttachment(attachment)) {
+        const uploadedAt = this.parseLifecycleDate(attachment.uploadedAt || provideTime);
+        const recordedHandledAt = this.parseLifecycleDate(attachment.duplicateHandledAt);
+        const timeSeed = [...String(attachment.name || '')]
+          .reduce((total, char) => (total + char.charCodeAt(0)) % 600, 0);
+        const simulatedHandledAt = uploadedAt
+          ? new Date(uploadedAt.getTime() + (6 * 60 + 35 + timeSeed) * 1000)
+          : updateTime;
+        const handledAt = recordedHandledAt && (!uploadedAt || recordedHandledAt.getTime() > uploadedAt.getTime())
+          ? recordedHandledAt
+          : simulatedHandledAt;
+        logs.push(this.createLifecycleLog(
+          '重复处理',
+          '已处理',
+          '重复 → 覆盖',
+          handledAt,
+          'success',
+          attachment.duplicateHandledBy || inboxItem?.provider || '操作用户'
+        ));
+      }
+      return logs;
+
       if (attachment.isHistorical) {
         const version = attachment.version || 1;
         logs.push(this.createLifecycleLog('文件收取', '已接收', `V${version} 原始Excel已进入文件箱`, provideTime, 'info'));
@@ -3115,20 +3449,21 @@ const IngestionView = {
 
       if (attachment.repeatMultiStoreFlow) {
         addFileReceived();
-        logs.push(this.createLifecycleLog(
-          '文件校验',
-          '驳回',
-          '文件中存在无门店名称/门店编码的数据',
-          provideTime,
-          'danger'
-        ));
+        const initialRows = attachment.initialSplitStores || [];
+        const initialMatchedCount = initialRows.filter(store => store.status === '已匹配').length;
+        const initialRejectedCount = initialRows.filter(store => store.status === '驳回').length;
+        if (initialRejectedCount) {
+          logs.push(this.createLifecycleLog('文件校验', '驳回', '文件中存在无门店名称/门店编码的数据', provideTime, 'danger'));
+        } else {
+          logs.push(this.createLifecycleLog('文件校验', '正常', '首次上传文件结构、格式与内容校验通过', provideTime, 'success'));
+        }
 
         const initialMatchLog = this.createLifecycleLog(
           '门店匹配',
-          '部分异常',
-          '识别到 3 个门店，2 个已匹配、1 个驳回',
+          initialRejectedCount ? '部分异常' : '已匹配',
+          `识别到 ${initialRows.length} 个门店，${initialMatchedCount} 个已匹配${initialRejectedCount ? `、${initialRejectedCount} 个驳回` : ''}`,
           provideTime,
-          'warning'
+          initialRejectedCount ? 'warning' : 'success'
         );
         initialMatchLog.splitRows = this.buildAttachmentStoreSplitRows({
           ...context,
@@ -3148,12 +3483,16 @@ const IngestionView = {
           'info'
         ));
 
+        const repeatRows = attachment.splitStores || [];
+        const repeatDuplicateCount = repeatRows.filter(store => store.status === '重复').length;
+        const repeatMatchedCount = repeatRows.filter(store => store.status === '已匹配').length;
+        const repeatRejectedCount = repeatRows.filter(store => store.status === '驳回').length;
         const repeatMatchLog = this.createLifecycleLog(
           '门店匹配',
-          '重复',
-          '修正后的门店可以识别，其中 2 个门店与原始门店数据重复，1 个门店已匹配',
+          repeatDuplicateCount ? '重复' : repeatRejectedCount ? '部分异常' : '已匹配',
+          `修正后识别到 ${repeatRows.length} 个门店，${repeatDuplicateCount} 个重复、${repeatMatchedCount} 个已匹配${repeatRejectedCount ? `、${repeatRejectedCount} 个驳回` : ''}`,
           updateTime,
-          'warning'
+          repeatDuplicateCount || repeatRejectedCount ? 'warning' : 'success'
         );
         repeatMatchLog.splitRows = this.buildAttachmentStoreSplitRows({
           ...context,
@@ -3165,13 +3504,9 @@ const IngestionView = {
         });
         logs.push(repeatMatchLog);
 
-        logs.push(this.createLifecycleLog(
-          '重复处理',
-          '待处理',
-          '检测到 2 个重复门店，请确认覆盖或忽略',
-          updateTime,
-          'warning'
-        ));
+        if (repeatDuplicateCount) {
+          logs.push(this.createLifecycleLog('重复处理', '待处理', `检测到 ${repeatDuplicateCount} 个重复门店，请确认覆盖或忽略`, updateTime, 'warning'));
+        }
         return logs;
       }
 
@@ -3234,9 +3569,9 @@ const IngestionView = {
         logs.push(...this.buildUpstreamLifecycleLogs(context));
         logs.push(this.createLifecycleLog('已匹配数据', '待质检', '门店匹配完成，等待质量检查', row.matchedAt || provideTime, 'warning', '系统'));
         if (/质检中|质量校验中/.test(statusText)) {
-          logs.push(this.createLifecycleLog('质量检查', '质检中', '系统正在执行质量检查', updateTime, 'info', row.lastOperatorName || 'POS担当'));
+          logs.push(this.createLifecycleLog('提交质量检查', '已提交', '当前门店数据已提交质量检查', updateTime, 'info', row.qualitySubmittedBy || row.lastOperatorName || 'POS担当'));
         } else if (/已质检|已同步|已通过|正常/.test(statusText)) {
-          logs.push(this.createLifecycleLog('质量检查', '已质检', row.aiNote || '质量检查已完成', row.approvedAt || updateTime, 'success', row.approvedBy || row.lastOperatorName || 'POS担当'));
+          logs.push(this.createLifecycleLog('提交质量检查', '已提交', '当前门店数据已提交质量检查', row.qualitySubmittedAt || row.approvedAt || updateTime, 'success', row.qualitySubmittedBy || row.approvedBy || row.lastOperatorName || 'POS担当'));
           const logRoute = row.logRoute || row.qualityRoute || this.getQualityRoute(row);
           logs.push(this.createLifecycleLog(
             '质检结果',
@@ -3276,7 +3611,7 @@ const IngestionView = {
     if (inboxItem) {
       logs.push({
         node: cn ? '文件收取' : '파일 수집',
-        action: cn ? '文件已进入文件箱，等待系统校验' : '파일이 수집함에 들어왔습니다',
+        action: cn ? '文件已进入文件箱' : '파일이 수집함에 들어왔습니다',
         time: inboxItem.provideTime || '-',
         status: cn ? '已接收' : '수신됨',
         tone: 'info'
@@ -3321,25 +3656,187 @@ const IngestionView = {
     const action = log.action || '';
     if (/文件箱|收件箱/.test(moduleName)) return true;
     if (/未匹配/.test(moduleName)) {
-      return ['未匹配数据', '数据修正', '提交校验', '门店校验', 'POS驳回', '提交复核'].includes(node)
+      return ['未匹配数据', '数据修正', 'POS复核', 'POS驳回', '提交复核'].includes(node)
         || (node === '数据流转' && action.includes('未匹配数据'));
     }
     if (/已匹配|原始门店/.test(moduleName)) {
-      return ['已匹配数据', '质量检查', '质检结果'].includes(node)
+      return ['已匹配数据', '提交质量检查', '质量检查', '质检结果', '数据修正', '提交复核', 'POS复核'].includes(node)
         || (node === '数据流转' && (action.includes('已匹配数据') || action.includes('质量检查')));
     }
     if (/异常数据/.test(moduleName)) {
-      return ['异常处理', '异常驳回', '异常项解决', '提交复核', '异常整单通过'].includes(node)
+      return ['提交质量检查', '异常处理', '异常驳回', '异常项解决', '数据修正', '提交复核', '异常整单通过'].includes(node)
         || (node === '数据流转' && action.includes('异常数据'));
     }
     if (/标准POS|质量检查/.test(moduleName)) {
-      return ['标准POS生成', '标准POS', '标准POS驳回', '标准POS复核', '提交复核'].includes(node)
+      return ['提交质量检查', '标准POS生成', '标准POS', '标准POS驳回', '标准POS复核', '数据修正', '提交复核'].includes(node)
         || (node === '数据流转' && action.includes('标准POS表'));
     }
     if (/台账|汇总/.test(moduleName)) {
       return node === '台账入库' || (node === '数据流转' && action.includes('标准POS明细'));
     }
     return true;
+  },
+
+  getBusinessLifecycleLog(log = {}, context = {}) {
+    const manualNodes = new Set([
+      '文件收取', '文件上传', '新增附件', '重复处理', '附件删除',
+      'POS修改', 'POS驳回', '营业处理', '提交复核', 'POS复核',
+      '提交质量检查',
+      '标准POS驳回', '标准POS复核', '标准POS通过',
+      '异常驳回', '异常整单通过', '数据修正', '重新提交'
+    ]);
+    if (!manualNodes.has(log.node)) return null;
+    const triggerNodes = new Set(['文件收取', '文件上传', '新增附件']);
+    const inboxItem = context.inboxItem;
+    const row = context.row || {};
+    const placeholderOperator = /^(系统|上传用户|操作用户|POS担当|营业担当|Aiden)$/i.test(String(log.operator || '').trim());
+    const operator = log.operator && !placeholderOperator
+      ? log.operator
+      : triggerNodes.has(log.node)
+        ? (inboxItem?.provider || row.uploadUser || row.uploader || this.getSimulatedLogOperator(context, 'upload'))
+        : (row.lastOperatorName || row.updatedBy || inboxItem?.provider || this.getSimulatedLogOperator(context, 'business'));
+    const resolvedOperator = /^(系统|上传用户|操作用户|POS担当|营业担当|Aiden)$/i.test(String(operator || '').trim())
+      ? this.getSimulatedLogOperator(context, triggerNodes.has(log.node) ? 'upload' : 'business')
+      : operator;
+    const actionNameMap = {
+      文件收取: '上传文件',
+      文件上传: '重新上传文件',
+      新增附件: '上传新增附件',
+      重复处理: '处理重复数据',
+      附件删除: '删除附件',
+      POS修改: '修改字段',
+      POS驳回: '驳回单据',
+      营业处理: '处理单据',
+      提交复核: '提交复核',
+      POS复核: '复核单据',
+      提交质量检查: '提交质量检查',
+      标准POS驳回: '驳回标准POS',
+      标准POS复核: '复核标准POS',
+      标准POS通过: '通过标准POS',
+      异常驳回: '驳回异常单据',
+      异常整单通过: '通过异常整单',
+      数据修正: '修改数据',
+      重新提交: '重新提交'
+    };
+    const defaultActionMap = {
+      文件收取: '文件已进入文件箱',
+      重复处理: '重复 → 覆盖',
+      POS驳回: '客户门店编码缺失 → 营业担当',
+      数据修正: '客户门店编码：空 → 已补全',
+      提交复核: '已处理 → 待复核',
+      POS复核: '待复核 → 已通过',
+      POS修改: '原字段值 → 修正值',
+      提交质量检查: '已匹配数据 → 提交质量检查'
+    };
+    const rawAction = String(log.action ?? '').trim();
+    const action = !rawAction || rawAction === '-' || /^\d+$/.test(rawAction) || /^(null|undefined)$/i.test(rawAction)
+      ? (defaultActionMap[log.node] || actionNameMap[log.node] || log.node)
+      : rawAction;
+    const avatarTone = triggerNodes.has(log.node)
+      ? 'bg-emerald-500'
+      : /营业/.test(String(resolvedOperator))
+        ? 'bg-violet-500'
+        : 'bg-cyan-500';
+    return {
+      ...log,
+      action,
+      operator: resolvedOperator,
+      actionName: actionNameMap[log.node] || log.node,
+      avatarText: String(resolvedOperator).trim().slice(-1) || '人',
+      avatarTone,
+      logType: triggerNodes.has(log.node) ? 'MANUAL_TRIGGERED' : 'MANUAL'
+    };
+  },
+
+  getSimulatedLogOperator(context = {}, type = 'business') {
+    const row = context.row || {};
+    const identity = String(
+      row.id || row.fileName || row.sourceFileName || row.storeCode || row.storeName || context.sourceFileName || 'document'
+    );
+    const seed = [...identity].reduce((total, char) => (total * 31 + char.charCodeAt(0)) >>> 0, 0);
+    const names = type === 'upload'
+      ? ['张伟', '李娜', '王敏', '赵磊']
+      : ['张敏', '刘洋', '王磊', '陈晨'];
+    return names[seed % names.length];
+  },
+
+  mergeFullChainScenarioLogs(logs = [], context = {}) {
+    const row = context.row || {};
+    const moduleName = `${context.moduleName || ''} ${context.currentNode || ''}`;
+    if (!/单门店未匹配|单门店已匹配|原始门店|质量检查|标准POS|异常数据|台账|汇总/.test(moduleName)) return logs;
+    const identityText = [
+      row.storeCode,
+      row.customerStoreNo,
+      row.customerStoreCode,
+      row.rawStoreCode,
+      row.orionStoreCode,
+      row.fileName,
+      row.originalFileName,
+      row.sourceFileName,
+      context.sourceFileName
+    ].filter(Boolean).join(' ').toUpperCase();
+    const code = identityText.match(/S\d{7}/)?.[0] || '';
+    if (!['S0091005', 'S0219489'].includes(code)) return logs;
+
+    const inboxItem = context.inboxItem;
+    const attachment = context.attachment;
+    const uploader = row.uploadedBy || inboxItem?.provider || (code === 'S0219489' ? '李娜' : '张伟');
+    const posOperator = code === 'S0219489' ? '刘洋' : '张敏';
+    const salesOperator = code === 'S0219489' ? '王芳' : '赵倩';
+    let cursor = this.parseLifecycleDate(attachment?.uploadedAt || inboxItem?.provideTime || row.uploadTime || row.createdAt || row.updatedAt)
+      || new Date(2026, 4, 20, code === 'S0219489' ? 22 : 21, code === 'S0219489' ? 18 : 15, 0);
+    const at = (seconds = 0) => {
+      cursor = new Date(cursor.getTime() + seconds * 1000);
+      return new Date(cursor.getTime());
+    };
+    if (/单门店未匹配/.test(moduleName)) {
+      const unmatchedLogs = [
+        this.createLifecycleLog('文件收取', '已接收', '文件已进入文件箱', at(0), 'info', uploader),
+        this.createLifecycleLog('重复处理', '已处理', '重复 → 覆盖', at(8 * 60 + 25), 'success', uploader),
+        this.createLifecycleLog('POS驳回', '驳回待处理', '客户门店编码缺失 → 营业担当', at(13 * 60 + 15), 'warning', posOperator),
+        this.createLifecycleLog('数据修正', '已处理', `客户门店编码：空 → ${code}`, at(18 * 60 * 60 + 42 * 60 + 30), 'info', salesOperator),
+        this.createLifecycleLog('提交复核', '待复核', '已处理 → 待复核', at(6 * 60 + 25), 'info', salesOperator),
+        this.createLifecycleLog('POS复核', '已通过', '待复核 → 已通过', at(11 * 60 + 45), 'success', posOperator)
+      ];
+      return unmatchedLogs;
+    }
+    const scenarioLogs = [
+      this.createLifecycleLog('文件收取', '已接收', '文件已进入文件箱', at(0), 'info', uploader),
+      this.createLifecycleLog('重复处理', '已处理', '重复 → 覆盖', at(8 * 60 + 25), 'success', uploader)
+    ];
+
+    if (code === 'S0219489') {
+      scenarioLogs.push(
+        this.createLifecycleLog('POS驳回', '驳回待处理', '门店信息不完整 → 营业担当', at(11 * 60 + 10), 'warning', posOperator),
+        this.createLifecycleLog('数据修正', '已处理', '客户门店编码：空 → S0219489', at(47 * 60 + 35), 'info', salesOperator),
+        this.createLifecycleLog('提交复核', '待复核', '已处理 → 待复核', at(5 * 60 + 20), 'info', salesOperator),
+        this.createLifecycleLog('POS复核', '已通过', '待复核 → 已通过', at(12 * 60 + 15), 'success', posOperator),
+        this.createLifecycleLog('POS修改', '已处理', '客户产品名称：旧值 → 修正值', at(14 * 60 + 40), 'info', posOperator),
+        this.createLifecycleLog('提交质量检查', '已提交', '已匹配数据 → 提交质量检查', at(3 * 60 + 15), 'success', posOperator)
+      );
+    } else {
+      scenarioLogs.push(
+        this.createLifecycleLog('POS修改', '已处理', '销售金额：1575.00 → 1580.00', at(16 * 60 + 40), 'info', posOperator),
+        this.createLifecycleLog('提交质量检查', '已提交', '已匹配数据 → 提交质量检查', at(3 * 60 + 20), 'success', posOperator)
+      );
+    }
+
+    if (/异常数据/.test(moduleName)) {
+      scenarioLogs.push(
+        this.createLifecycleLog('异常驳回', '驳回待处理', '数据异常 → 营业担当', at(12 * 60 + 30), 'warning', posOperator),
+        this.createLifecycleLog('数据修正', '已处理', '异常字段：原值 → 修正值', at(34 * 60 + 15), 'info', salesOperator),
+        this.createLifecycleLog('提交复核', '待复核', '异常数据已处理 → 待复核', at(6 * 60 + 20), 'info', salesOperator)
+      );
+    }
+
+    const inheritedNodeNames = new Set([
+      '文件收取', '重复处理', 'POS驳回', '数据修正', '提交复核',
+      'POS复核', 'POS修改', '提交质量检查', '异常驳回'
+    ]);
+    return [
+      ...scenarioLogs,
+      ...logs.filter((log) => !inheritedNodeNames.has(log.node))
+    ];
   },
 
   openDocumentDetail(context = {}) {
@@ -3358,10 +3855,18 @@ const IngestionView = {
       info: 'bg-blue-50 text-brand border-blue-100',
       muted: 'bg-slate-50 text-slate-500 border-slate-100'
     };
-    const logs = this.resolveLifecycleLogTimes(
-      this.buildDocumentDetailLogs({ ...context, inboxItem, attachment: sourceAttachment }),
-      { ...context, inboxItem, attachment: sourceAttachment, row }
+    const lifecycleContext = { ...context, inboxItem, attachment: sourceAttachment, row };
+    const resolvedLogs = this.resolveLifecycleLogTimes(
+      this.mergeFullChainScenarioLogs(
+        this.buildDocumentDetailLogs(lifecycleContext),
+        lifecycleContext
+      ),
+      lifecycleContext
     );
+    const logs = resolvedLogs
+      .map(log => this.getBusinessLifecycleLog(log, { ...context, inboxItem, attachment: sourceAttachment, row }))
+      .filter(Boolean)
+      .sort((left, right) => (this.parseLifecycleDate(right.time)?.getTime() || 0) - (this.parseLifecycleDate(left.time)?.getTime() || 0));
     const canShowAllInboxSplits = Boolean(context.inboxItem && !context.attachment && /文件箱$|收件箱$|받은 편지함$/.test(context.currentNode || ''));
     const splitGroups = sourceAttachment || canShowAllInboxSplits
       ? this.buildDocumentSplitGroups({
@@ -3375,53 +3880,31 @@ const IngestionView = {
     const requiredSourceFileName = this.getRequiredSourceFileName(context, row);
     const content = `
       <div class="space-y-5">
-        <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
-          <div class="flex items-center gap-2 mb-4">
-            <span class="h-7 w-7 rounded-lg bg-blue-50 text-brand flex items-center justify-center">
-              <i class="fa-solid fa-file-lines text-xs"></i>
-            </span>
-            <h4 class="text-sm font-extrabold text-[#1d2129]">${cn ? '原始文件' : '원본 파일'}</h4>
-          </div>
-          <div class="space-y-2.5">
-            ${context.sourceFileName || row.sourceFileName
-              ? this.renderFallbackSourceFile(context.sourceFileName || row.sourceFileName)
-              : inboxItem && Array.isArray(inboxItem.attachments) && inboxItem.attachments.length
-                ? this.renderInboxSourceAttachments(inboxItem, { attachment: sourceAttachment, attachmentIndex: sourceAttachmentIndex })
-                : this.renderFallbackSourceFile(requiredSourceFileName)}
-          </div>
-        </section>
-
-        ${this.renderDocumentSplitResultSection(splitGroups)}
+        ${this.renderDocumentSourceTable({ ...context, inboxItem, attachment: sourceAttachment, attachmentIndex: sourceAttachmentIndex }, splitGroups, context.sourceFileName || row.sourceFileName || requiredSourceFileName)}
 
         <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
-          <div class="mb-1 flex items-center justify-between gap-3">
-            <h4 class="text-sm font-extrabold text-[#1d2129]">${cn ? '单据日志' : '문서 로그'}</h4>
-            <div class="inline-flex rounded-lg border border-gray-200 bg-slate-50 p-0.5 text-xs">
-              <button type="button" class="document-lifecycle-filter rounded-md bg-white px-2.5 py-1 font-semibold text-brand shadow-sm" data-log-scope="all">${cn ? '全部日志' : '전체 로그'}</button>
-              <button type="button" class="document-lifecycle-filter rounded-md px-2.5 py-1 font-semibold text-[#86909c]" data-log-scope="current">${cn ? '当前模块' : '현재 모듈'}</button>
-            </div>
-          </div>
-          <p class="mb-4 text-xs text-[#86909c]">${cn ? '累计展示当前子单据从文件收取至当前模块的完整数据流向' : '현재 파일의 전체 데이터 흐름을 표시합니다'}</p>
-          <div class="space-y-3">
+          <div class="mb-1"><h4 class="text-sm font-extrabold text-[#1d2129]">${cn ? '单据日志' : '문서 로그'}</h4></div>
+          <div class="document-lifecycle-list mt-4">
             ${logs.map((log, index) => `
               <div class="document-lifecycle-log flex gap-3" data-current-module="${this.isCurrentModuleLifecycleLog(log, context) ? 'true' : 'false'}">
-                <div class="flex flex-col items-center">
-                  <span class="w-7 h-7 rounded-full bg-blue-50 text-brand flex items-center justify-center text-xs font-bold">${index + 1}</span>
-                  ${index < logs.length - 1 ? '<span class="flex-1 w-px bg-gray-200 my-1"></span>' : ''}
+                <div class="flex w-8 shrink-0 flex-col items-center">
+                  <span class="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-white ${log.avatarTone}">${this.escapeHtml(log.avatarText)}</span>
+                  ${index < logs.length - 1 ? '<span class="my-1 w-px flex-1 bg-gray-200"></span>' : ''}
                 </div>
-                <div class="flex-1 rounded-xl border border-gray-100 bg-slate-50 px-4 py-3">
-                  <div class="flex items-center justify-between gap-3">
-                    <div class="font-bold text-sm text-[#1d2129]">${this.escapeHtml(log.node)}</div>
-                    <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border ${logToneClass[log.tone] || logToneClass.muted}">${this.escapeHtml(log.status)}</span>
+                <div class="min-w-0 flex-1 pb-5">
+                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1 pt-1">
+                    <span class="text-sm font-bold text-[#1d2129]">${this.escapeHtml(log.operator)}</span>
+                    <span class="text-xs font-medium text-[#86909c]">${this.escapeHtml(log.actionName)}</span>
                   </div>
-                  <div class="mt-1 text-sm leading-6 text-[#4e5969]">${this.escapeHtml(log.action)}</div>
-                  <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#86909c]">
-                    <span>${this.escapeHtml(log.time)}</span>
-                    ${log.operator ? `<span>操作人：${this.escapeHtml(log.operator)}</span>` : ''}
+                  <div class="mt-2 rounded-lg bg-slate-50 px-3 py-2.5 text-sm leading-6 text-[#4e5969]">
+                    ${this.escapeHtml(log.action)}
+                    ${log.status && !/已接收|已上传/.test(log.status) ? `<div class="mt-0.5 text-xs text-[#86909c]">状态：${this.escapeHtml(log.status)}</div>` : ''}
                   </div>
+                  <div class="mt-2 text-xs text-[#a0a8b5]">${this.escapeHtml(log.time)}</div>
                 </div>
               </div>
             `).join('')}
+            <div class="document-lifecycle-empty ${logs.length ? 'hidden' : ''} py-8 text-center text-sm text-[#86909c]">暂无人工操作记录</div>
           </div>
         </section>
       </div>
@@ -3455,6 +3938,75 @@ const IngestionView = {
       if (row && Object.keys(row).length) this.showStoreDataPreviewModal(row);
     });
 
+    const sharedSplitContainer = overlay.querySelector('.document-source-split-shared-container');
+    if (sharedSplitContainer) {
+      overlay.querySelectorAll('.document-source-split-panel').forEach(panel => sharedSplitContainer.appendChild(panel));
+    }
+
+    overlay.querySelectorAll('.document-source-tree-toggle').forEach(btn => {
+      btn.addEventListener('click', event => {
+        event.stopPropagation();
+        const target = btn.dataset.treeTarget;
+        const children = overlay.querySelector(`.document-source-tree-children[data-tree="${target}"]`);
+        if (!children) return;
+        const wasExpanded = btn.getAttribute('aria-expanded') === 'true';
+        btn.setAttribute('aria-expanded', String(!wasExpanded));
+        children.classList.toggle('hidden', wasExpanded);
+        const icon = btn.querySelector('i.fa-chevron-right, i.fa-chevron-down');
+        icon?.classList.toggle('fa-chevron-right', wasExpanded);
+        icon?.classList.toggle('fa-chevron-down', !wasExpanded);
+
+        if (!wasExpanded) return;
+        children.querySelectorAll('.document-source-split-toggle').forEach(toggle => {
+          const panelKey = toggle.dataset.target;
+          toggle.setAttribute('aria-expanded', 'false');
+          toggle.querySelector('.document-source-split-label').textContent = '查看';
+          toggle.querySelector('i')?.classList.replace('fa-chevron-up', 'fa-chevron-down');
+          overlay.querySelector(`.document-source-split-panel[data-panel="${panelKey}"]`)?.classList.add('hidden');
+          overlay.querySelector(`.document-source-table-row[data-source-key="${panelKey}"]`)?.classList.remove('bg-blue-50/70', 'ring-1', 'ring-inset', 'ring-blue-200');
+        });
+        if (!overlay.querySelector('.document-source-split-toggle[aria-expanded="true"]')) {
+          sharedSplitContainer?.classList.add('hidden');
+        }
+      });
+    });
+
+    overlay.querySelectorAll('.document-source-split-toggle').forEach(btn => {
+      btn.addEventListener('click', event => {
+        event.stopPropagation();
+        const target = btn.dataset.target;
+        const wasExpanded = btn.getAttribute('aria-expanded') === 'true';
+        overlay.querySelectorAll('.document-source-split-toggle').forEach(toggle => {
+          toggle.setAttribute('aria-expanded', 'false');
+          toggle.querySelector('.document-source-split-label').textContent = '查看';
+          toggle.querySelector('i')?.classList.replace('fa-chevron-up', 'fa-chevron-down');
+        });
+        overlay.querySelectorAll('.document-source-split-panel').forEach(panel => panel.classList.add('hidden'));
+        overlay.querySelectorAll('.document-source-table-row').forEach(tableRow => {
+          tableRow.classList.remove('bg-blue-50/70', 'ring-1', 'ring-inset', 'ring-blue-200');
+        });
+        if (wasExpanded) {
+          sharedSplitContainer?.classList.add('hidden');
+          return;
+        }
+        btn.setAttribute('aria-expanded', 'true');
+        btn.querySelector('.document-source-split-label').textContent = '收起';
+        btn.querySelector('i')?.classList.replace('fa-chevron-down', 'fa-chevron-up');
+        overlay.querySelector(`.document-source-split-panel[data-panel="${target}"]`)?.classList.remove('hidden');
+        overlay.querySelector(`.document-source-table-row[data-source-key="${target}"]`)?.classList.add('bg-blue-50/70', 'ring-1', 'ring-inset', 'ring-blue-200');
+        sharedSplitContainer?.classList.remove('hidden');
+      });
+    });
+
+    overlay.querySelectorAll('.document-split-source-select').forEach(select => {
+      select.addEventListener('change', () => {
+        const group = select.dataset.group;
+        overlay.querySelectorAll(`.document-split-source-panel[data-group="${group}"]`).forEach(panel => {
+          panel.classList.toggle('hidden', panel.dataset.sourceIndex !== select.value);
+        });
+      });
+    });
+
     overlay.querySelectorAll('.document-split-version-tab').forEach(btn => {
       btn.addEventListener('click', () => {
         const groupId = btn.dataset.splitGroup;
@@ -3470,22 +4022,6 @@ const IngestionView = {
         });
         overlay.querySelectorAll(`.document-split-version-panel[data-split-group="${groupId}"]`).forEach(panel => {
           panel.classList.toggle('hidden', panel.dataset.splitVersion !== versionId);
-        });
-      });
-    });
-
-    overlay.querySelectorAll('.document-lifecycle-filter').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const scope = btn.dataset.logScope || 'all';
-        overlay.querySelectorAll('.document-lifecycle-filter').forEach((item) => {
-          const active = item.dataset.logScope === scope;
-          item.classList.toggle('bg-white', active);
-          item.classList.toggle('text-brand', active);
-          item.classList.toggle('shadow-sm', active);
-          item.classList.toggle('text-[#86909c]', !active);
-        });
-        overlay.querySelectorAll('.document-lifecycle-log').forEach((item) => {
-          item.classList.toggle('hidden', scope === 'current' && item.dataset.currentModule !== 'true');
         });
       });
     });

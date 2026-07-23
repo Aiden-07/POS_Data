@@ -12,11 +12,11 @@ const QAView = {
   searchField: 'all',
   searchKeyword: '',
   standardStatusFilter: '',
-  standardStatusOptions: ['待通过', '处理中', '待复核', '已通过'],
+  standardStatusOptions: ['待通过', '驳回待处理', '待复核', '已通过'],
   exceptionTypeFilter: '',
   statusFilter: '',
   exceptionStatusOptions: ['待处理', '营业担当处理中', 'POS担当待处理'],
-  exceptionDisplayStatusOptions: ['待处理', '处理中', '待复核'],
+  exceptionDisplayStatusOptions: ['待处理', '驳回待处理', '待复核'],
   hierarchyFilter: {
     teams: [],
     offices: [],
@@ -1323,7 +1323,7 @@ const QAView = {
   getStandardDisplayStatus(status) {
     return ({
       待通过: '待通过',
-      营业担当处理中: '处理中',
+      营业担当处理中: '驳回待处理',
       POS担当待处理: '待复核',
       已通过: '已通过'
     })[status] || status;
@@ -1474,7 +1474,7 @@ const QAView = {
   getExceptionDisplayStatus(status) {
     return ({
       待处理: '待处理',
-      营业担当处理中: '处理中',
+      营业担当处理中: '驳回待处理',
       POS担当待处理: '待复核'
     })[status] || status;
   },
@@ -2746,6 +2746,7 @@ const QAView = {
     if (!overlay) return;
     const team = this.getRejectTeam(row);
     const rejectAssignee = this.getRejectAssignee(team);
+    const rejectAssigneeDisplay = `${rejectAssignee.team} - ${rejectAssignee.user}`;
     const isAgain = this.getExceptionStatus(row) === 'POS担当待处理';
     overlay.innerHTML = `
       <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6">
@@ -2766,7 +2767,7 @@ const QAView = {
             </div>
             <div class="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 flex items-center justify-between">
               <span class="text-sm text-[#4e5969]">${isAgain ? '再次驳回至营业担当' : '驳回至营业担当'}</span>
-              <span class="text-sm font-bold text-brand">${rejectAssignee.label}</span>
+              <span class="text-sm font-bold text-brand">${this.escapeHtml(rejectAssigneeDisplay)}</span>
             </div>
             <div>
               <label for="qa-reject-manual-note" class="block mb-2 text-xs font-semibold text-[#4e5969]">手动备注信息</label>
@@ -2774,7 +2775,7 @@ const QAView = {
                 class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm leading-6 text-[#1d2129] resize-none focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
                 placeholder="请输入补充说明或处理建议">${row.rejectNote || ''}</textarea>
             </div>
-            <p class="text-xs text-[#86909c] leading-5"><span class="font-semibold text-[#4e5969]">说明：</span>驳回操作需针对门店级的完整 POS 表执行，而非单条数据。确认后状态更新为「处理中」，当前责任人变更为 ${rejectAssignee.label}。</p>
+            <p class="text-xs text-[#86909c] leading-5"><span class="font-semibold text-[#4e5969]">说明：</span>驳回操作最小粒度为门店，门店下全部异常单据同步推送对应营业担当；单据状态更新为「驳回待处理」，责任人统一变更为 ${this.escapeHtml(rejectAssigneeDisplay)}。</p>
           </div>
           <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
             <button type="button" id="qa-reject-confirm-cancel" class="px-4 py-2 rounded-lg text-sm text-[#4e5969] bg-gray-100 hover:bg-gray-200 transition-colors">取消</button>
@@ -2802,7 +2803,7 @@ const QAView = {
       close();
       this.renderExceptionTable();
       if (typeof Dialog !== 'undefined') {
-        Dialog.toast(`${row.storeName || row.storeCode} 已${isAgain ? '再次' : ''}驳回至 ${rejectAssignee.label}`, 'success');
+        Dialog.toast(`${row.storeName || row.storeCode} 已${isAgain ? '再次' : ''}驳回至 ${rejectAssigneeDisplay}`, 'success');
       }
     });
   },
@@ -2822,7 +2823,8 @@ const QAView = {
     const isAgain = status === 'POS担当待处理';
     const team = row.salesTeam || '营业 Team';
     const rejectAssignee = this.getRejectAssignee(team);
-    overlay.innerHTML = `<div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6"><div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden"><div class="px-6 py-5 border-b border-gray-100 flex items-start justify-between"><div><h3 class="text-lg font-bold">${isAgain ? '确认再次驳回标准POS表' : '确认驳回标准POS表'}</h3><p class="mt-1 text-sm text-[#86909c]">${this.escapeHtml(row.storeName)} · ${this.escapeHtml(row.storeCode)}</p></div><button id="qa-standard-reject-close" class="w-8 h-8 rounded-lg hover:bg-gray-100"><i class="fa-solid fa-xmark"></i></button></div><div class="px-6 py-5 space-y-4"><div class="rounded-xl border border-red-100 bg-red-50 px-4 py-3"><div class="text-xs font-semibold text-red-500">AI判断</div><div class="mt-1 text-sm">${this.escapeHtml(row.aiNote || '-')}</div></div><div class="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 flex justify-between"><span class="text-sm">驳回至营业担当</span><strong class="text-brand">${this.escapeHtml(rejectAssignee.label)}</strong></div><label class="block"><span class="mb-2 block text-xs font-semibold">手动备注信息</span><textarea id="qa-standard-reject-note" rows="4" maxlength="500" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="请输入补充说明或处理建议"></textarea></label><p class="text-xs leading-5 text-[#86909c]">驳回将作用于该门店的完整POS表，而非当前单条产品明细。确认后状态变为“处理中”，当前责任人为 ${this.escapeHtml(rejectAssignee.label)}。</p></div><div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-3"><button id="qa-standard-reject-cancel" class="px-4 py-2 rounded-lg bg-gray-100 text-sm">取消</button><button id="qa-standard-reject-submit" class="px-4 py-2 rounded-lg bg-red-500 text-white text-sm">${isAgain ? '确认再次驳回' : '确认驳回'}</button></div></div></div>`;
+    const rejectAssigneeDisplay = `${rejectAssignee.team} - ${rejectAssignee.user}`;
+    overlay.innerHTML = `<div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6"><div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden"><div class="px-6 py-5 border-b border-gray-100 flex items-start justify-between"><div><h3 class="text-lg font-bold">${isAgain ? '确认再次驳回标准POS表' : '确认驳回标准POS表'}</h3><p class="mt-1 text-sm text-[#86909c]">${this.escapeHtml(row.storeName)} · ${this.escapeHtml(row.storeCode)}</p></div><button id="qa-standard-reject-close" class="w-8 h-8 rounded-lg hover:bg-gray-100"><i class="fa-solid fa-xmark"></i></button></div><div class="px-6 py-5 space-y-4"><div class="rounded-xl border border-red-100 bg-red-50 px-4 py-3"><div class="text-xs font-semibold text-red-500">AI判断</div><div class="mt-1 text-sm">${this.escapeHtml(row.aiNote || '-')}</div></div><div class="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 flex justify-between"><span class="text-sm">驳回至营业担当</span><strong class="text-brand">${this.escapeHtml(rejectAssigneeDisplay)}</strong></div><label class="block"><span class="mb-2 block text-xs font-semibold">手动备注信息</span><textarea id="qa-standard-reject-note" rows="4" maxlength="500" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="请输入补充说明或处理建议"></textarea></label><p class="text-xs leading-5 text-[#86909c]"><span class="font-semibold text-[#4e5969]">说明：</span>驳回操作最小粒度为门店，门店下全部单据同步推送对应营业担当；单据状态更新为「驳回待处理」，责任人统一变更为 ${this.escapeHtml(rejectAssigneeDisplay)}。</p></div><div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-3"><button id="qa-standard-reject-cancel" class="px-4 py-2 rounded-lg bg-gray-100 text-sm">取消</button><button id="qa-standard-reject-submit" class="px-4 py-2 rounded-lg bg-red-500 text-white text-sm">${isAgain ? '确认再次驳回' : '确认驳回'}</button></div></div></div>`;
     const close = () => { overlay.innerHTML = ''; };
     overlay.querySelector('#qa-standard-reject-close')?.addEventListener('click', close);
     overlay.querySelector('#qa-standard-reject-cancel')?.addEventListener('click', close);
@@ -2835,7 +2837,7 @@ const QAView = {
       });
       close();
       this.renderStandardTable();
-      Dialog.toast(`${row.storeName} 已${isAgain ? '再次' : ''}驳回至 ${rejectAssignee.label}`, 'success');
+      Dialog.toast(`${row.storeName} 已${isAgain ? '再次' : ''}驳回至 ${rejectAssigneeDisplay}`, 'success');
     });
   },
 
