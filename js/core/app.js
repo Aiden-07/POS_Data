@@ -49,26 +49,13 @@ const App = {
     const menuBtn = document.getElementById('user-menu-btn');
     const menuPanel = document.getElementById('user-menu-panel');
     const logoutBtn = document.getElementById('logout-btn');
-    const changePasswordBtn = document.getElementById('change-password-btn');
-    const accountBindingBtn = document.getElementById('account-binding-btn');
+    const settingsCenterBtn = document.getElementById('settings-center-btn');
     const userNameEl = document.getElementById('header-user-name');
     const userRoleEl = document.getElementById('header-user-role');
     const state = Store.getState();
 
     if (userNameEl) userNameEl.textContent = state.userName || 'Aiden';
     if (userRoleEl) userRoleEl.textContent = state.userRole || 'POS担当';
-
-    document.querySelectorAll('.demo-account-switch').forEach((button) => {
-      button.addEventListener('click', (event) => {
-        event.stopPropagation();
-        if (!Store.switchAccount(button.dataset.account)) return;
-        closeMenu();
-        this.applyRoleVisibility();
-        this.syncHeaderUser();
-        this.mountView(Store.getState().currentView || 'dashboard');
-        Dialog.toast(`已切换为 ${Store.getState().userName}（${Store.getState().userRole}）`, 'success');
-      });
-    });
 
     const closeMenu = () => {
       menuPanel?.classList.add('hidden');
@@ -82,16 +69,10 @@ const App = {
       menuBtn.setAttribute('aria-expanded', String(willOpen));
     });
 
-    changePasswordBtn?.addEventListener('click', (event) => {
+    settingsCenterBtn?.addEventListener('click', (event) => {
       event.stopPropagation();
       closeMenu();
-      this.openChangePasswordDialog();
-    });
-
-    accountBindingBtn?.addEventListener('click', (event) => {
-      event.stopPropagation();
-      closeMenu();
-      this.openAccountBindingDialog();
+      this.openSettingsCenter();
     });
 
     logoutBtn?.addEventListener('click', (event) => {
@@ -147,6 +128,253 @@ const App = {
       settingsSubnav?.classList.toggle('hidden', !willOpen);
       settingsToggle.setAttribute('aria-expanded', String(willOpen));
     });
+  },
+
+  getQualityCheckConfig() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('pos_quality_check_config') || '{}');
+      return {
+        manual: saved.manual !== false,
+        updatedBy: saved.updatedBy || 'Aiden',
+        updatedAt: saved.updatedAt || '尚未修改'
+      };
+    } catch (error) {
+      return { manual: true, updatedBy: 'Aiden', updatedAt: '尚未修改' };
+    }
+  },
+
+  renderSettingsCenterSection(section = 'profile') {
+    const state = Store.getState();
+    const binding = this.getAccountBindingState();
+    const quality = this.getQualityCheckConfig();
+    const qrExpiresAt = Number(binding.qrExpiresAt) || Date.now() + 5 * 60 * 1000;
+    const qrExpired = !binding.bound && Date.now() >= qrExpiresAt;
+    const qrCells = Array.from({ length: 81 }).map((_, index) => {
+      const row = Math.floor(index / 9);
+      const col = index % 9;
+      const finder = ((row < 3 || row > 5) && (col < 3 || col > 5));
+      const active = finder || ((index * 7 + row * 3 + col) % 5 < 2);
+      return `<span class="${active ? 'bg-[#172b4d]' : 'bg-white'} rounded-[1px]"></span>`;
+    }).join('');
+    if (section === 'password') return `
+      <div class="max-w-xl">
+        <h3 class="text-lg font-black text-[#1d2129]">修改密码</h3>
+        <p class="mt-1 text-sm text-[#86909c]">更新当前登录账号的访问密码</p>
+        <form id="settings-password-form" class="mt-6 space-y-4">
+          ${['原密码','新密码','确认新密码'].map((label, index) => `<label class="block"><span class="mb-2 block text-sm font-semibold text-[#4e5969]">${label}</span><input type="password" data-password-index="${index}" class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-blue-100"></label>`).join('')}
+          <p id="settings-password-error" class="hidden text-sm text-red-600"></p>
+          <button type="submit" class="rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm">确认修改</button>
+        </form>
+      </div>`;
+    if (section === 'binding') return `
+      <div>
+        <h3 class="text-lg font-black text-[#1d2129]">账号绑定</h3>
+        <p class="mt-1 text-sm text-[#86909c]">绑定企业微信后，可用于消息通知和身份确认</p>
+        <div class="mt-6 rounded-2xl border ${binding.bound ? 'border-green-100 bg-green-50/40' : 'border-blue-100 bg-blue-50/40'} p-5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3"><span class="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-xl text-green-600 shadow-sm"><i class="fa-brands fa-weixin"></i></span><div><div class="font-bold text-[#1d2129]">企业微信</div><div class="mt-1 text-xs text-[#86909c]">${binding.bound ? `${binding.nickname || state.userName} · ${binding.company || 'Orion POS'}` : '当前账号尚未绑定'}</div></div></div>
+            <span class="rounded-full px-2.5 py-1 text-xs font-bold ${binding.bound ? 'bg-green-100 text-green-700' : binding.scanStatus === 'pending' ? 'bg-blue-100 text-brand' : 'bg-amber-100 text-amber-700'}">${binding.bound ? '已绑定' : binding.scanStatus === 'pending' ? '待确认' : '未绑定'}</span>
+          </div>
+          ${binding.bound ? `
+            <div class="mt-5 grid grid-cols-2 gap-3 text-sm">
+              <div class="rounded-xl bg-white px-4 py-3"><div class="text-xs text-[#86909c]">企业微信昵称</div><div class="mt-1 font-bold text-[#1d2129]">${binding.nickname || state.userName}</div></div>
+              <div class="rounded-xl bg-white px-4 py-3"><div class="text-xs text-[#86909c]">所属企业</div><div class="mt-1 font-bold text-[#1d2129]">${binding.company || 'Orion POS'}</div></div>
+              <div class="rounded-xl bg-white px-4 py-3"><div class="text-xs text-[#86909c]">绑定账号</div><div class="mt-1 font-bold text-[#1d2129]">${state.account || '-'}</div></div>
+              <div class="rounded-xl bg-white px-4 py-3"><div class="text-xs text-[#86909c]">绑定时间</div><div class="mt-1 font-bold text-[#1d2129]">${binding.boundAt || '-'}</div></div>
+            </div>
+            <div class="mt-5 flex justify-end gap-3"><button type="button" id="settings-binding-unbind" class="rounded-lg bg-red-50 px-4 py-2 text-sm font-semibold text-red-600">解除绑定</button><button type="button" id="settings-binding-rebind" class="rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-brand">重新绑定</button></div>
+          ` : `
+            <div class="mt-5 flex gap-6 rounded-2xl bg-white p-5">
+              <div class="relative shrink-0 rounded-xl border border-blue-100 bg-white p-3 shadow-sm">
+                <div class="grid h-40 w-40 grid-cols-9 gap-1 ${qrExpired ? 'opacity-20' : ''}">${qrCells}</div>
+                ${qrExpired ? '<div class="absolute inset-0 flex items-center justify-center"><span class="rounded-lg bg-white px-3 py-2 text-xs font-bold text-[#4e5969] shadow">二维码已失效</span></div>' : ''}
+                ${binding.scanStatus === 'pending' && !qrExpired ? '<div class="absolute inset-0 flex items-center justify-center bg-white/90"><div class="text-center"><i class="fa-solid fa-circle-check text-2xl text-green-600"></i><div class="mt-2 text-xs font-bold text-[#1d2129]">已扫码</div></div></div>' : ''}
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="text-base font-bold text-[#1d2129]">${binding.scanStatus === 'pending' ? '请在企业微信中确认授权' : '使用企业微信扫码绑定'}</div>
+                <ol class="mt-3 space-y-2 text-sm text-[#4e5969]"><li>1. 打开企业微信“扫一扫”</li><li>2. 扫描左侧二维码</li><li>3. 在企业微信中确认账号授权</li></ol>
+                <div class="mt-4 text-xs text-[#86909c]">二维码有效期：<span id="settings-binding-countdown" class="font-bold text-[#4e5969]" data-expires-at="${qrExpiresAt}">${qrExpired ? '已失效' : '05:00'}</span></div>
+                <div class="mt-5 flex flex-wrap gap-2">
+                  <button type="button" id="settings-binding-refresh" class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-[#4e5969]">刷新二维码</button>
+                  ${binding.scanStatus === 'pending' && !qrExpired
+                    ? '<button type="button" id="settings-binding-confirm" class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-brand">模拟确认绑定</button>'
+                    : `<button type="button" id="settings-binding-scan" class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-brand" ${qrExpired ? 'disabled' : ''}>模拟扫码</button>`}
+                </div>
+              </div>
+            </div>
+          `}
+        </div>
+      </div>`;
+    if (section === 'accounts') return `
+      <div>
+        <h3 class="text-lg font-black text-[#1d2129]">切换演示账号</h3>
+        <p class="mt-1 text-sm text-[#86909c]">切换账号以验证不同角色的页面和操作权限</p>
+        <div class="mt-6 grid gap-3">
+          ${Object.values(Store.accounts).map(account => `<button type="button" class="settings-account-option flex items-center justify-between rounded-2xl border p-4 text-left transition-colors ${state.account === account.account ? 'border-blue-200 bg-blue-50' : 'border-gray-100 hover:border-blue-100 hover:bg-slate-50'}" data-account="${account.account}"><span class="flex items-center gap-3"><span class="flex h-10 w-10 items-center justify-center rounded-full bg-white font-bold text-brand shadow-sm">${account.userName.slice(0, 1)}</span><span><span class="block font-bold text-[#1d2129]">${account.userName}</span><span class="mt-1 block text-xs text-[#86909c]">${account.userRole}${account.team ? ` · ${account.team}` : ''}</span></span></span>${state.account === account.account ? '<span class="text-xs font-bold text-brand"><i class="fa-solid fa-check mr-1"></i>当前账号</span>' : '<span class="text-xs font-semibold text-[#86909c]">切换</span>'}</button>`).join('')}
+        </div>
+      </div>`;
+    if (section === 'quality') return `
+      <div>
+        <h3 class="text-lg font-black text-[#1d2129]">质检配置</h3>
+        <p class="mt-1 text-sm text-[#86909c]">配置单门店已匹配数据进入质量检查的方式</p>
+        <div class="mt-6 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <div class="flex items-start justify-between gap-6">
+            <div><div class="font-bold text-[#1d2129]">人工触发质检</div><p class="mt-2 max-w-xl text-sm leading-6 text-[#4e5969]">开启后，需要人工在“单门店已匹配数据”中选择单据并点击“质检”；关闭后，新进入的已匹配数据由系统自动提交质量检查。</p></div>
+            <label class="relative mt-1 inline-flex cursor-pointer items-center"><input id="settings-quality-manual" type="checkbox" class="peer sr-only" ${quality.manual ? 'checked' : ''}><span class="h-6 w-11 rounded-full bg-gray-200 transition-colors peer-checked:bg-brand"></span><span class="absolute left-1 h-4 w-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5"></span></label>
+          </div>
+          <div class="mt-5 grid grid-cols-2 gap-3 text-xs"><div class="rounded-xl bg-slate-50 px-4 py-3"><span class="text-[#86909c]">当前模式</span><strong class="ml-2 text-[#1d2129]">${quality.manual ? '人工质检' : '自动质检'}</strong></div><div class="rounded-xl bg-slate-50 px-4 py-3"><span class="text-[#86909c]">最后修改</span><strong class="ml-2 text-[#1d2129]">${quality.updatedBy} · ${quality.updatedAt}</strong></div></div>
+          <div class="mt-5 flex justify-end"><button id="settings-quality-save" type="button" class="rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm">保存配置</button></div>
+        </div>
+      </div>`;
+    return `
+      <div>
+        <h3 class="text-lg font-black text-[#1d2129]">账号信息</h3>
+        <p class="mt-1 text-sm text-[#86909c]">查看当前登录用户及组织归属</p>
+        <div class="mt-6 overflow-hidden rounded-2xl border border-gray-100 bg-white">
+          ${[
+            ['姓名', state.userName || '-'], ['登录账号', state.account || '-'], ['当前角色', state.userRole || '-'],
+            ['所属Team', state.team || '-'], ['所属营业所', state.salesOffice || '-']
+          ].map(([label, value]) => `<div class="grid grid-cols-[140px_1fr] border-b border-gray-100 px-5 py-4 last:border-b-0"><span class="text-sm font-semibold text-[#86909c]">${label}</span><span class="text-sm font-bold text-[#1d2129]">${value}</span></div>`).join('')}
+        </div>
+      </div>`;
+  },
+
+  openSettingsCenter(initialSection = 'profile') {
+    const overlay = document.getElementById('overlay-container');
+    if (!overlay) return;
+    const canManageQuality = Store.getState().isAdmin || Store.isPosActor();
+    const navItems = [
+      ['profile', 'fa-user', '账号信息'],
+      ['password', 'fa-key', '修改密码'],
+      ['binding', 'fa-link', '账号绑定'],
+      ['accounts', 'fa-people-arrows', '账号切换'],
+      ...(canManageQuality ? [['quality', 'fa-list-check', '质检配置']] : [])
+    ];
+    overlay.innerHTML = `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-6 backdrop-blur-sm"><div class="flex h-[min(680px,86vh)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"><div class="flex items-center justify-between border-b border-gray-100 px-6 py-4"><div><h2 class="text-lg font-black text-[#1d2129]">设置中心</h2><p class="mt-1 text-xs text-[#86909c]">个人账号与业务流程配置</p></div><button id="settings-center-close" type="button" class="flex h-9 w-9 items-center justify-center rounded-lg text-[#86909c] hover:bg-gray-100"><i class="fa-solid fa-xmark"></i></button></div><div class="flex min-h-0 flex-1"><aside class="w-52 shrink-0 border-r border-gray-100 bg-slate-50/60 p-3"><nav class="space-y-1">${navItems.map(([key, icon, label]) => `<button type="button" class="settings-center-nav flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold" data-section="${key}"><i class="fa-solid ${icon} w-4"></i><span>${label}</span></button>`).join('')}</nav></aside><main id="settings-center-content" class="min-w-0 flex-1 overflow-auto p-7"></main></div></div></div>`;
+    let activeSection = initialSection;
+    const render = () => {
+      overlay.querySelectorAll('.settings-center-nav').forEach(button => {
+        const active = button.dataset.section === activeSection;
+        button.classList.toggle('bg-blue-50', active);
+        button.classList.toggle('text-brand', active);
+        button.classList.toggle('text-[#4e5969]', !active);
+      });
+      const content = overlay.querySelector('#settings-center-content');
+      if (!content) return;
+      content.innerHTML = this.renderSettingsCenterSection(activeSection);
+      this.bindSettingsCenterSection(activeSection, render);
+    };
+    overlay.querySelector('#settings-center-close')?.addEventListener('click', () => {
+      if (this.settingsBindingTimer) clearInterval(this.settingsBindingTimer);
+      this.settingsBindingTimer = null;
+      overlay.innerHTML = '';
+    });
+    overlay.querySelectorAll('.settings-center-nav').forEach(button => button.addEventListener('click', () => {
+      activeSection = button.dataset.section;
+      render();
+    }));
+    render();
+  },
+
+  bindSettingsCenterSection(section, rerender) {
+    const overlay = document.getElementById('overlay-container');
+    if (this.settingsBindingTimer) {
+      clearInterval(this.settingsBindingTimer);
+      this.settingsBindingTimer = null;
+    }
+    if (section === 'password') {
+      overlay.querySelector('#settings-password-form')?.addEventListener('submit', event => {
+        event.preventDefault();
+        const values = [...event.currentTarget.querySelectorAll('input')].map(input => input.value.trim());
+        const error = overlay.querySelector('#settings-password-error');
+        const showError = message => { error.textContent = message; error.classList.remove('hidden'); };
+        if (values.some(value => !value)) return showError('请完整填写原密码、新密码和确认新密码');
+        if (values[1].length < 6) return showError('新密码至少需要6位');
+        if (values[1] !== values[2]) return showError('两次输入的新密码不一致');
+        event.currentTarget.reset();
+        error.classList.add('hidden');
+        Dialog.toast('密码修改成功');
+      });
+    }
+    if (section === 'binding') {
+      let current = this.getAccountBindingState();
+      if (!current.bound && !current.qrExpiresAt) {
+        current = { ...current, scanStatus: 'idle', qrExpiresAt: Date.now() + 5 * 60 * 1000 };
+        this.saveAccountBindingState(current);
+      }
+      const countdown = overlay.querySelector('#settings-binding-countdown');
+      const updateCountdown = () => {
+        if (!countdown) return;
+        const remaining = Math.max(0, Number(countdown.dataset.expiresAt) - Date.now());
+        if (!remaining) {
+          const shouldRefreshState = countdown.textContent !== '已失效';
+          countdown.textContent = '已失效';
+          clearInterval(this.settingsBindingTimer);
+          this.settingsBindingTimer = null;
+          if (shouldRefreshState) rerender();
+          return;
+        }
+        const totalSeconds = Math.ceil(remaining / 1000);
+        countdown.textContent = `${String(Math.floor(totalSeconds / 60)).padStart(2, '0')}:${String(totalSeconds % 60).padStart(2, '0')}`;
+      };
+      updateCountdown();
+      if (countdown) this.settingsBindingTimer = setInterval(updateCountdown, 1000);
+      overlay.querySelector('#settings-binding-refresh')?.addEventListener('click', () => {
+        this.saveAccountBindingState({ ...this.getAccountBindingState(), bound: false, scanStatus: 'idle', qrExpiresAt: Date.now() + 5 * 60 * 1000 });
+        rerender();
+        Dialog.toast('二维码已刷新');
+      });
+      overlay.querySelector('#settings-binding-scan')?.addEventListener('click', () => {
+        this.saveAccountBindingState({ ...this.getAccountBindingState(), scanStatus: 'pending' });
+        rerender();
+        Dialog.toast('已扫码，请在企业微信中确认');
+      });
+      overlay.querySelector('#settings-binding-confirm')?.addEventListener('click', () => {
+        this.saveAccountBindingState({
+          bound: true,
+          scanStatus: 'confirmed',
+          qrExpiresAt: 0,
+          nickname: Store.getState().userName,
+          company: 'Orion POS',
+          boundAt: this.getCurrentTime()
+        });
+        rerender();
+        Dialog.toast('企业微信绑定成功');
+      });
+      overlay.querySelector('#settings-binding-unbind')?.addEventListener('click', () => {
+        this.saveAccountBindingState({ bound: false, scanStatus: 'idle', qrExpiresAt: Date.now() + 5 * 60 * 1000, nickname: '', company: '', boundAt: '' });
+        rerender();
+        Dialog.toast('已解除企业微信绑定');
+      });
+      overlay.querySelector('#settings-binding-rebind')?.addEventListener('click', () => {
+        this.saveAccountBindingState({ ...this.getAccountBindingState(), bound: false, scanStatus: 'idle', qrExpiresAt: Date.now() + 5 * 60 * 1000 });
+        rerender();
+      });
+    }
+    if (section === 'accounts') {
+      overlay.querySelectorAll('.settings-account-option').forEach(button => button.addEventListener('click', () => {
+        if (!Store.switchAccount(button.dataset.account)) return;
+        this.applyRoleVisibility();
+        this.syncHeaderUser();
+        this.mountView(Store.getState().currentView || 'dashboard');
+        rerender();
+        Dialog.toast(`已切换为 ${Store.getState().userName}（${Store.getState().userRole}）`, 'success');
+      }));
+    }
+    if (section === 'quality') {
+      overlay.querySelector('#settings-quality-save')?.addEventListener('click', () => {
+        const manual = Boolean(overlay.querySelector('#settings-quality-manual')?.checked);
+        localStorage.setItem('pos_quality_check_config', JSON.stringify({
+          manual,
+          updatedBy: Store.getState().userName,
+          updatedAt: this.getCurrentTime(),
+          effectiveAt: manual ? null : Date.now()
+        }));
+        this.mountView(Store.getState().currentView || 'dashboard');
+        rerender();
+        Dialog.toast(`已切换为${manual ? '人工' : '自动'}质检模式`, 'success');
+      });
+    }
   },
 
   openChangePasswordDialog() {
@@ -228,10 +456,10 @@ const App = {
     try {
       const saved = JSON.parse(localStorage.getItem('pos_account_binding') || '{}');
       return saved && typeof saved === 'object'
-        ? { bound: false, nickname: '', company: '', boundAt: '', ...saved }
-        : { bound: false, nickname: '', company: '', boundAt: '' };
+        ? { bound: false, scanStatus: 'idle', qrExpiresAt: 0, nickname: '', company: '', boundAt: '', ...saved }
+        : { bound: false, scanStatus: 'idle', qrExpiresAt: 0, nickname: '', company: '', boundAt: '' };
     } catch (error) {
-      return { bound: false, nickname: '', company: '', boundAt: '' };
+      return { bound: false, scanStatus: 'idle', qrExpiresAt: 0, nickname: '', company: '', boundAt: '' };
     }
   },
 

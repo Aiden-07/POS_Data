@@ -58,6 +58,7 @@ const IngestionView = {
   },
 
   getWorkflowStatus(row = {}) {
+    if (this.isAutomaticQualityRecord(row)) return '质检中';
     if (row.workflowStatus) return row.workflowStatus;
     if (String(row.status).includes('质量校验中')) return '质检中';
     if (/(已同步|已通过)/.test(String(row.status))) return '已同步';
@@ -105,14 +106,36 @@ const IngestionView = {
       && (row.currentOwnerTeam || row.handler || row.team) === Store.getState().team;
   },
 
+  isManualQualityCheckEnabled() {
+    try {
+      const config = JSON.parse(localStorage.getItem('pos_quality_check_config') || '{}');
+      return config.manual !== false;
+    } catch (error) {
+      return true;
+    }
+  },
+
+  isAutomaticQualityRecord(row = {}) {
+    try {
+      const config = JSON.parse(localStorage.getItem('pos_quality_check_config') || '{}');
+      if (config.manual !== false || !config.effectiveAt) return false;
+      if (row.workflowStatus || /质量校验中|已同步|已通过|校验失败/.test(String(row.status || ''))) return false;
+      const enteredAt = row.matchedAt || row.updatedAt || row.createdAt || row.uploadedAt || row.receivedAt;
+      const enteredTime = enteredAt ? new Date(String(enteredAt).replace(' ', 'T')).getTime() : 0;
+      return Number.isFinite(enteredTime) && enteredTime >= Number(config.effectiveAt);
+    } catch (error) {
+      return false;
+    }
+  },
+
   renderMatchedWorkflowActions(row) {
     const isPos = this.isPosActor();
     const id = this.escapeHtml(row.id);
     if (this.getMatchedQualityStatus(row) === '已质检') return `
-      ${this.hasIngestionPermission('单门店已匹配数据', '质检') ? `<button class="px-2 py-1 text-xs rounded text-gray-300 cursor-not-allowed" type="button" disabled title="该单据已完成质检，不可重复质检"><i class="fa-solid fa-check"></i></button>` : ''}
+      ${this.isManualQualityCheckEnabled() && this.hasIngestionPermission('单门店已匹配数据', '质检') ? `<button class="px-2 py-1 text-xs rounded text-gray-300 cursor-not-allowed" type="button" disabled title="该单据已完成质检，不可重复质检"><i class="fa-solid fa-check"></i></button>` : ''}
       <button class="px-2 py-1 text-xs rounded text-gray-300 cursor-not-allowed" type="button" disabled title="该单据已完成质检，不可编辑"><i class="fa-solid fa-pen-to-square"></i></button>`;
     if (isPos && this.canEditMatchedRow(row)) return `
-      ${this.hasIngestionPermission('单门店已匹配数据', '质检') ? `<button class="px-2 py-1 text-xs rounded action-btn text-green-600 hover:bg-green-50" data-action="approve" data-id="${id}" title="进入质量检查"><i class="fa-solid fa-check"></i></button>` : ''}
+      ${this.isManualQualityCheckEnabled() && this.hasIngestionPermission('单门店已匹配数据', '质检') ? `<button class="px-2 py-1 text-xs rounded action-btn text-green-600 hover:bg-green-50" data-action="approve" data-id="${id}" title="进入质量检查"><i class="fa-solid fa-check"></i></button>` : ''}
       <button class="px-2 py-1 text-xs rounded action-btn row-edit-btn text-amber-500 hover:bg-amber-50" data-action="edit" data-id="${id}" title="编辑"><i class="fa-solid fa-pen-to-square row-edit-icon"></i></button>`;
     if (!isPos && this.canEditMatchedRow(row)) return `
       <button class="px-2 py-1 text-xs rounded action-btn text-green-600 hover:bg-green-50" data-action="submit-sales-result" data-id="${id}" title="提交处理结果"><i class="fa-solid fa-check"></i></button>
@@ -5092,12 +5115,13 @@ const IngestionView = {
     if (!headerRow) return;
     const cn = this.getCurrentLang() === 'cn';
     const isOriginalStoreList = this.activeDataMode === 'files';
+    const disableManualSelection = isOriginalStoreList && !this.isManualQualityCheckEnabled();
     const commonStart = `
       <th class="px-5 py-4 w-[60px] min-w-[60px] rounded-tl-lg sticky left-0 z-30 bg-[#f7f8fa]">
-        <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-brand focus:ring-brand">
+        <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" ${disableManualSelection ? 'disabled title="当前为自动质检模式"' : ''}>
       </th>
       <th class="px-4 py-4 min-w-40">${cn ? '时间' : '시간'}</th>
-      <th class="px-4 py-4 min-w-36">${cn ? '合作方ERP' : '파트너 ERP'}</th>
+      <th class="px-4 py-4 min-w-36">${cn ? '客户系统' : '고객 시스템'}</th>
       <th class="px-4 py-4 min-w-64">${cn ? '原始文件名' : '원본 파일명'}</th>
       <th class="px-4 py-4 min-w-64">${cn ? '当前文件名' : '현재 파일명'}</th>
     `;
@@ -5254,7 +5278,7 @@ const IngestionView = {
       return `
         <tr class="hover:bg-slate-50 transition-colors group" data-id="${row.id}">
           <td class="px-4 py-3 w-[60px] min-w-[60px]">
-            <input type="checkbox" class="row-cb rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" value="${row.id}" ${isActionLocked ? 'disabled' : ''}>
+            <input type="checkbox" class="row-cb rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" value="${row.id}" ${(isActionLocked || (this.activeDataMode === 'files' && !this.isManualQualityCheckEnabled())) ? 'disabled' : ''}>
           </td>
           <td class="px-4 py-3 text-[#4e5969]">${this.escapeHtml(deliveryFields.time)}</td>
           <td class="px-4 py-3"><span class="row-edit-display">${this.escapeHtml(deliveryFields.partnerErp)}</span><input type="text" class="row-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="partnerErp" value="${this.escapeHtml(deliveryFields.partnerErp === '-' ? '' : deliveryFields.partnerErp)}"></td>
@@ -5546,7 +5570,7 @@ const IngestionView = {
             <tr>
               <th class="px-4 py-4 w-[60px] rounded-tl-lg sticky left-0 z-30 bg-[#f7f8fa]"><input type="checkbox" id="ingestion-stash-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>
               <th class="px-4 py-4 w-40">时间</th>
-              <th class="px-4 py-4 w-36">合作方ERP</th>
+              <th class="px-4 py-4 w-36">客户系统</th>
               <th class="px-4 py-4 w-64">原始文件名</th>
               <th class="px-4 py-4 w-64">当前文件名</th>
               <th class="px-5 py-4 w-36">客户门店号</th>
@@ -5691,7 +5715,7 @@ const IngestionView = {
           row: { ...row, ...workflow },
           moduleFields: [
             { label: '时间', value: deliveryFields.time || displayMonth },
-            { label: '合作方ERP', value: deliveryFields.partnerErp },
+            { label: '客户系统', value: deliveryFields.partnerErp },
             { label: '原始文件名', value: deliveryFields.originalFileName },
             { label: '当前文件名', value: deliveryFields.currentFileName },
             { label: '客户门店号', value: deliveryFields.customerStoreNo },
@@ -5786,7 +5810,7 @@ const IngestionView = {
         if (!partnerErpInput?.value.trim()) {
           partnerErpInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
           partnerErpInput?.focus();
-          Dialog.toast('请输入合作方ERP', 'warning');
+          Dialog.toast('请输入客户系统', 'warning');
           return;
         }
         const tradeCode = tradeCodeInput?.value.trim().toUpperCase() || '';
@@ -6383,7 +6407,7 @@ const IngestionView = {
             row: rowData,
             moduleFields: [
               { label: '时间', value: deliveryFields.time },
-              { label: '合作方ERP', value: deliveryFields.partnerErp },
+              { label: '客户系统', value: deliveryFields.partnerErp },
               { label: '原始文件名', value: deliveryFields.originalFileName },
               { label: '当前文件名', value: deliveryFields.currentFileName },
               { label: '客户门店号', value: deliveryFields.customerStoreNo },
@@ -6446,7 +6470,7 @@ const IngestionView = {
             if (!partnerErpInput?.value.trim()) {
               partnerErpInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
               partnerErpInput?.focus();
-              Dialog.toast('请输入合作方ERP', 'warning');
+              Dialog.toast('请输入客户系统', 'warning');
               return;
             }
             const tradeCode = tradeCodeInput?.value.trim().toUpperCase() || '';
@@ -7681,8 +7705,8 @@ const IngestionView = {
   
   bindBatchEvents() {
     const handleBatchAction = (action) => {
-      if (this.activeDataMode === 'files' && action === 'approve' && !this.hasIngestionPermission('单门店已匹配数据', '质检')) {
-        Dialog.toast('当前账号无质检权限', 'warning');
+      if (this.activeDataMode === 'files' && action === 'approve' && (!this.isManualQualityCheckEnabled() || !this.hasIngestionPermission('单门店已匹配数据', '质检'))) {
+        Dialog.toast(this.isManualQualityCheckEnabled() ? '当前账号无质检权限' : '当前为自动质检模式，无需人工提交', 'warning');
         return;
       }
       if (this.activeDataMode === 'stash') {
@@ -7882,7 +7906,7 @@ const IngestionView = {
       document.getElementById('pagination-area')?.classList.toggle('hidden', showOriginal);
       document.getElementById('btn-upload-file')?.classList.toggle('hidden', !showOriginal || !this.hasIngestionPermission('文件箱', '上传'));
       document.getElementById('btn-batch-archive')?.classList.toggle('hidden', showOriginal || showStash || activeTab === 'archive' || activeTab === 'files');
-      document.getElementById('btn-batch-approve')?.classList.toggle('hidden', showOriginal || activeTab === 'archive');
+      document.getElementById('btn-batch-approve')?.classList.toggle('hidden', showOriginal || activeTab === 'archive' || (activeTab === 'files' && !this.isManualQualityCheckEnabled()));
       document.getElementById('btn-batch-reject')?.classList.toggle('hidden', showOriginal || showStash || activeTab === 'files');
       document.getElementById('team-select-wrapper')?.classList.toggle('hidden', showOriginal || showStash);
       document.getElementById('approval-status-wrapper')?.classList.toggle('hidden', showOriginal || activeTab === 'archive');

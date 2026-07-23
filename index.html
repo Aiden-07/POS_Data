@@ -108,21 +108,9 @@
               <i class="fa-solid fa-chevron-down user-chevron"></i>
             </button>
             <div id="user-menu-panel" class="user-menu-panel hidden">
-              <div class="px-3 py-2 text-[11px] font-bold text-[#86909c]">切换演示账号</div>
-              <button class="user-menu-item demo-account-switch" data-account="aiden.pos" type="button">
-                <i class="fa-solid fa-user-shield"></i><span>Aiden · POS担当</span>
-              </button>
-              <button class="user-menu-item demo-account-switch" data-account="wangmin.sales" type="button">
-                <i class="fa-solid fa-user"></i><span>王敏 · 营业担当</span>
-              </button>
-              <div class="my-1 border-t border-gray-100"></div>
-              <button id="change-password-btn" class="user-menu-item" type="button">
-                <i class="fa-solid fa-key"></i>
-                <span>修改密码</span>
-              </button>
-              <button id="account-binding-btn" class="user-menu-item" type="button">
-                <i class="fa-solid fa-link"></i>
-                <span>账号绑定</span>
+              <button id="settings-center-btn" class="user-menu-item" type="button">
+                <i class="fa-solid fa-gear"></i>
+                <span>设置中心</span>
               </button>
               <button id="logout-btn" class="user-menu-item danger" type="button">
                 <i class="fa-solid fa-right-from-bracket"></i>
@@ -220,11 +208,11 @@
   <script src="js/components/ai-assistant.js?v=20260626-ai-fab-drag"></script>
   <script src="js/views/login.js?v=20260714-dual-account-workflow"></script>
   <script src="js/views/dashboard.js?v=20260707-qa-detail-preview"></script>
-    <script src="js/views/ingestion.js?v=20260722-split-summary-removed-v59"></script>
-    <script src="js/views/qa.js?v=20260721-standard-reject-copy-v15"></script>
-  <script src="js/views/ledger.js?v=20260721-document-detail-permission-v6"></script>
+    <script src="js/views/ingestion.js?v=20260723-quality-mode-config-v61"></script>
+    <script src="js/views/qa.js?v=20260723-customer-system-label-v17"></script>
+  <script src="js/views/ledger.js?v=20260723-org-filter-labels-v8"></script>
   <script src="js/views/settings.js?v=20260721-document-detail-permission-v7"></script>
-  <script src="js/core/app.js?v=20260714-dual-account-workflow"></script>
+  <script src="js/core/app.js?v=20260723-settings-quality-icon-v4"></script>
 <script>
 (function () {
   const STATUS_OPTIONS = ['全部状态', '正常', '驳回', '待处理'];

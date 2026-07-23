@@ -857,6 +857,31 @@ const QAView = {
     };
   },
 
+  getStandardResolvedIssue(row = {}, index = 0, detailIndex = null) {
+    const explicit = row.abnormalDescription || row.resolutionDescription || row.remark;
+    if (explicit && explicit !== '-') return explicit;
+    const seed = String(row.storeCode || row.storeName || index || 0)
+      .split('')
+      .reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    const storeScenarios = [
+      '发现客户门店名称与主数据不一致；已通过客户门店号匹配门店主数据，并统一为标准门店名称',
+      '发现客户门店编码缺失；已根据经销商、门店名称及地址匹配门店主数据并补全编码',
+      '发现经销商名称使用历史简称；已通过客户系统编码核验，并更新为标准经销商名称',
+      '发现同一门店存在重复销售明细；已按销售日期、门店及产品编码去重，保留最新有效记录',
+      '发现交易处归属与当前组织关系不一致；已根据门店主数据重新匹配交易处及所属ACC'
+    ];
+    const productScenarios = [
+      '发现客户产品编码缺失；已通过客户条形码匹配产品主数据，并补全标准产品编码',
+      '发现客户产品名称与产品主数据不一致；已通过条形码核验，并替换为标准产品名称',
+      '发现商品条形码位数异常；已根据客户产品编码匹配产品主数据，并更新为有效69码',
+      '发现销售金额与销售数量×零售单价不一致；已复核原始销售明细，并修正销售金额',
+      '发现销售成本高于销售金额；已依据原始进销存明细重新核算并修正销售成本',
+      '发现同一产品在同一销售日期重复上报；已按门店、日期及产品编码去重，保留最新记录'
+    ];
+    const scenarios = detailIndex === null ? storeScenarios : productScenarios;
+    return scenarios[(seed + (detailIndex || 0)) % scenarios.length];
+  },
+
   getQaProductFields(detail = {}, row = {}, index = 0) {
     const barcode = detail.barcode || row.barcode || '-';
     const productName = detail.productName || row.productName || '-';
@@ -872,7 +897,7 @@ const QAView = {
 
   getQaBusinessColumnWidth(header = '') {
     return ({
-      时间: 128, 合作方ERP: 150, 客户门店号: 140, 经销商: 170, ACC: 110,
+      时间: 128, 客户系统: 150, 客户门店号: 140, 经销商: 170, ACC: 110,
       好丽友交易处编码: 170, 好丽友交易处名称: 220,
       客户产品号: 150, 客户产品名称: 220, 客户条形码: 170,
       好丽友产品编码: 170, 好丽友条形码: 170, 好丽友产品名称: 240,
@@ -937,6 +962,7 @@ const QAView = {
           const productEditKey = `${row.storeCode}:${detailIndex}`;
           const product = this.getQaProductFields({ ...detail, ...(this.standardProductEdits.get(productEditKey) || {}) }, row, detailIndex);
           const responsibility = this.getStandardResponsibility(row);
+          const resolvedIssue = this.getStandardResolvedIssue(row, index, detailIndex);
           return `<tr class="hover:bg-slate-50 transition-colors" data-product-index="${detailIndex}" data-product-key="${this.escapeHtml(productEditKey)}">
             <td class="px-4 py-3"><input type="checkbox" class="row-cb-qa-standard rounded border-gray-300 text-brand focus:ring-brand disabled:opacity-40" value="${this.escapeHtml(row.storeCode)}" ${this.canSelectStandard(row) ? '' : 'disabled'}></td>
             <td class="px-4 py-3 whitespace-nowrap">${business.productDate}</td>
@@ -956,7 +982,7 @@ const QAView = {
             <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(detail.amount))}</td>
             <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(detail.cost))}</td>
             <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(detail.retailPrice))}</td>
-            <td class="px-4 py-3 align-middle text-center text-[#86909c]"><span class="inline-flex min-h-6 items-center justify-center">-</span></td>
+            <td class="px-4 py-3 align-middle text-amber-700" title="${this.escapeHtml(resolvedIssue)}"><span class="block w-full truncate">${this.escapeHtml(resolvedIssue)}</span></td>
             <td class="px-4 py-3 font-medium">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
             <td class="px-4 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
             <td class="px-4 py-3 text-center">${this.renderStandardStatusBadge(row)}</td>
@@ -966,6 +992,7 @@ const QAView = {
       : rows.map(({ row, index }) => {
           const business = this.getQaBusinessFields(row, index);
           const responsibility = this.getStandardResponsibility(row);
+          const resolvedIssue = this.getStandardResolvedIssue(row, index);
           return `<tr class="hover:bg-slate-50 transition-colors">
             <td class="px-4 py-3"><input type="checkbox" class="row-cb-qa-standard rounded border-gray-300 text-brand focus:ring-brand disabled:opacity-40" value="${this.escapeHtml(row.storeCode)}" ${this.canSelectStandard(row) ? '' : 'disabled'}></td>
             <td class="px-4 py-3 whitespace-nowrap">${business.storeMonth}</td>
@@ -975,7 +1002,7 @@ const QAView = {
             <td class="px-4 py-3">${this.escapeHtml(business.acc)}</td>
             <td class="px-4 py-3 font-mono" data-edit-field="orionTradeCode" data-edit-value="${this.escapeHtml(business.tradeCode)}">${this.escapeHtml(business.tradeCode)}</td>
             <td class="px-4 py-3 align-middle"><button type="button" class="qa-standard-preview-trigger block w-full max-w-full truncate text-left text-brand hover:underline" data-index="${index}" title="${this.escapeHtml(business.tradeName)}">${this.escapeHtml(business.tradeName)}</button></td>
-            <td class="px-4 py-3 align-middle text-center text-[#86909c]"><span class="inline-flex min-h-6 items-center justify-center">-</span></td>
+            <td class="px-4 py-3 align-middle text-amber-700" title="${this.escapeHtml(resolvedIssue)}"><span class="block w-full truncate">${this.escapeHtml(resolvedIssue)}</span></td>
             <td class="px-4 py-3 font-medium">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
             <td class="px-4 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
             <td class="px-4 py-3 text-center">${this.renderStandardStatusBadge(row)}</td>
@@ -983,8 +1010,8 @@ const QAView = {
           </tr>`;
         });
     const headers = isProductView
-      ? ['时间','合作方ERP','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','客户产品号','客户产品名称','客户条形码','好丽友产品编码','好丽友条形码','好丽友产品名称','销售数量','销售金额','销售成本','零售单价','异常说明','当前责任人','最近操作人','状态','操作']
-      : ['时间','合作方ERP','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','异常说明','当前责任人','最近操作人','状态','操作'];
+      ? ['时间','客户系统','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','客户产品号','客户产品名称','客户条形码','好丽友产品编码','好丽友条形码','好丽友产品名称','销售数量','销售金额','销售成本','零售单价','异常说明','当前责任人','最近操作人','状态','操作']
+      : ['时间','客户系统','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','异常说明','当前责任人','最近操作人','状态','操作'];
     const count = isProductView ? body.length : rows.length;
     container.innerHTML = `<div class="animate-[fadeIn_0.22s_ease-out] flex min-h-0 flex-1 flex-col"><div class="min-h-0 flex-1 overflow-auto"><table class="table-fixed text-left text-sm text-[#4e5969]" style="width:${this.getQaBusinessTableWidth(headers)}px;min-width:100%;">${this.renderQaBusinessColGroup(headers)}<thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10"><tr><th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="qa-standard-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>${headers.map((header, index) => `<th class="${this.getQaBusinessHeaderClass(header, index, headers.length)}">${header}</th>`).join('')}</tr></thead><tbody id="qa-standard-tbody" class="divide-y divide-gray-100">${body.length ? body.join('') : `<tr><td colspan="${headers.length + 1}" class="px-4 py-16 text-center text-[#86909c]">暂无符合条件的${isProductView ? '产品' : '门店'}数据</td></tr>`}</tbody></table></div>${this.renderQaTableSummary(count)}</div>`;
     this.bindStandardSelectionEvents();
@@ -1849,8 +1876,8 @@ const QAView = {
       </tr>`;
     });
     const headers = isProductView
-      ? ['时间','合作方ERP','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','客户产品号','客户产品名称','客户条形码','好丽友产品编码','好丽友条形码','好丽友产品名称','销售数量','销售金额','销售成本','零售单价','异常说明','当前责任人','最近操作人','状态','操作']
-      : ['时间','合作方ERP','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','未解决','异常说明','当前责任人','最近操作人','状态','操作'];
+      ? ['时间','客户系统','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','客户产品号','客户产品名称','客户条形码','好丽友产品编码','好丽友条形码','好丽友产品名称','销售数量','销售金额','销售成本','零售单价','异常说明','当前责任人','最近操作人','状态','操作']
+      : ['时间','客户系统','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','未解决','异常说明','当前责任人','最近操作人','状态','操作'];
     container.innerHTML = `<div class="flex-1 min-h-0 overflow-auto"><table class="table-fixed text-left text-sm text-[#4e5969]" style="width:${this.getQaBusinessTableWidth(headers)}px;min-width:100%;">${this.renderQaBusinessColGroup(headers)}<thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10"><tr><th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="qa-exception-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>${headers.map((header, index) => `<th class="${this.getQaBusinessHeaderClass(header, index, headers.length)}">${header}</th>`).join('')}</tr></thead><tbody id="qa-tbody" class="divide-y divide-gray-100">${body.length ? body.join('') : `<tr><td colspan="${headers.length + 1}" class="px-4 py-16 text-center text-[#86909c]">暂无符合条件的${isProductView ? '产品' : '门店'}异常数据</td></tr>`}</tbody></table></div>${this.renderQaTableSummary(body.length)}`;
     this.bindTableEvents();
     this.bindExceptionEvents();

@@ -47,7 +47,7 @@ const LedgerView = {
 
   tableColumns: [
     { key: 'transactionDate', label: '时间', width: 'w-28', value: (item) => item.transactionDate },
-    { key: 'partnerErp', label: '合作方ERP', width: 'w-32', value: (item) => String(item.partnerErp || '-').replace(/\s*ERP\s*$/i, '') || '-' },
+    { key: 'partnerErp', label: '客户系统', width: 'w-32', value: (item) => String(item.partnerErp || '-').replace(/\s*ERP\s*$/i, '') || '-' },
     { key: 'dealerName', label: '经销商', width: 'w-36', truncate: true, value: (item) => item.dealer },
     { key: 'customerStoreNo', label: '客户门店号', width: 'w-32', mono: true, value: (item) => item.customerStoreNo },
     { key: 'rawTransactionCode', label: '原始交易出码', width: 'w-36', mono: true, value: (item) => item.rawTransactionCode },
@@ -366,8 +366,8 @@ const LedgerView = {
       <div class="ledger-filter-line ledger-org-filter">
         <div class="ledger-filter-label">所属组织</div>
         <div class="ledger-filter-content">
-          ${this.renderOrgOptionRow('区域', 'region', regions, region)}
-          ${region ? this.renderOrgOptionRow('营业所', 'office', offices, office) : ''}
+          ${this.renderOrgOptionRow('营业Team', 'region', regions, region)}
+          ${region ? this.renderOrgOptionRow('区域', 'office', offices, office) : ''}
           ${office ? this.renderOrgOptionRow('经销商', 'dealer', dealers, dealer) : ''}
         </div>
       </div>
@@ -928,7 +928,7 @@ const LedgerView = {
             row,
             moduleFields: [
               { label: '时间', value: row.transactionDate || '-' },
-              { label: '合作方ERP', value: String(row.partnerErp || '-').replace(/\s*ERP\s*$/i, '') || '-' },
+              { label: '客户系统', value: String(row.partnerErp || '-').replace(/\s*ERP\s*$/i, '') || '-' },
               { label: '经销商', value: row.dealer || '-' },
               { label: '客户门店号', value: row.customerStoreNo || '-' },
               { label: '原始交易出码', value: row.rawTransactionCode || '-' },
