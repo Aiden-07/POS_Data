@@ -6,6 +6,7 @@ const QAView = {
   rejectedStoreCodes: new Set(),
   approvedStandardStoreCodes: new Set(),
   standardProductEdits: new Map(),
+  comparisonEdits: new Map(),
   confidenceFilter: {
     preset: ''
   },
@@ -222,12 +223,12 @@ const QAView = {
       ? this.standardData.filter((row) => row.salesTeam === activeTeam)
       : [];
     const rowsForDealers = activeOffice
-      ? rowsForOffices.filter((row) => row.salesOffice === activeOffice)
+      ? rowsForOffices.filter((row) => row.region === activeOffice)
       : [];
     return {
       teams: [...new Set(this.standardData.map((row) => row.salesTeam))],
-      offices: [...new Set(rowsForOffices.map((row) => row.salesOffice))],
-      dealers: [...new Set(rowsForDealers.map((row) => row.dealer))],
+      offices: [...new Set(rowsForOffices.map((row) => row.region))],
+      dealers: [...new Set(rowsForDealers.map((row) => row.salesOffice))],
       activeTeam,
       activeOffice
     };
@@ -261,9 +262,9 @@ const QAView = {
     const columns = 1 + (options.activeTeam ? 1 : 0) + (options.activeOffice ? 1 : 0);
     return `
       <div class="grid gap-3" style="grid-template-columns: repeat(${columns}, minmax(210px, 1fr));">
-        ${this.renderHierarchyCheckboxGroup('一级：营业Team', options.teams, this.hierarchyFilter.teams, 'qa-team-checkbox', '暂无营业Team', options.activeTeam)}
-        ${options.activeTeam ? this.renderHierarchyCheckboxGroup('二级：营业所', options.offices, this.hierarchyFilter.offices, 'qa-office-checkbox', '暂无营业所', options.activeOffice) : ''}
-        ${options.activeOffice ? this.renderHierarchyCheckboxGroup('三级：经销商', options.dealers, this.hierarchyFilter.dealers, 'qa-dealer-checkbox', '暂无经销商') : ''}
+        ${this.renderHierarchyCheckboxGroup('一级：本部Team', options.teams, this.hierarchyFilter.teams, 'qa-team-checkbox', '暂无本部Team', options.activeTeam)}
+        ${options.activeTeam ? this.renderHierarchyCheckboxGroup('二级：区域', options.offices, this.hierarchyFilter.offices, 'qa-office-checkbox', '暂无区域', options.activeOffice) : ''}
+        ${options.activeOffice ? this.renderHierarchyCheckboxGroup('三级：营业所', options.dealers, this.hierarchyFilter.dealers, 'qa-dealer-checkbox', '暂无营业所') : ''}
       </div>
     `;
   },
@@ -514,6 +515,65 @@ const QAView = {
       .replace(/'/g, '&#39;');
   },
 
+  getQaAbnormalItems(row = {}, index = 0, options = {}) {
+    if (Array.isArray(row.abnormalItems) && row.abnormalItems.length) return row.abnormalItems;
+    const resolved = options.resolved === true;
+    const product = options.product === true;
+    const seedText = String(row.storeCode || row.customerStoreNo || row.id || row.storeName || index);
+    const seed = [...seedText].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    const storeScenarios = resolved ? [
+      { problem: '客户门店名称与主数据标准名称不一致', resolution: '已通过客户门店号核验并替换为标准门店名称' },
+      { problem: '客户门店编码缺失', resolution: '已根据经销商、门店名称及地址匹配门店主数据并补全编码' },
+      { problem: '交易处归属与当前组织关系不一致', resolution: '已依据最新门店主数据更新交易处、营业Team及ACC归属' },
+      { problem: '同一门店存在重复销售明细', resolution: '已按销售日期、门店及产品编码去重并保留最新有效记录' }
+    ] : [
+      { problem: '客户门店编码缺失，无法匹配门店主数据', resolution: '待营业担当补充有效门店编码并提交复核' },
+      { problem: '客户门店名称与主数据标准名称不一致', resolution: '待根据客户门店号核对并修正标准门店名称' },
+      { problem: '交易处归属与当前组织关系不一致', resolution: '待核对门店所属营业Team、区域及营业所' },
+      { problem: '同一门店存在重复销售明细', resolution: '待确认覆盖历史数据或忽略本次重复数据' }
+    ];
+    const productScenarios = resolved ? [
+      { problem: '客户产品编码缺失', resolution: '已通过客户条形码匹配产品主数据并补全标准产品编码' },
+      { problem: '客户产品名称与产品主数据不一致', resolution: '已通过条形码核验并替换为标准产品名称' },
+      { problem: '销售金额与销售数量×零售单价不一致', resolution: '已复核原始销售明细并修正销售金额' },
+      { problem: '销售成本高于销售金额', resolution: '已依据原始进销存明细重新核算并修正销售成本' }
+    ] : [
+      { problem: '客户产品编码缺失，无法匹配产品主数据', resolution: '待根据客户条形码补充有效产品编码' },
+      { problem: '客户产品名称与条形码对应的主数据不一致', resolution: '待核对原始销售明细并修正客户产品名称' },
+      { problem: '销售金额与销售数量×零售单价不一致', resolution: '待复核原始销售明细并修正销售金额' },
+      { problem: '销售成本高于销售金额', resolution: '待核对进销存明细并重新计算销售成本' }
+    ];
+    const scenarios = product ? productScenarios : storeScenarios;
+    const explicit = row.abnormalDescription || row.remark || row.aiJudgment;
+    const items = [];
+    if (explicit && explicit !== '-') {
+      const parts = String(explicit).split(/[；;]\s*/).filter(Boolean);
+      parts.forEach((part) => {
+        const [problem, resolution] = part.split(/[，,]\s*(?:已|待)/, 2);
+        items.push({
+          problem: problem.replace(/^发现/, '').replace(/[。.]$/, ''),
+          resolution: resolution ? `${part.includes('待') ? '待' : '已'}${resolution.replace(/[。.]$/, '')}` : (resolved ? '已完成数据核验与修正' : '待人工核对并完成修正')
+        });
+      });
+    }
+    for (let offset = 0; items.length < 3; offset += 1) {
+      const item = scenarios[(seed + offset) % scenarios.length];
+      if (!items.some(current => current.problem === item.problem)) items.push(item);
+    }
+    return items;
+  },
+
+  renderQaAbnormalCell(row = {}, index = 0, options = {}) {
+    const items = this.getQaAbnormalItems(row, index, options);
+    const first = items[0] || { problem: '-', resolution: '' };
+    return `<div class="anomaly-list-cell" tabindex="0">
+      <span class="anomaly-list-cell__summary">${this.escapeHtml(first.problem)}</span>
+      <div class="anomaly-list-cell__popover" role="tooltip">
+        <ul>${items.map(item => `<li><div class="anomaly-list-cell__problem">${this.escapeHtml(item.problem)}</div></li>`).join('')}</ul>
+      </div>
+    </div>`;
+  },
+
   renderStorePreviewTrigger(scope, value, index = '', id = '') {
     const safeValue = this.escapeHtml(value || '-');
     if (scope === 'exception') {
@@ -612,7 +672,10 @@ const QAView = {
     }
     row.dataset.editing = 'true';
     const originalHtml = row.innerHTML;
-    const allowedDocumentFields = new Set(['partnerErp', 'orionTradeCode', 'orionProductCode']);
+    const allowedDocumentFields = new Set([
+      'partnerErp', 'orionTradeCode', 'orionProductCode',
+      'quantity', 'amount', 'cost', 'retailPrice'
+    ]);
     const editableCells = Array.from(row.querySelectorAll('[data-edit-field]'))
       .filter(cell => allowedDocumentFields.has(cell.dataset.editField));
     const actionCell = button.closest('td');
@@ -634,7 +697,7 @@ const QAView = {
       } else if (field === 'yearMonth') {
         cell.innerHTML = `<input type="month" class="qa-inline-input w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-sm text-[#1d2129] outline-none focus:border-brand" data-field="${field}" value="${rawValue === '-' ? '' : rawValue}">`;
       } else if (['quantity', 'amount', 'cost', 'retailPrice', 'exceptionCount'].includes(field)) {
-        cell.innerHTML = `<input type="number" step="0.01" class="qa-inline-input w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-sm text-[#1d2129] outline-none focus:border-brand" data-field="${field}" value="${rawValue === '-' ? '' : rawValue}">`;
+        cell.innerHTML = `<input type="text" inputmode="decimal" class="qa-inline-input qa-inline-numeric w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-sm text-[#1d2129] outline-none focus:border-brand" data-field="${field}" value="${rawValue === '-' ? '' : rawValue}">`;
       } else {
         cell.innerHTML = `<input class="qa-inline-input w-full rounded-lg border border-blue-100 bg-white px-2 py-1 text-sm text-[#1d2129] outline-none focus:border-brand" data-field="${field}" value="${rawValue === '-' ? '' : rawValue}">`;
       }
@@ -681,6 +744,30 @@ const QAView = {
           Dialog.toast('编辑字段不能为空', 'warning');
           return;
         }
+        const numericFields = ['quantity', 'amount', 'cost', 'retailPrice'];
+        for (const field of numericFields) {
+          if (values[field] === undefined) continue;
+          const value = values[field];
+          if (!/^\d+(?:\.\d{1,2})?$/.test(value) || Number(value) < 0) {
+            Dialog.toast('数值字段必须大于等于 0，且最多保留两位小数', 'warning');
+            return;
+          }
+          values[field] = field === 'quantity'
+            ? String(Number(value))
+            : Number(value).toFixed(2);
+        }
+        const consistencyWarnings = [];
+        if (['quantity', 'amount', 'retailPrice'].every((field) => values[field] !== undefined)
+          && Math.abs(Number(values.amount) - Number(values.quantity) * Number(values.retailPrice)) > 0.01) {
+          consistencyWarnings.push('销售金额与销售数量×零售单价不一致');
+        }
+        if (values.cost !== undefined && values.amount !== undefined && Number(values.cost) > Number(values.amount)) {
+          consistencyWarnings.push('成本高于销售金额');
+        }
+        const showInlineSaveResult = () => Dialog.toast(
+          consistencyWarnings.length ? `已保存当前行；${consistencyWarnings.join('；')}` : '已保存当前行',
+          consistencyWarnings.length ? 'warning' : 'success'
+        );
         const tradeRecord = values.orionTradeCode !== undefined ? this.getQaTradeMasterRecord(values.orionTradeCode) : null;
         if (values.orionTradeCode !== undefined && !tradeRecord) {
           Dialog.toast('好丽友交易处编码不存在，请输入有效编码', 'warning');
@@ -710,10 +797,13 @@ const QAView = {
               orionBarcode: productRecord.barcode,
               orionProductName: productRecord.name
             });
+            numericFields.forEach((field) => {
+              if (values[field] !== undefined) target[field] = values[field];
+            });
             this.saveWorkflowState();
           }
           row.dataset.editing = 'false';
-          if (typeof Dialog !== 'undefined') Dialog.toast('已保存当前行', 'success');
+          if (typeof Dialog !== 'undefined') showInlineSaveResult();
           this.renderExceptionTable();
           return;
         } else if (button.dataset.scope === 'standard') {
@@ -722,17 +812,25 @@ const QAView = {
             if (values.partnerErp !== undefined) target.partnerErp = values.partnerErp;
             if (tradeRecord) this.applyQaTradeMaster(target, tradeRecord);
             if (productRecord && row.dataset.productKey) this.standardProductEdits.set(row.dataset.productKey, {
+              ...(this.standardProductEdits.get(row.dataset.productKey) || {}),
               orionProductCode: productRecord.code,
               orionBarcode: productRecord.barcode,
               orionProductName: productRecord.name
             });
+            if (row.dataset.productKey && numericFields.some((field) => values[field] !== undefined)) {
+              const productEdit = { ...(this.standardProductEdits.get(row.dataset.productKey) || {}) };
+              numericFields.forEach((field) => {
+                if (values[field] !== undefined) productEdit[field] = values[field];
+              });
+              this.standardProductEdits.set(row.dataset.productKey, productEdit);
+            }
             this.saveStandardWorkflow(target, {
               lastOperatorName: actor.userName || '系统', lastOperatorRole: actor.userRole || '系统',
               lastAction: '编辑单据', lastOperatedAt: operatedAt
             });
           }
           row.dataset.editing = 'false';
-          if (typeof Dialog !== 'undefined') Dialog.toast('已保存当前行', 'success');
+          if (typeof Dialog !== 'undefined') showInlineSaveResult();
           this.renderStandardTable();
           return;
         }
@@ -960,7 +1058,8 @@ const QAView = {
       ? rows.flatMap(({ row, index }) => this.getStandardPreviewRows(row).map((detail, detailIndex) => {
           const business = this.getQaBusinessFields(row, index);
           const productEditKey = `${row.storeCode}:${detailIndex}`;
-          const product = this.getQaProductFields({ ...detail, ...(this.standardProductEdits.get(productEditKey) || {}) }, row, detailIndex);
+          const editedDetail = { ...detail, ...(this.standardProductEdits.get(productEditKey) || {}) };
+          const product = this.getQaProductFields(editedDetail, row, detailIndex);
           const responsibility = this.getStandardResponsibility(row);
           const resolvedIssue = this.getStandardResolvedIssue(row, index, detailIndex);
           return `<tr class="hover:bg-slate-50 transition-colors" data-product-index="${detailIndex}" data-product-key="${this.escapeHtml(productEditKey)}">
@@ -978,11 +1077,11 @@ const QAView = {
             <td class="px-4 py-3 font-mono" data-edit-field="orionProductCode" data-edit-value="${this.escapeHtml(product.orionProductCode)}">${this.escapeHtml(product.orionProductCode)}</td>
             <td class="px-4 py-3 font-mono">${this.escapeHtml(product.orionBarcode)}</td>
             <td class="px-4 py-3 truncate" title="${this.escapeHtml(product.orionProductName)}">${this.escapeHtml(product.orionProductName)}</td>
-            <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(detail.quantity, 0))}</td>
-            <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(detail.amount))}</td>
-            <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(detail.cost))}</td>
-            <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(detail.retailPrice))}</td>
-            <td class="px-4 py-3 align-middle text-amber-700" title="${this.escapeHtml(resolvedIssue)}"><span class="block w-full truncate">${this.escapeHtml(resolvedIssue)}</span></td>
+            ${this.renderQaEditableCell('quantity', editedDetail.quantity, 'px-3 py-3 text-right tabular-nums whitespace-nowrap')}
+            ${this.renderQaEditableCell('amount', editedDetail.amount, 'px-3 py-3 text-right tabular-nums whitespace-nowrap')}
+            ${this.renderQaEditableCell('cost', editedDetail.cost, 'px-3 py-3 text-right tabular-nums whitespace-nowrap')}
+            ${this.renderQaEditableCell('retailPrice', editedDetail.retailPrice, 'px-3 py-3 text-right tabular-nums whitespace-nowrap')}
+            <td class="px-4 py-3 align-middle text-amber-700">${this.renderQaAbnormalCell({ ...row, abnormalDescription: resolvedIssue }, detailIndex, { resolved: true, product: true })}</td>
             <td class="px-4 py-3 font-medium">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
             <td class="px-4 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
             <td class="px-4 py-3 text-center">${this.renderStandardStatusBadge(row)}</td>
@@ -1002,7 +1101,7 @@ const QAView = {
             <td class="px-4 py-3">${this.escapeHtml(business.acc)}</td>
             <td class="px-4 py-3 font-mono" data-edit-field="orionTradeCode" data-edit-value="${this.escapeHtml(business.tradeCode)}">${this.escapeHtml(business.tradeCode)}</td>
             <td class="px-4 py-3 align-middle"><button type="button" class="qa-standard-preview-trigger block w-full max-w-full truncate text-left text-brand hover:underline" data-index="${index}" title="${this.escapeHtml(business.tradeName)}">${this.escapeHtml(business.tradeName)}</button></td>
-            <td class="px-4 py-3 align-middle text-amber-700" title="${this.escapeHtml(resolvedIssue)}"><span class="block w-full truncate">${this.escapeHtml(resolvedIssue)}</span></td>
+            <td class="px-4 py-3 align-middle text-amber-700">${this.renderQaAbnormalCell({ ...row, abnormalDescription: resolvedIssue }, index, { resolved: true })}</td>
             <td class="px-4 py-3 font-medium">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
             <td class="px-4 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
             <td class="px-4 py-3 text-center">${this.renderStandardStatusBadge(row)}</td>
@@ -1297,10 +1396,10 @@ const QAView = {
         if (this.hierarchyFilter.teams.length > 0 && !this.hierarchyFilter.teams.includes(row.salesTeam)) {
           return false;
         }
-        if (this.hierarchyFilter.offices.length > 0 && !this.hierarchyFilter.offices.includes(row.salesOffice)) {
+        if (this.hierarchyFilter.offices.length > 0 && !this.hierarchyFilter.offices.includes(row.region)) {
           return false;
         }
-        if (this.hierarchyFilter.dealers.length > 0 && !this.hierarchyFilter.dealers.includes(row.dealer)) {
+        if (this.hierarchyFilter.dealers.length > 0 && !this.hierarchyFilter.dealers.includes(row.salesOffice)) {
           return false;
         }
 
@@ -1858,17 +1957,17 @@ const QAView = {
         <td class="px-4 py-3 font-mono" data-edit-field="orionProductCode" data-edit-value="${this.escapeHtml(product.orionProductCode)}">${this.escapeHtml(product.orionProductCode)}</td>
         <td class="px-4 py-3 font-mono">${this.escapeHtml(product.orionBarcode)}</td>
         <td class="px-4 py-3 truncate" title="${this.escapeHtml(product.orionProductName)}">${this.escapeHtml(product.orionProductName)}</td>
-        <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(row.quantity, 0))}</td>
-        <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(row.amount))}</td>
-        <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(row.cost))}</td>
-        <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">${this.escapeHtml(this.formatQaMetric(row.retailPrice))}</td>` : '';
+        ${this.renderQaEditableCell('quantity', row.quantity, 'px-3 py-3 text-right tabular-nums whitespace-nowrap')}
+        ${this.renderQaEditableCell('amount', row.amount, 'px-3 py-3 text-right tabular-nums whitespace-nowrap')}
+        ${this.renderQaEditableCell('cost', row.cost, 'px-3 py-3 text-right tabular-nums whitespace-nowrap')}
+        ${this.renderQaEditableCell('retailPrice', row.retailPrice, 'px-3 py-3 text-right tabular-nums whitespace-nowrap')}` : '';
       const abnormal = row.remark || row.aiJudgment || row.abnormalDescription || '-';
       const unresolvedCell = isProductView ? '' : `<td class="px-4 py-3 text-center font-semibold tabular-nums ${batchSummary.unresolvedCount ? 'text-red-600' : 'text-green-600'}">${batchSummary.unresolvedCount}</td>`;
       const actions = isProductView
         ? this.renderQaActionButtons({ scope: 'exception', id, row, hideDetail: false })
         : this.renderExceptionBatchActionButtons(row);
       return `<tr class="hover:bg-slate-50 transition-colors">${common}${productCells}${unresolvedCell}
-        <td class="px-4 py-3 align-middle ${abnormal === '-' ? 'text-center text-[#86909c]' : 'text-left text-amber-700'}" title="${this.escapeHtml(abnormal)}"><span class="${abnormal === '-' ? 'inline-flex min-h-6 items-center justify-center' : 'block w-full truncate'}">${this.escapeHtml(abnormal)}</span></td>
+        <td class="px-4 py-3 align-middle text-left text-amber-700">${this.renderQaAbnormalCell({ ...row, abnormalDescription: abnormal }, index, { product: isProductView })}</td>
         <td class="px-4 py-3 font-medium">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
         <td class="px-4 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
         <td class="px-4 py-3 text-center">${this.getExceptionStatusBadge(status)}</td>
@@ -2054,6 +2153,225 @@ const QAView = {
     });
   },
 
+  getQaComparisonColumns() {
+    return [
+      { key: 'transactionDate', label: '时间', width: 112 },
+      { key: 'partnerErp', label: '客户系统', width: 130 },
+      { key: 'dealer', label: '经销商', width: 150 },
+      { key: 'customerStoreNo', label: '客户门店号', width: 130 },
+      { key: 'rawTransactionCode', label: '原始交易出码', width: 150 },
+      { key: 'customerStoreName', label: '客户门店名称', width: 190 },
+      { key: 'team', label: 'TEAM', width: 120 },
+      { key: 'region', label: '区域', width: 120 },
+      { key: 'salesOffice', label: '营业所', width: 140 },
+      { key: 'acc', label: 'ACC', width: 110 },
+      { key: 'orionStoreCode', label: '好丽友交易处编码', width: 170, editable: true },
+      { key: 'orionStoreName', label: '好丽友交易处名称', width: 210 },
+      { key: 'customerProductCode', label: '客户产品号', width: 150 },
+      { key: 'customerProductName', label: '客户产品名称', width: 210 },
+      { key: 'customerBarcode', label: '客户条形码', width: 165 },
+      { key: 'orionProductCode', label: '好丽友产品编码', width: 165, editable: true },
+      { key: 'orionBarcode', label: '好丽友条形码', width: 165 },
+      { key: 'orionProductName', label: '好丽友产品名称', width: 230 },
+      { key: 'quantity', label: '销售数量', width: 100, editable: true, numeric: true },
+      { key: 'amount', label: '销售金额', width: 110, editable: true, numeric: true },
+      { key: 'cost', label: '成本', width: 110, editable: true, numeric: true },
+      { key: 'retailPrice', label: '零售单价', width: 110, editable: true, numeric: true }
+    ].map((column) => column.key === 'partnerErp' ? { ...column, editable: true } : column);
+  },
+
+  buildQaComparisonRows(row, exceptionRow = null, contextKey = '') {
+    const source = exceptionRow ? { ...row, ...exceptionRow } : row;
+    const originalDetails = this.getOriginalPreviewRows(row);
+    const cleanedDetails = exceptionRow ? this.getExceptionPreviewRows(exceptionRow) : this.getStandardPreviewRows(row);
+    const business = this.getQaBusinessFields(source);
+    const unresolvedText = `${exceptionRow?.conflictType || ''} ${exceptionRow?.aiJudgment || ''}`;
+
+    const originalRows = originalDetails.map((detail, index) => ({
+      transactionDate: detail.month || '',
+      partnerErp: row.partnerErp || '',
+      dealer: row.dealer || '',
+      customerStoreNo: row.customerStoreNo || row.storeCode || '',
+      rawTransactionCode: row.rawTransactionCode || '',
+      customerStoreName: row.customerStoreName || row.storeName || '',
+      team: row.salesTeam || '',
+      region: row.region || '',
+      salesOffice: row.salesOffice || '',
+      acc: detail.acc || '',
+      orionStoreCode: row.orionTradeCode || row.matchedStoreCode || '',
+      orionStoreName: row.orionTradeName || row.matchedStoreName || '',
+      customerProductCode: detail.customerProductCode || '',
+      customerProductName: detail.customerProductName || '',
+      customerBarcode: detail.customerBarcode || '',
+      orionProductCode: detail.orionProductCode || '',
+      orionBarcode: detail.orionBarcode || '',
+      orionProductName: detail.productName || '',
+      quantity: detail.quantity ?? '',
+      amount: detail.amount ?? '',
+      cost: detail.cost ?? '',
+      retailPrice: detail.retailPrice ?? ''
+    }));
+
+    const cleanedRows = cleanedDetails.map((detail, index) => {
+      const product = this.getQaProductFields(detail, source, index);
+      const edit = this.comparisonEdits.get(`${contextKey}:${index}`) || {};
+      const unresolvedFields = new Set();
+      if (exceptionRow && /待处理|无法|冲突|未匹配/.test(unresolvedText)) {
+        if (/系统/.test(unresolvedText)) unresolvedFields.add('partnerErp');
+        else if (/交易处|门店/.test(unresolvedText)) unresolvedFields.add('orionStoreCode');
+        else unresolvedFields.add('orionProductCode');
+      }
+      return {
+        transactionDate: detail.month || business.productDate || '',
+        partnerErp: edit.partnerErp ?? business.partnerErp ?? '',
+        dealer: business.dealer || '',
+        customerStoreNo: business.customerStoreNo || '',
+        rawTransactionCode: source.rawTransactionCode || '',
+        customerStoreName: source.customerStoreName || source.storeName || '',
+        team: source.salesTeam || '',
+        region: source.region || '',
+        salesOffice: source.salesOffice || '',
+        acc: detail.acc || business.acc || '',
+        orionStoreCode: edit.orionStoreCode ?? business.tradeCode ?? '',
+        orionStoreName: business.tradeName || '',
+        customerProductCode: product.customerProductCode || '',
+        customerProductName: product.customerProductName || '',
+        customerBarcode: product.customerBarcode || '',
+        orionProductCode: edit.orionProductCode ?? product.orionProductCode ?? '',
+        orionBarcode: product.orionBarcode || '',
+        orionProductName: product.orionProductName || '',
+        quantity: edit.quantity ?? detail.quantity ?? '',
+        amount: edit.amount ?? detail.amount ?? '',
+        cost: edit.cost ?? detail.cost ?? '',
+        retailPrice: edit.retailPrice ?? detail.retailPrice ?? '',
+        _unresolvedFields: unresolvedFields,
+        _manualFields: new Set(Object.keys(edit))
+      };
+    });
+    cleanedRows.forEach((cleaned, index) => {
+      cleaned._original = originalRows[index];
+    });
+    return { originalRows, cleanedRows };
+  },
+
+  renderQaComparisonTable(rows, side = 'original', contextKey = '') {
+    const columns = this.getQaComparisonColumns();
+    const tableWidth = columns.reduce((sum, column) => sum + column.width, 0);
+    return `
+      <table class="qa-comparison-table text-xs text-left border-separate border-spacing-0 bg-white" style="width:${tableWidth}px;min-width:100%;">
+        <colgroup>${columns.map((column) => `<col style="width:${column.width}px">`).join('')}</colgroup>
+        <thead><tr>${columns.map((column) => `<th class="sticky top-0 z-20 px-3 py-2 border-b border-r border-gray-300 bg-[#f7f8fa] text-[#1d2129] font-semibold whitespace-nowrap first:border-l">${column.label}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${rows.map((item, rowIndex) => `<tr class="hover:bg-blue-50/30 transition-colors">
+            ${columns.map((column) => {
+              const value = item[column.key] ?? '';
+              if (side === 'original') {
+                return `<td class="px-3 py-2 border-b border-r border-gray-200 bg-white whitespace-nowrap first:border-l">${value === '' ? '<span class="text-red-500">空</span>' : this.escapeHtml(value)}</td>`;
+              }
+              const unresolved = item._unresolvedFields?.has(column.key) || value === '';
+              const manual = item._manualFields?.has(column.key);
+              const resolved = !unresolved && String(value) !== String(item._original?.[column.key] ?? '');
+              const stateClass = unresolved ? 'qa-compare-unresolved' : manual ? 'qa-compare-manual' : resolved ? 'qa-compare-resolved' : '';
+              const editableAttrs = column.editable
+                ? ` data-compare-editable="true" data-compare-field="${column.key}" data-compare-row="${rowIndex}" data-compare-value="${this.escapeHtml(value)}" data-compare-context="${this.escapeHtml(contextKey)}"${column.numeric ? ' data-compare-numeric="true"' : ''}`
+                : '';
+              return `<td class="px-3 py-2 border-b border-r border-gray-200 whitespace-nowrap first:border-l ${stateClass}"${editableAttrs}>${value === '' ? '<span class="font-semibold">待处理</span>' : this.escapeHtml(value)}</td>`;
+            }).join('')}
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    `;
+  },
+
+  bindQaComparisonEditor(overlay, contextKey) {
+    const editButton = overlay.querySelector('#qa-compare-edit');
+    const cancelButton = overlay.querySelector('#qa-compare-edit-cancel');
+    const cleanedContainer = overlay.querySelector('#qa-compare-standard-scroll');
+    if (!editButton || !cleanedContainer) return;
+    let editing = false;
+    let originalHtml = '';
+
+    const stopEditing = () => {
+      editing = false;
+      editButton.innerHTML = '<i class="fa-solid fa-pen-to-square mr-1"></i>编辑';
+      cancelButton?.classList.add('hidden');
+    };
+    const startEditing = () => {
+      editing = true;
+      originalHtml = cleanedContainer.innerHTML;
+      editButton.innerHTML = '<i class="fa-solid fa-check mr-1"></i>保存';
+      cancelButton?.classList.remove('hidden');
+      cleanedContainer.querySelectorAll('[data-compare-editable="true"]').forEach((cell) => {
+        const value = cell.dataset.compareValue || '';
+        cell.innerHTML = `<input type="text" ${cell.dataset.compareNumeric === 'true' ? 'inputmode="decimal"' : ''} class="qa-compare-edit-input ${cell.dataset.compareNumeric === 'true' ? 'text-right' : ''}" value="${this.escapeHtml(value)}" aria-label="编辑${cell.dataset.compareField}">`;
+      });
+      cleanedContainer.querySelector('.qa-compare-edit-input')?.focus();
+    };
+    const saveEditing = () => {
+      const pending = new Map();
+      let invalid = false;
+      cleanedContainer.querySelectorAll('[data-compare-editable="true"]').forEach((cell) => {
+        const input = cell.querySelector('input');
+        let value = input?.value.trim() || '';
+        if (!value) invalid = true;
+        if (cell.dataset.compareNumeric === 'true') {
+          if (!/^\d+(?:\.\d{1,2})?$/.test(value) || Number(value) < 0) {
+            invalid = true;
+          } else {
+            value = cell.dataset.compareField === 'quantity'
+              ? String(Number(value))
+              : Number(value).toFixed(2);
+          }
+        }
+        const originalValue = cell.dataset.compareValue || '';
+        const changed = cell.dataset.compareNumeric === 'true'
+          ? Number(value) !== Number(originalValue)
+          : value !== originalValue;
+        if (!changed) return;
+        const rowIndex = Number(cell.dataset.compareRow);
+        if (!pending.has(rowIndex)) pending.set(rowIndex, {});
+        pending.get(rowIndex)[cell.dataset.compareField] = value;
+      });
+      if (invalid) {
+        Dialog.toast('编辑字段不能为空；数值需大于等于 0 且最多保留两位小数', 'warning');
+        return;
+      }
+      pending.forEach((values, rowIndex) => {
+        const key = `${contextKey}:${rowIndex}`;
+        this.comparisonEdits.set(key, {
+          ...(this.comparisonEdits.get(key) || {}),
+          ...values
+        });
+      });
+      cleanedContainer.querySelectorAll('[data-compare-editable="true"]').forEach((cell) => {
+        let value = cell.querySelector('input')?.value.trim() || '';
+        if (cell.dataset.compareNumeric === 'true' && value) {
+          value = cell.dataset.compareField === 'quantity'
+            ? String(Number(value))
+            : Number(value).toFixed(2);
+        }
+        const originalValue = cell.dataset.compareValue || '';
+        const changed = cell.dataset.compareNumeric === 'true'
+          ? Number(value) !== Number(originalValue)
+          : value !== originalValue;
+        cell.dataset.compareValue = value;
+        cell.textContent = value;
+        if (changed) {
+          cell.classList.remove('qa-compare-resolved', 'qa-compare-unresolved');
+          cell.classList.add('qa-compare-manual');
+        }
+      });
+      stopEditing();
+      Dialog.toast('清洗后数据已保存', 'success');
+    };
+
+    editButton.addEventListener('click', () => editing ? saveEditing() : startEditing());
+    cancelButton?.addEventListener('click', () => {
+      cleanedContainer.innerHTML = originalHtml;
+      stopEditing();
+    });
+  },
+
   renderPreviewTable(headers, rows, editable = false) {
     return `
       <table class="w-full min-w-[1180px] text-xs text-center border-separate border-spacing-0 bg-white">
@@ -2186,17 +2504,19 @@ const QAView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
 
-    const headers = ['年月', 'ACC', '经销商', '门店编码', '门店名称', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
-    const rows = this.getStandardPreviewRows(row);
+    const contextKey = `standard:${row.storeCode}`;
+    const { cleanedRows } = this.buildQaComparisonRows(row, null, contextKey);
     overlay.innerHTML = `
       <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6 py-8">
         <div id="qa-standard-preview-modal" class="relative bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col" style="width: min(1500px, calc(100vw - 48px)); height: min(680px, calc(100vh - 64px)); min-width: 820px; min-height: 420px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px);">
           <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white shrink-0">
             <div>
-              <h3 class="font-bold text-[#1d2129] text-base">标准POS表预览</h3>
-              <p class="text-xs text-[#86909c] mt-1">${row.storeName} · ${row.storeCode} · 点击编辑后可修改单元格</p>
+              <h3 class="font-bold text-[#1d2129] text-base">门店数据预览（清洗后）</h3>
+              <p class="text-xs text-[#86909c] mt-1">${row.storeName} · ${row.storeCode} · 自动回填字段高亮，人工编辑字段使用蓝色标识</p>
             </div>
             <div class="flex items-center gap-2">
+              <button type="button" id="qa-compare-edit-cancel" class="hidden px-3 py-1.5 rounded-lg text-xs text-[#4e5969] bg-white border border-gray-200 hover:bg-gray-50">取消</button>
+              <button type="button" id="qa-compare-edit" class="px-3 py-1.5 rounded-lg text-xs text-brand bg-white border border-blue-200 hover:bg-blue-50"><i class="fa-solid fa-pen-to-square mr-1"></i>编辑</button>
               <button type="button" id="qa-standard-preview-fullscreen" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="全屏">
                 <i class="fa-solid fa-expand"></i>
               </button>
@@ -2206,33 +2526,8 @@ const QAView = {
             </div>
           </div>
           <div class="p-6 bg-[#f7f9fc] flex-1 min-h-0">
-            <div class="qa-preview-table-scroll h-full">
-            <table class="w-full min-w-[1380px] text-sm text-center border-separate border-spacing-0 bg-white">
-              <thead>
-                <tr>
-                  ${headers.map((header) => `<th class="sticky top-0 z-20 px-3 py-2 border-b border-r border-gray-300 bg-[#f7f8fa] text-[#1d2129] font-semibold whitespace-nowrap shadow-[0_1px_0_rgba(148,163,184,0.35)] first:border-l">${header}</th>`).join('')}
-                </tr>
-              </thead>
-              <tbody>
-                ${rows.map((item) => `
-                  <tr class="hover:bg-blue-50/30 transition-colors">
-                    ${this.renderEditablePreviewCell(item.month)}
-                    ${this.renderEditablePreviewCell(item.acc)}
-                    ${this.renderEditablePreviewCell(item.dealer, 'min-w-36')}
-                    ${this.renderEditablePreviewCell(item.storeCode)}
-                    ${this.renderEditablePreviewCell(item.storeName, 'min-w-48 text-left')}
-                    ${this.renderEditablePreviewCell(item.productCode)}
-                    ${this.renderEditablePreviewCell(item.productName, 'min-w-56 text-left')}
-                    ${this.renderEditablePreviewCell(item.barcode)}
-                    ${this.renderEditablePreviewCell(item.quantity)}
-                    ${this.renderEditablePreviewCell(item.amount)}
-                    ${this.renderEditablePreviewCell(item.cost)}
-                    ${this.renderEditablePreviewCell(item.retailPrice)}
-                    ${this.renderEditablePreviewCell(item.remark)}
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
+            <div id="qa-compare-standard-scroll" class="qa-preview-table-scroll h-full">
+              ${this.renderQaComparisonTable(cleanedRows, 'cleaned', contextKey)}
             </div>
           </div>
           <div class="px-6 py-4 border-t border-gray-100 bg-white flex items-center justify-between gap-3 shrink-0">
@@ -2252,12 +2547,11 @@ const QAView = {
     const closePreview = () => {
       overlay.innerHTML = '';
     };
-    const previewEditor = this.bindQaPreviewEditControls(overlay);
-    const requestClose = () => previewEditor.requestClose(closePreview);
-    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', requestClose);
+    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', closePreview);
     overlay.querySelector('#qa-original-compare-open')?.addEventListener('click', () => {
       this.openOriginalComparison(index);
     });
+    this.bindQaComparisonEditor(overlay, contextKey);
     this.bindStandardPreviewWindowControls(overlay);
   },
 
@@ -2267,16 +2561,15 @@ const QAView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
 
-    const headers = ['年月', 'ACC', '经销商', '门店编码', '门店名称', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
-    const originalRows = this.getOriginalPreviewRows(row);
-    const standardRows = this.getStandardPreviewRows(row);
+    const contextKey = `standard:${row.storeCode}`;
+    const { originalRows, cleanedRows } = this.buildQaComparisonRows(row, null, contextKey);
     overlay.innerHTML = `
       <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6 py-8">
         <div id="qa-standard-preview-modal" class="relative bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col" style="width: min(1700px, calc(100vw - 48px)); height: min(760px, calc(100vh - 64px)); min-width: 980px; min-height: 520px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px);">
           <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white shrink-0">
             <div>
               <h3 class="font-bold text-[#1d2129] text-base">原始门店数据对比</h3>
-              <p class="text-xs text-[#86909c] mt-1">${row.storeName} · ${row.storeCode} · 左侧原始门店数据，右侧当前标准门店数据</p>
+              <p class="text-xs text-[#86909c] mt-1">${row.storeName} · ${row.storeCode} · 左侧原始数据，右侧清洗后数据</p>
             </div>
             <div class="flex items-center gap-2">
               <button type="button" id="qa-standard-preview-fullscreen" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="全屏">
@@ -2295,18 +2588,24 @@ const QAView = {
               </div>
               <div class="p-3 flex-1 min-h-0">
                 <div id="qa-compare-original-scroll" class="qa-preview-table-scroll h-full">
-                  ${this.renderPreviewTable(headers, originalRows, false)}
+                  ${this.renderQaComparisonTable(originalRows, 'original', contextKey)}
                 </div>
               </div>
             </section>
             <section class="min-w-0 rounded-xl border border-blue-100 bg-white overflow-hidden flex flex-col">
-              <div class="px-4 py-3 border-b border-blue-100 bg-blue-50/70">
-                <h4 class="text-sm font-bold text-[#1d2129]">当前标准门店数据</h4>
-                <p class="text-xs text-[#86909c] mt-1">AI标准化后的结果，可直接作为标准POS表校验依据</p>
+              <div class="px-4 py-3 border-b border-blue-100 bg-blue-50/70 flex items-center justify-between gap-3">
+                <div>
+                  <h4 class="text-sm font-bold text-[#1d2129]">清洗后数据</h4>
+                  <p class="text-xs text-[#86909c] mt-1">自动回填字段高亮；人工编辑字段使用蓝色标识</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <button type="button" id="qa-compare-edit-cancel" class="hidden px-3 py-1.5 rounded-lg text-xs text-[#4e5969] bg-white border border-gray-200 hover:bg-gray-50">取消</button>
+                  <button type="button" id="qa-compare-edit" class="px-3 py-1.5 rounded-lg text-xs text-brand bg-white border border-blue-200 hover:bg-blue-50"><i class="fa-solid fa-pen-to-square mr-1"></i>编辑</button>
+                </div>
               </div>
               <div class="p-3 flex-1 min-h-0">
                 <div id="qa-compare-standard-scroll" class="qa-preview-table-scroll h-full">
-                  ${this.renderPreviewTable(headers, standardRows, true)}
+                  ${this.renderQaComparisonTable(cleanedRows, 'cleaned', contextKey)}
                 </div>
               </div>
             </section>
@@ -2323,9 +2622,8 @@ const QAView = {
     const closePreview = () => {
       overlay.innerHTML = '';
     };
-    const previewEditor = this.bindQaPreviewEditControls(overlay, { successMessage: '标准门店数据已保存' });
-    const requestClose = () => previewEditor.requestClose(closePreview);
-    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', requestClose);
+    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', closePreview);
+    this.bindQaComparisonEditor(overlay, contextKey);
     this.bindStandardPreviewWindowControls(overlay);
     this.bindComparisonScrollSync(overlay);
   },
@@ -2343,17 +2641,19 @@ const QAView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
 
-    const headers = ['年月', 'ACC', '经销商', '门店编码', '门店名称', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
-    const originalRows = this.getOriginalPreviewRows(matched);
+    const contextKey = `exception:${exceptionRow.id || matched.storeCode}`;
+    const { cleanedRows } = this.buildQaComparisonRows(matched, exceptionRow, contextKey);
     overlay.innerHTML = `
       <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6 py-8">
         <div id="qa-standard-preview-modal" class="relative bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col" style="width: min(1500px, calc(100vw - 48px)); height: min(680px, calc(100vh - 64px)); min-width: 820px; min-height: 420px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px);">
           <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white shrink-0">
             <div>
-              <h3 class="font-bold text-[#1d2129] text-base">原始门店数据预览</h3>
-              <p class="text-xs text-[#86909c] mt-1">${matched.storeName || '-'} · ${matched.storeCode || '-'} · 仅展示原始门店数据</p>
+              <h3 class="font-bold text-[#1d2129] text-base">门店数据预览（清洗后）</h3>
+              <p class="text-xs text-[#86909c] mt-1">${matched.storeName || '-'} · ${matched.storeCode || '-'} · 自动回填字段高亮，未解决字段标记为红色</p>
             </div>
             <div class="flex items-center gap-2">
+              <button type="button" id="qa-compare-edit-cancel" class="hidden px-3 py-1.5 rounded-lg text-xs text-[#4e5969] bg-white border border-gray-200 hover:bg-gray-50">取消</button>
+              <button type="button" id="qa-compare-edit" class="px-3 py-1.5 rounded-lg text-xs text-brand bg-white border border-blue-200 hover:bg-blue-50"><i class="fa-solid fa-pen-to-square mr-1"></i>编辑</button>
               <button type="button" id="qa-standard-preview-fullscreen" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="全屏">
                 <i class="fa-solid fa-expand"></i>
               </button>
@@ -2363,8 +2663,8 @@ const QAView = {
             </div>
           </div>
           <div class="p-6 bg-[#f7f9fc] flex-1 min-h-0">
-            <div class="qa-preview-table-scroll h-full">
-              ${this.renderPreviewTable(headers, originalRows, true)}
+            <div id="qa-compare-standard-scroll" class="qa-preview-table-scroll h-full">
+              ${this.renderQaComparisonTable(cleanedRows, 'cleaned', contextKey)}
             </div>
           </div>
           <div class="px-6 py-4 border-t border-gray-100 bg-white flex items-center justify-between gap-3 shrink-0">
@@ -2384,12 +2684,11 @@ const QAView = {
     const closePreview = () => {
       overlay.innerHTML = '';
     };
-    const previewEditor = this.bindQaPreviewEditControls(overlay, { successMessage: '异常数据已保存' });
-    const requestClose = () => previewEditor.requestClose(closePreview);
-    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', requestClose);
+    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', closePreview);
     overlay.querySelector('#qa-exception-compare-open')?.addEventListener('click', () => {
       this.openExceptionComparison(exceptionRow);
     });
+    this.bindQaComparisonEditor(overlay, contextKey);
     this.bindStandardPreviewWindowControls(overlay);
   },
 
@@ -2406,16 +2705,15 @@ const QAView = {
     const overlay = document.getElementById('overlay-container');
     if (!overlay) return;
 
-    const headers = ['年月', 'ACC', '经销商', '门店编码', '门店名称', '产品编码', '产品名称', '69码', '销售数量', '销售金额', '销售成本', '零售价', '备注'];
-    const originalRows = this.getOriginalPreviewRows(matched);
-    const exceptionRows = this.getExceptionPreviewRows(exceptionRow);
+    const contextKey = `exception:${exceptionRow.id || matched.storeCode}`;
+    const { originalRows, cleanedRows } = this.buildQaComparisonRows(matched, exceptionRow, contextKey);
     overlay.innerHTML = `
       <div class="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-sm flex items-center justify-center px-6 py-8">
         <div id="qa-standard-preview-modal" class="relative bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col" style="width: min(1700px, calc(100vw - 48px)); height: min(760px, calc(100vh - 64px)); min-width: 980px; min-height: 520px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px);">
           <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white shrink-0">
             <div>
               <h3 class="font-bold text-[#1d2129] text-base">原始数据对比</h3>
-              <p class="text-xs text-[#86909c] mt-1">${matched.storeName || '-'} · ${matched.storeCode || '-'} · 左侧原始数据，右侧异常数据</p>
+              <p class="text-xs text-[#86909c] mt-1">${matched.storeName || '-'} · ${matched.storeCode || '-'} · 左侧原始数据，右侧清洗后数据</p>
             </div>
             <div class="flex items-center gap-2">
               <button type="button" id="qa-standard-preview-fullscreen" class="w-8 h-8 rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129] transition-colors" title="全屏">
@@ -2434,18 +2732,24 @@ const QAView = {
               </div>
               <div class="p-3 flex-1 min-h-0">
                 <div id="qa-compare-original-scroll" class="qa-preview-table-scroll h-full">
-                  ${this.renderPreviewTable(headers, originalRows, false)}
+                  ${this.renderQaComparisonTable(originalRows, 'original', contextKey)}
                 </div>
               </div>
             </section>
-            <section class="min-w-0 rounded-xl border border-red-100 bg-white overflow-hidden flex flex-col">
-              <div class="px-4 py-3 border-b border-red-100 bg-red-50/70">
-                <h4 class="text-sm font-bold text-[#1d2129]">异常数据</h4>
-                <p class="text-xs text-[#86909c] mt-1">当前异常数据，保留异常类型和 AI 判断说明</p>
+            <section class="min-w-0 rounded-xl border border-blue-100 bg-white overflow-hidden flex flex-col">
+              <div class="px-4 py-3 border-b border-blue-100 bg-blue-50/70 flex items-center justify-between gap-3">
+                <div>
+                  <h4 class="text-sm font-bold text-[#1d2129]">清洗后数据</h4>
+                  <p class="text-xs text-[#86909c] mt-1">自动回填字段高亮；未解决字段标记为红色</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <button type="button" id="qa-compare-edit-cancel" class="hidden px-3 py-1.5 rounded-lg text-xs text-[#4e5969] bg-white border border-gray-200 hover:bg-gray-50">取消</button>
+                  <button type="button" id="qa-compare-edit" class="px-3 py-1.5 rounded-lg text-xs text-brand bg-white border border-blue-200 hover:bg-blue-50"><i class="fa-solid fa-pen-to-square mr-1"></i>编辑</button>
+                </div>
               </div>
               <div class="p-3 flex-1 min-h-0">
                 <div id="qa-compare-standard-scroll" class="qa-preview-table-scroll h-full">
-                  ${this.renderPreviewTable(headers, exceptionRows, true)}
+                  ${this.renderQaComparisonTable(cleanedRows, 'cleaned', contextKey)}
                 </div>
               </div>
             </section>
@@ -2462,9 +2766,8 @@ const QAView = {
     const closePreview = () => {
       overlay.innerHTML = '';
     };
-    const previewEditor = this.bindQaPreviewEditControls(overlay, { successMessage: '异常数据已保存' });
-    const requestClose = () => previewEditor.requestClose(closePreview);
-    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', requestClose);
+    overlay.querySelector('#qa-standard-preview-close')?.addEventListener('click', closePreview);
+    this.bindQaComparisonEditor(overlay, contextKey);
     this.bindStandardPreviewWindowControls(overlay);
     this.bindComparisonScrollSync(overlay);
   },

@@ -5,6 +5,7 @@ const App = {
     'ingestion': typeof IngestionView !== 'undefined' ? IngestionView : null,
     'qa': typeof QAView !== 'undefined' ? QAView : null,
     'ledger': typeof LedgerView !== 'undefined' ? LedgerView : null,
+    'analytics': typeof AnalyticsView !== 'undefined' ? AnalyticsView : null,
     'settings-users': typeof SettingsView !== 'undefined' ? SettingsView : null,
     'settings-roles': typeof SettingsView !== 'undefined' ? SettingsView : null,
     'settings-fields': typeof SettingsView !== 'undefined' ? SettingsView : null,
@@ -682,7 +683,7 @@ const App = {
   syncGlobalPeriodVisibility(hash) {
     const picker = document.getElementById('global-period-picker');
     if (!picker) return;
-    picker.classList.toggle('hidden', hash === 'ledger' || hash.startsWith('settings-'));
+    picker.classList.toggle('hidden', hash === 'ledger' || hash === 'analytics' || hash.startsWith('settings-'));
   },
 
   syncSettingsNav(hash) {

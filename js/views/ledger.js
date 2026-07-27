@@ -6,9 +6,17 @@ const LEDGER_DEFAULT_COLUMNS = [
 
 const LedgerView = {
   edits: new Map(),
+  editingRowKey: '',
+  compoundFiltersExpanded: false,
+  compoundFilters: [],
+  appliedCompoundFilters: [],
+  compoundPositionBound: false,
+  compoundEventsBound: false,
   filters: {
     year: '2026',
     month: '06',
+    startMonth: '2026-01',
+    endMonth: '2026-07',
     keyword: '',
     keywordField: 'all',
     org: {
@@ -30,6 +38,11 @@ const LedgerView = {
   closePanelsBound: false,
   searchDropdownCloseBound: false,
   advancedFiltersExpanded: false,
+  selectedStartMonth: '2026-01',
+  selectedEndMonth: '2026-07',
+  monthPickerViewYear: 2026,
+  monthRangeSelectingEnd: false,
+  monthRangeError: '',
   keywordFieldOptions: [
     { value: 'all', label: '全部' },
     { value: 'acc', label: 'ACC' },
@@ -43,6 +56,16 @@ const LedgerView = {
     { value: 'orionProductName', label: '好丽友产品名称' },
     { value: 'orionProductCode', label: '好丽友产品编码' },
     { value: 'orionBarcode', label: '好丽友条形码' }
+  ],
+  compoundFilterFieldOptions: [
+    { value: 'partnerErp', label: '客户系统' },
+    { value: 'dealer', label: '经销商' },
+    { value: 'acc', label: 'ACC' },
+    { value: 'orionStoreCode', label: '好丽友交易处编码' },
+    { value: 'orionStoreName', label: '好丽友交易处名称' },
+    { value: 'orionProductCode', label: '好丽友产品编码' },
+    { value: 'orionBarcode', label: '好丽友条形码' },
+    { value: 'orionProductName', label: '好丽友产品名称' }
   ],
 
   tableColumns: [
@@ -144,6 +167,10 @@ const LedgerView = {
                 ${this.renderGroupOptions()}
               </div>
             </div>
+            <button id="ledger-batch-edit-btn" class="ledger-table-tool-button ledger-batch-edit-button" type="button">
+              <i class="fa-solid fa-pen-to-square"></i>
+              <span>批量修改</span>
+            </button>
             <button id="ledger-export-btn" class="ledger-table-tool-button" type="button">
               <i class="fa-solid fa-download"></i>
               <span>导出</span>
@@ -234,6 +261,57 @@ const LedgerView = {
     `;
   },
 
+  getCurrentMonthValue() {
+    const date = new Date();
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  },
+
+  formatMonthChinese(value) {
+    const [year, month] = value.split('-').map(Number);
+    return `${year}年${month}月`;
+  },
+
+  getSelectedMonthCount() {
+    const [startYear, startMonth] = this.selectedStartMonth.split('-').map(Number);
+    const [endYear, endMonth] = this.selectedEndMonth.split('-').map(Number);
+    return (endYear - startYear) * 12 + endMonth - startMonth + 1;
+  },
+
+  renderLedgerMonthPanel(year) {
+    const names = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
+    const currentMonth = this.getCurrentMonthValue();
+    return `
+      <section class="analytics-month-panel" aria-label="${year}年">
+        <div class="analytics-month-grid">
+          ${names.map((name, index) => {
+            const value = `${year}-${String(index + 1).padStart(2, '0')}`;
+            const selected = value === this.selectedStartMonth || value === this.selectedEndMonth;
+            const inRange = value > this.selectedStartMonth && value < this.selectedEndMonth;
+            return `<button type="button" class="analytics-month-option ${selected ? 'selected' : ''} ${inRange ? 'in-range' : ''}" data-ledger-month="${value}" ${value > currentMonth ? 'disabled' : ''} aria-label="${year}年${index + 1}月">${name}</button>`;
+          }).join('')}
+        </div>
+      </section>
+    `;
+  },
+
+  renderLedgerMonthPicker() {
+    const currentYear = new Date().getFullYear();
+    const leftYear = Math.min(Math.max(this.monthPickerViewYear, 2000), currentYear);
+    this.monthPickerViewYear = leftYear;
+    return `
+      <div class="analytics-month-picker-header">
+        <button type="button" class="analytics-month-nav" data-ledger-month-nav="-1" aria-label="上一年"><i class="fa-solid fa-angles-left"></i></button>
+        <span>${leftYear}年</span>
+        <span>${leftYear + 1}年</span>
+        <button type="button" class="analytics-month-nav" data-ledger-month-nav="1" aria-label="下一年" ${leftYear >= currentYear ? 'disabled' : ''}><i class="fa-solid fa-angles-right"></i></button>
+      </div>
+      <div class="analytics-month-picker-panels">
+        ${this.renderLedgerMonthPanel(leftYear)}
+        ${this.renderLedgerMonthPanel(leftYear + 1)}
+      </div>
+    `;
+  },
+
   renderFilters() {
     return `
       <div class="ledger-filter-panel" id="ledger-filter-panel">
@@ -251,6 +329,26 @@ const LedgerView = {
               </label>
               <div id="ledger-search-field-dropdown" class="ledger-search-field-dropdown hidden"></div>
             </div>
+            <div class="ledger-month-range-filter">
+              <span class="ledger-main-filter-caption">时间范围</span>
+              <div class="analytics-month-picker-wrap">
+                <button id="ledger-month-range-button" class="analytics-month-range-button ledger-month-range-button ${this.monthRangeError ? 'invalid' : ''}" type="button" aria-expanded="false">
+                  <i class="fa-regular fa-calendar"></i>
+                  <span>${this.formatMonthChinese(this.selectedStartMonth)}</span>
+                  <span class="analytics-range-to">至</span>
+                  <span>${this.formatMonthChinese(this.selectedEndMonth)}</span>
+                </button>
+                <span id="ledger-month-range-error" class="analytics-month-range-error ${this.monthRangeError ? '' : 'hidden'}">${this.monthRangeError}</span>
+                <div id="ledger-month-picker" class="analytics-month-picker hidden">${this.renderLedgerMonthPicker()}</div>
+              </div>
+            </div>
+            <div class="ledger-compound-filter-wrap">
+              <button id="ledger-compound-filter-btn" class="ledger-filter-secondary ledger-compound-filter-btn" type="button" aria-expanded="${this.compoundFiltersExpanded}">
+                <i class="fa-solid fa-filter"></i>
+                <span id="ledger-compound-filter-label">筛选（${this.appliedCompoundFilters.length}）</span>
+              </button>
+              ${this.renderCompoundFilterPanel()}
+            </div>
             <button id="ledger-filter-submit" class="ledger-filter-primary" type="button">
               <i class="fa-solid fa-magnifying-glass"></i>
               <span>查询</span>
@@ -263,23 +361,6 @@ const LedgerView = {
           </div>
         </div>
         <div id="ledger-advanced-filters" class="ledger-advanced-filters ${this.advancedFiltersExpanded ? '' : 'hidden'}">
-          <div class="ledger-filter-line">
-            <div class="ledger-filter-label">选择时间</div>
-            <div class="ledger-filter-content ledger-time-controls">
-              <span class="ledger-filter-icon"><i class="fa-regular fa-calendar"></i></span>
-              <select id="ledger-filter-year" class="ledger-inline-select">
-                <option value="2026">2026年</option>
-                <option value="2025">2025年</option>
-                <option value="2024">2024年</option>
-              </select>
-              <select id="ledger-filter-month" class="ledger-inline-select">
-                ${Array.from({ length: 12 }, (_, index) => {
-                  const value = String(index + 1).padStart(2, '0');
-                  return `<option value="${value}">${index + 1}月</option>`;
-                }).join('')}
-              </select>
-            </div>
-          </div>
           ${this.renderOrgSelector()}
           <div class="ledger-filter-actions">
             <button id="ledger-filter-reset" class="ledger-filter-secondary" type="button">
@@ -290,6 +371,196 @@ const LedgerView = {
         </div>
       </div>
     `;
+  },
+
+  createCompoundFilter(relation = 'AND') {
+    return {
+      id: `condition-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      relation,
+      field: 'partnerErp',
+      value: ''
+    };
+  },
+
+  renderCompoundFilterPanel() {
+    const conditions = this.compoundFilters.length
+      ? this.compoundFilters
+      : [this.createCompoundFilter()];
+    if (!this.compoundFilters.length) this.compoundFilters = conditions;
+    return `
+      <div id="ledger-compound-filter-panel" class="ledger-compound-filter-panel ${this.compoundFiltersExpanded ? '' : 'hidden'}">
+        <div class="ledger-compound-filter-head">
+          <div>
+            <strong>组合筛选</strong>
+            <span>文本包含匹配，支持 AND / OR</span>
+          </div>
+          <div class="ledger-compound-head-actions">
+            <button type="button" class="ledger-compound-close" data-compound-action="close" aria-label="关闭组合筛选">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+        <div class="ledger-compound-conditions">
+          ${conditions.map((condition, index) => `
+            <div class="ledger-compound-condition" data-condition-id="${this.escapeHtml(condition.id)}">
+              ${index === 0 ? '<span class="ledger-compound-relation-placeholder">条件</span>' : `
+                <select class="ledger-compound-relation" data-condition-property="relation" aria-label="条件关系">
+                  <option value="AND" ${condition.relation === 'AND' ? 'selected' : ''}>AND</option>
+                  <option value="OR" ${condition.relation === 'OR' ? 'selected' : ''}>OR</option>
+                </select>
+              `}
+              <select class="ledger-compound-field" data-condition-property="field" aria-label="筛选字段">
+                ${this.compoundFilterFieldOptions.map((option) => `
+                  <option value="${option.value}" ${condition.field === option.value ? 'selected' : ''}>${option.label}</option>
+                `).join('')}
+              </select>
+              <input class="ledger-compound-value" data-condition-property="value" type="text" value="${this.escapeHtml(condition.value)}" placeholder="请输入搜索内容" aria-label="搜索内容">
+              <button type="button" class="ledger-compound-remove" data-compound-action="remove" title="删除条件" aria-label="删除条件" ${conditions.length === 1 ? 'disabled' : ''}>
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+            </div>
+          `).join('')}
+        </div>
+        <button type="button" class="ledger-compound-add" data-compound-action="add" ${conditions.length >= 20 ? 'disabled' : ''}>
+          <i class="fa-solid fa-plus"></i>
+          <span>${conditions.length >= 20 ? '已达 20 条上限' : '添加条件'}</span>
+        </button>
+        <div class="ledger-compound-actions">
+          <button type="button" class="ledger-filter-secondary" data-compound-action="clear">清空</button>
+          <button type="button" class="ledger-filter-secondary" data-compound-action="close">取消</button>
+          <button type="button" class="ledger-filter-primary" data-compound-action="apply">应用筛选</button>
+        </div>
+      </div>
+    `;
+  },
+
+  renderCompoundFilterPanelIntoDom() {
+    const current = document.getElementById('ledger-compound-filter-panel');
+    if (current) {
+      current.outerHTML = this.renderCompoundFilterPanel();
+      this.mountCompoundFilterPortal();
+      this.positionCompoundFilterPanel();
+    }
+  },
+
+  mountCompoundFilterPortal() {
+    const inlinePanel = document.querySelector('#ledger-filter-panel #ledger-compound-filter-panel');
+    const portalPanel = document.querySelector('body > #ledger-compound-filter-panel');
+    if (!inlinePanel) return;
+    if (portalPanel && portalPanel !== inlinePanel) portalPanel.remove();
+    document.body.appendChild(inlinePanel);
+  },
+
+  bindCompoundFilterPanelEvents() {
+    if (this.compoundEventsBound) return;
+    document.addEventListener('click', (event) => {
+      const panel = event.target.closest('#ledger-compound-filter-panel');
+      if (!panel) {
+        if (this.compoundFiltersExpanded && !event.target.closest('#ledger-compound-filter-btn')) {
+          this.compoundFiltersExpanded = false;
+          this.renderCompoundFilterPanelIntoDom();
+          this.updateCompoundFilterButton();
+        }
+        return;
+      }
+      const actionTarget = event.target.closest('[data-compound-action]');
+      if (actionTarget) {
+        this.handleCompoundFilterAction(actionTarget.dataset.compoundAction, actionTarget);
+      }
+    });
+    document.addEventListener('input', (event) => {
+      if (!event.target.closest('#ledger-compound-filter-panel')) return;
+      if (event.target.matches('[data-condition-property]')) this.syncCompoundCondition(event.target);
+    });
+    document.addEventListener('change', (event) => {
+      if (!event.target.closest('#ledger-compound-filter-panel')) return;
+      if (event.target.matches('[data-condition-property]')) this.syncCompoundCondition(event.target);
+    });
+    window.addEventListener('hashchange', () => {
+      if (window.location.hash !== '#ledger') {
+        document.querySelector('body > #ledger-compound-filter-panel')?.remove();
+        this.compoundFiltersExpanded = false;
+      }
+    });
+    this.compoundEventsBound = true;
+  },
+
+  positionCompoundFilterPanel() {
+    if (!this.compoundFiltersExpanded) return;
+    const button = document.getElementById('ledger-compound-filter-btn');
+    const panel = document.getElementById('ledger-compound-filter-panel');
+    if (!button || !panel) return;
+
+    const margin = 12;
+    const gap = 8;
+    const buttonRect = button.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const panelWidth = Math.min(720, viewportWidth - margin * 2);
+    const availableBelow = viewportHeight - buttonRect.bottom - gap - margin;
+    const availableAbove = buttonRect.top - gap - margin;
+    const openBelow = availableBelow >= 320 || availableBelow >= availableAbove;
+    const availableHeight = Math.max(260, openBelow ? availableBelow : availableAbove);
+    const maxHeight = Math.min(560, availableHeight);
+    const left = Math.min(
+      Math.max(margin, buttonRect.left),
+      Math.max(margin, viewportWidth - panelWidth - margin)
+    );
+
+    panel.style.width = `${panelWidth}px`;
+    panel.style.maxHeight = `${maxHeight}px`;
+    panel.style.left = `${left}px`;
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+    if (openBelow) {
+      panel.style.top = `${buttonRect.bottom + gap}px`;
+    } else {
+      panel.style.top = `${Math.max(margin, buttonRect.top - gap - panel.getBoundingClientRect().height)}px`;
+    }
+    panel.dataset.placement = openBelow ? 'bottom' : 'top';
+  },
+
+  syncCompoundCondition(target) {
+    const row = target.closest('[data-condition-id]');
+    const condition = this.compoundFilters.find((item) => item.id === row?.dataset.conditionId);
+    const property = target.dataset.conditionProperty;
+    if (condition && property) condition[property] = target.value;
+  },
+
+  handleCompoundFilterAction(action, target) {
+    if (action === 'close') {
+      this.compoundFiltersExpanded = false;
+    } else if (action === 'add') {
+      if (this.compoundFilters.length >= 20) {
+        Dialog.toast('最多添加 20 个筛选条件', 'warning');
+        return;
+      }
+      this.compoundFilters.push(this.createCompoundFilter('AND'));
+    } else if (action === 'remove') {
+      const id = target.closest('[data-condition-id]')?.dataset.conditionId;
+      this.compoundFilters = this.compoundFilters.filter((item) => item.id !== id);
+      if (!this.compoundFilters.length) this.compoundFilters = [this.createCompoundFilter()];
+    } else if (action === 'clear') {
+      this.compoundFilters = [this.createCompoundFilter()];
+      this.appliedCompoundFilters = [];
+      this.refreshTable();
+    } else if (action === 'apply') {
+      this.appliedCompoundFilters = this.compoundFilters
+        .map((item, index) => ({ ...item, relation: index === 0 ? 'AND' : item.relation, value: item.value.trim() }))
+        .filter((item) => item.value);
+      this.compoundFiltersExpanded = false;
+      this.refreshTable();
+      Dialog.toast(this.appliedCompoundFilters.length ? '组合筛选已应用' : '组合筛选已清空', 'success');
+    }
+    this.renderCompoundFilterPanelIntoDom();
+    this.updateCompoundFilterButton();
+  },
+
+  updateCompoundFilterButton() {
+    const button = document.getElementById('ledger-compound-filter-btn');
+    const label = document.getElementById('ledger-compound-filter-label');
+    if (button) button.setAttribute('aria-expanded', String(this.compoundFiltersExpanded));
+    if (label) label.textContent = `筛选（${this.appliedCompoundFilters.length}）`;
   },
 
   getKeywordFieldLabel(value = this.filters.keywordField) {
@@ -326,7 +597,6 @@ const LedgerView = {
 
   getAdvancedFilterCount() {
     let count = 0;
-    if (this.filters.year !== '2026' || this.filters.month !== '06') count += 1;
     if (this.orgNavigator.region) count += 1;
     if (this.orgNavigator.office) count += 1;
     if (this.orgNavigator.dealer) count += 1;
@@ -468,10 +738,14 @@ const LedgerView = {
   },
 
   getAllRows() {
-    return this.standardData.flatMap((row) => this.getStandardPreviewRows(row)).map((item) => ({
-      ...item,
-      ...(this.edits.get(this.getLedgerRowKey(item)) || {})
-    }));
+    return this.standardData.flatMap((row) => this.getStandardPreviewRows(row)).map((item) => {
+      const ledgerKey = this.getLedgerRowKey(item);
+      return {
+        ...item,
+        ...(this.edits.get(ledgerKey) || {}),
+        _ledgerKey: ledgerKey
+      };
+    });
   },
 
   hasLedgerPermission(action) {
@@ -505,14 +779,35 @@ const LedgerView = {
       }
       return Object.values(values).some((value) => contains(value, keyword));
     };
+    const matchesCompoundFilters = (item) => {
+      if (!this.appliedCompoundFilters.length) return true;
+      const values = {
+        partnerErp: String(item.partnerErp || '').replace(/\s*ERP\s*$/i, ''),
+        dealer: item.dealer,
+        acc: item.acc,
+        orionStoreCode: item.storeCode,
+        orionStoreName: item.storeName,
+        orionProductCode: item.productCode,
+        orionBarcode: item.barcode,
+        orionProductName: item.productName
+      };
+      const groups = [];
+      this.appliedCompoundFilters.forEach((condition, index) => {
+        if (index === 0 || condition.relation === 'OR') groups.push([]);
+        groups[groups.length - 1].push(condition);
+      });
+      return groups.some((group) => group.every((condition) => contains(values[condition.field], condition.value)));
+    };
 
     return this.getAllRows().filter((item) => {
-      const monthMatch = item.month === `${filters.year}年${filters.month}月`;
+      const itemMonth = String(item.transactionDate || '').slice(0, 7);
+      const monthMatch = itemMonth >= filters.startMonth && itemMonth <= filters.endMonth;
       const regionMatch = !filters.org.region || item.fullRegion === filters.org.region;
       const officeMatch = !filters.org.office || item.salesOffice === filters.org.office;
       const orgDealerMatch = !filters.org.dealer || item.dealer === filters.org.dealer;
       const keywordMatch = matchesKeyword(item);
-      return monthMatch && regionMatch && officeMatch && orgDealerMatch && keywordMatch;
+      const compoundMatch = matchesCompoundFilters(item);
+      return monthMatch && regionMatch && officeMatch && orgDealerMatch && keywordMatch && compoundMatch;
     });
   },
 
@@ -546,13 +841,14 @@ const LedgerView = {
     }
 
     return rows.map((item) => `
-      <tr class="hover:bg-slate-50 transition-colors">
+      <tr class="hover:bg-slate-50 transition-colors ${this.editingRowKey === this.getLedgerRowKey(item) ? 'ledger-row-editing' : ''}" data-ledger-editing="${this.editingRowKey === this.getLedgerRowKey(item)}">
         ${this.renderDataCells(item)}
       </tr>
     `).join('');
   },
 
   getLedgerRowKey(item) {
+    if (item?._ledgerKey) return item._ledgerKey;
     return [
       item.month,
       item.storeCode,
@@ -562,6 +858,17 @@ const LedgerView = {
   },
 
   renderDataCells(item) {
+    const rowKey = this.getLedgerRowKey(item);
+    const isEditing = this.editingRowKey === rowKey;
+    const editableColumns = {
+      partnerErp: { field: 'partnerErp', mono: false },
+      orionStoreCode: { field: 'storeCode', mono: true },
+      orionProductCode: { field: 'productCode', mono: true },
+      quantity: { field: 'quantity', numeric: true },
+      amount: { field: 'amount', numeric: true, money: true },
+      cost: { field: 'cost', numeric: true, money: true },
+      retailPrice: { field: 'retailPrice', numeric: true, money: true }
+    };
     const cells = this.getVisibleColumns().map((column) => {
       const value = column.value(item);
       const classes = ['px-4', 'py-3'];
@@ -569,41 +876,114 @@ const LedgerView = {
       if (column.mono) classes.push('font-mono', 'text-xs', 'text-[#1d2129]');
       if (column.truncate) classes.push('truncate');
       if (['dealerName', 'customerStoreName', 'orionStoreName', 'customerProductName', 'orionProductName'].includes(column.key)) classes.push('max-w-[220px]');
+      const editable = editableColumns[column.key];
+      if (isEditing && editable) {
+        const inputValue = editable.field === 'partnerErp'
+          ? String(item[editable.field] || '').replace(/\s*ERP\s*$/i, '')
+          : item[editable.field] || '';
+        return `<td class="${classes.join(' ')}">
+          <input
+            type="text"
+            ${editable.numeric ? 'inputmode="decimal"' : ''}
+            class="ledger-inline-edit-input${editable.mono ? ' font-mono' : ''}"
+            data-ledger-edit-field="${editable.field}"
+            ${editable.numeric ? 'data-ledger-numeric="true"' : ''}
+            ${editable.money ? 'data-ledger-money="true"' : ''}
+            value="${this.escapeHtml(inputValue)}"
+            aria-label="编辑${this.escapeHtml(column.label)}"
+          >
+        </td>`;
+      }
       const title = column.truncate ? ` title="${this.escapeHtml(value)}"` : '';
       return `<td class="${classes.join(' ')}"${title}>${this.escapeHtml(value)}</td>`;
     }).join('');
     return `${cells}
       <td class="px-4 py-3">
         <div class="flex items-center gap-1">
+        ${isEditing ? `
+          <button type="button" class="ledger-save-btn ledger-inline-action is-save" data-ledger-key="${this.escapeHtml(rowKey)}" title="保存修改" aria-label="保存修改">
+            <i class="fa-solid fa-check"></i>
+          </button>
+          <button type="button" class="ledger-cancel-btn ledger-inline-action is-cancel" data-ledger-key="${this.escapeHtml(rowKey)}" title="取消修改" aria-label="取消修改">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        ` : `
         ${this.hasLedgerPermission('单据详情') ? `<button type="button" class="ledger-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-colors" data-ledger-key="${this.escapeHtml(this.getLedgerRowKey(item))}" title="单据详情">
           <i class="fa-solid fa-list-check"></i>
         </button>` : '<span class="text-xs text-[#86909c]">—</span>'}
+        ${this.hasLedgerPermission('编辑') ? `<button type="button" class="ledger-edit-btn px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 transition-colors" data-ledger-key="${this.escapeHtml(this.getLedgerRowKey(item))}" title="编辑">
+          <i class="fa-solid fa-pen-to-square"></i>
+        </button>` : ''}
+        `}
         </div>
       </td>
     `;
   },
 
-  openLedgerEditDialog(row) {
+  startInlineEdit(row) {
     if (!row || !this.hasLedgerPermission('编辑')) {
       Dialog.toast('当前账号无编辑权限', 'warning');
       return;
     }
-    const key = this.getLedgerRowKey(row);
-    Dialog.show({
-      title: '编辑标准POS明细',
-      content: `<div class="grid grid-cols-2 gap-3 text-left"><label class="text-sm">销售数量<input id="ledger-edit-quantity" type="number" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" value="${this.escapeHtml(row.quantity)}"></label><label class="text-sm">销售金额<input id="ledger-edit-amount" type="number" step="0.1" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" value="${this.escapeHtml(row.amount)}"></label><label class="text-sm">销售成本<input id="ledger-edit-cost" type="number" step="0.1" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" value="${this.escapeHtml(row.cost)}"></label><label class="text-sm">零售价<input id="ledger-edit-price" type="number" step="0.1" class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2" value="${this.escapeHtml(row.retailPrice)}"></label></div>`,
-      confirmText: '保存', cancelText: '取消',
-      onConfirm: () => {
-        this.edits.set(key, {
-          quantity: document.getElementById('ledger-edit-quantity')?.value || row.quantity,
-          amount: document.getElementById('ledger-edit-amount')?.value || row.amount,
-          cost: document.getElementById('ledger-edit-cost')?.value || row.cost,
-          retailPrice: document.getElementById('ledger-edit-price')?.value || row.retailPrice
-        });
-        this.refreshTable();
-        Dialog.toast('标准POS明细已保存', 'success');
-      }
+    this.editingRowKey = this.getLedgerRowKey(row);
+    this.refreshTable();
+    requestAnimationFrame(() => {
+      document.querySelector(`tr[data-ledger-editing="true"] input`)?.focus();
     });
+  },
+
+  saveInlineEdit(button) {
+    const key = button?.getAttribute('data-ledger-key') || this.editingRowKey;
+    const tableRow = button?.closest('tr');
+    const inputs = Array.from(tableRow?.querySelectorAll('[data-ledger-edit-field]') || []);
+    const values = {};
+    for (const input of inputs) {
+      const field = input.dataset.ledgerEditField;
+      let value = input.value.trim();
+      if (!value) {
+        Dialog.toast('编辑字段不能为空', 'warning');
+        return;
+      }
+      if (input.dataset.ledgerNumeric === 'true') {
+        if (!/^\d+(?:\.\d{1,2})?$/.test(value) || Number(value) < 0) {
+          Dialog.toast('数值字段必须大于等于 0，且最多保留两位小数', 'warning');
+          return;
+        }
+        value = input.dataset.ledgerMoney === 'true'
+          ? Number(value).toFixed(2)
+          : String(Number(value));
+      } else if (['storeCode', 'productCode'].includes(field)) {
+        value = value.toUpperCase();
+      }
+      values[field] = value;
+    }
+    if (!Object.keys(values).length) {
+      Dialog.toast('当前没有可编辑字段', 'warning');
+      return;
+    }
+    const consistencyWarnings = [];
+    if (['quantity', 'amount', 'retailPrice'].every((field) => values[field] !== undefined)
+      && Math.abs(Number(values.amount) - Number(values.quantity) * Number(values.retailPrice)) > 0.01) {
+      consistencyWarnings.push('销售金额与销售数量×零售单价不一致');
+    }
+    if (values.cost !== undefined && values.amount !== undefined && Number(values.cost) > Number(values.amount)) {
+      consistencyWarnings.push('成本高于销售金额');
+    }
+    this.edits.set(key, {
+      ...(this.edits.get(key) || {}),
+      ...values
+    });
+    this.editingRowKey = '';
+    this.refreshTable();
+    Dialog.toast(
+      consistencyWarnings.length ? `台账明细已更新；${consistencyWarnings.join('；')}` : '台账明细已更新',
+      consistencyWarnings.length ? 'warning' : 'success'
+    );
+  },
+
+  cancelInlineEdit() {
+    this.editingRowKey = '';
+    this.refreshTable();
   },
 
   getGroupLabel(item) {
@@ -636,7 +1016,7 @@ const LedgerView = {
           </td>
         </tr>
         ${collapsed ? '' : items.map((item) => `
-          <tr class="hover:bg-slate-50 transition-colors">
+          <tr class="hover:bg-slate-50 transition-colors ${this.editingRowKey === this.getLedgerRowKey(item) ? 'ledger-row-editing' : ''}" data-ledger-editing="${this.editingRowKey === this.getLedgerRowKey(item)}">
             ${this.renderDataCells(item)}
           </tr>
         `).join('')}
@@ -682,8 +1062,6 @@ const LedgerView = {
       if (el) el.value = value;
     };
 
-    setValue('ledger-filter-year', this.filters.year);
-    setValue('ledger-filter-month', this.filters.month);
     setValue('ledger-filter-keyword', this.filters.keyword);
     this.syncKeywordSearchControl();
   },
@@ -693,6 +1071,8 @@ const LedgerView = {
     this.filters = {
       year: getValue('ledger-filter-year') || '2026',
       month: getValue('ledger-filter-month') || '06',
+      startMonth: this.selectedStartMonth,
+      endMonth: this.selectedEndMonth,
       keyword: getValue('ledger-filter-keyword'),
       keywordField: this.filters.keywordField || 'all',
       org: {
@@ -708,6 +1088,8 @@ const LedgerView = {
     this.filters = {
       year: '2026',
       month: '06',
+      startMonth: `${this.getCurrentMonthValue().slice(0, 4)}-01`,
+      endMonth: this.getCurrentMonthValue(),
       keyword: '',
       keywordField: 'all',
       org: {
@@ -716,12 +1098,20 @@ const LedgerView = {
         dealer: ''
       }
     };
+    this.selectedStartMonth = this.filters.startMonth;
+    this.selectedEndMonth = this.filters.endMonth;
+    this.monthRangeError = '';
     this.orgNavigator = {
       region: '',
       office: '',
       dealer: ''
     };
+    this.compoundFilters = [this.createCompoundFilter()];
+    this.appliedCompoundFilters = [];
+    this.compoundFiltersExpanded = false;
     this.syncFilterControls();
+    this.renderCompoundFilterPanelIntoDom();
+    this.updateCompoundFilterButton();
     this.renderOrgSelectorIntoDom();
     this.updateAdvancedFilterCount();
     this.loadDataMock();
@@ -820,6 +1210,273 @@ const LedgerView = {
     this.refreshTable();
   },
 
+  getBatchFieldConfig(field) {
+    return {
+      storeCode: { label: '好丽友交易处编码', nameField: 'storeName' },
+      productCode: { label: '好丽友产品编码', nameField: 'productName' },
+      partnerErp: { label: '客户系统', nameField: '' }
+    }[field] || { label: field, nameField: '' };
+  },
+
+  getBatchOptions(field, rows) {
+    const options = new Map();
+    rows.forEach((row) => {
+      const value = String(row[field] || '').replace(field === 'partnerErp' ? /\s*ERP\s*$/i : /$^/, '').trim();
+      if (!value) return;
+      const current = options.get(value) || { value, label: value, count: 0 };
+      current.count += 1;
+      options.set(value, current);
+    });
+    return [...options.values()].sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, 'zh-CN'));
+  },
+
+  getBatchScopeItems(rows) {
+    const items = [
+      `时间范围：${this.formatMonthChinese(this.filters.startMonth)}—${this.formatMonthChinese(this.filters.endMonth)}`
+    ];
+    if (this.filters.keyword) {
+      const label = this.keywordFieldOptions.find((item) => item.value === this.filters.keywordField)?.label || '全部字段';
+      items.push(`关键字：${label}包含“${this.filters.keyword}”`);
+    }
+    if (this.filters.org.region) items.push(`区域：${this.filters.org.region}`);
+    if (this.filters.org.office) items.push(`营业所：${this.filters.org.office}`);
+    if (this.filters.org.dealer) items.push(`经销商：${this.filters.org.dealer}`);
+    this.appliedCompoundFilters.forEach((condition, index) => {
+      const label = this.compoundFilterFieldOptions.find((item) => item.value === condition.field)?.label || condition.field;
+      items.push(`${index ? condition.relation : 'AND'} · ${label}包含“${condition.value}”`);
+    });
+    if (items.length === 1) items.push('其他条件：无');
+    return { items, total: rows.length };
+  },
+
+  openBatchEditor(initialState = null) {
+    const scopeRows = this.getFilteredRows();
+    if (!scopeRows.length) {
+      Dialog.toast('当前筛选范围内没有可修改的数据', 'warning');
+      return;
+    }
+    const overlay = document.getElementById('overlay-container');
+    const state = {
+      field: initialState?.field || 'productCode',
+      oldValue: initialState?.oldValue || '',
+      newValue: initialState?.newValue || ''
+    };
+    const close = () => { overlay.innerHTML = ''; };
+    const scope = this.getBatchScopeItems(scopeRows);
+    overlay.innerHTML = `
+        <div class="ledger-batch-backdrop">
+          <section class="ledger-batch-drawer" role="dialog" aria-modal="true" aria-labelledby="ledger-batch-title">
+            <header class="ledger-batch-head">
+              <div>
+                <span class="ledger-batch-eyebrow">范围锁定 · 智能替换</span>
+                <h2 id="ledger-batch-title">批量修改</h2>
+                <p>修改当前全部筛选结果，不受滚动位置或可见行限制。</p>
+              </div>
+              <button type="button" class="ledger-batch-close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
+            </header>
+            <div class="ledger-batch-body">
+              <section class="ledger-batch-form-card">
+                <label class="ledger-batch-field">
+                  <span>修改字段</span>
+                  <select id="ledger-batch-field">
+                    <option value="productCode" ${state.field === 'productCode' ? 'selected' : ''}>好丽友产品编码</option>
+                    <option value="storeCode" ${state.field === 'storeCode' ? 'selected' : ''}>好丽友交易处编码</option>
+                    <option value="partnerErp" ${state.field === 'partnerErp' ? 'selected' : ''}>客户系统</option>
+                  </select>
+                </label>
+                <div class="ledger-batch-replace-grid">
+                  ${this.renderBatchSearchSelect('old', '原值', null, [], true)}
+                  <span class="ledger-batch-arrow"><i class="fa-solid fa-arrow-right"></i></span>
+                  ${this.renderBatchSearchSelect('new', '修改为', null, [], false)}
+                </div>
+              </section>
+              <section class="ledger-batch-scope ledger-batch-scope-compact">
+                <div class="ledger-batch-section-title">
+                  <span><i class="fa-solid fa-filter"></i> 本次修改范围</span>
+                  <strong>${scope.total} 条</strong>
+                </div>
+                <div class="ledger-batch-scope-chips">
+                  ${scope.items.map((item) => `<span>${this.escapeHtml(item)}</span>`).join('')}
+                </div>
+                <p>实际影响条数将在下一步确认时展示。</p>
+              </section>
+            </div>
+            <footer class="ledger-batch-actions">
+              <button type="button" class="ledger-batch-cancel">取消</button>
+              <button type="button" id="ledger-batch-next" disabled>确认</button>
+            </footer>
+          </section>
+        </div>`;
+
+    const getContext = () => {
+      const oldOptions = this.getBatchOptions(state.field, scopeRows);
+      const allNewOptions = this.getBatchOptions(state.field, this.getAllRows());
+      if (!oldOptions.some((item) => item.value === state.oldValue)) state.oldValue = '';
+      const newOptions = allNewOptions.filter((item) => item.value !== state.oldValue);
+      if (!newOptions.some((item) => item.value === state.newValue)) state.newValue = '';
+      const affectedRows = scopeRows.filter((row) => {
+        const value = String(row[state.field] || '').replace(state.field === 'partnerErp' ? /\s*ERP\s*$/i : /$^/, '').trim();
+        return value === state.oldValue;
+      });
+      return {
+        oldOptions,
+        newOptions,
+        affectedRows,
+        oldOption: oldOptions.find((item) => item.value === state.oldValue),
+        newOption: newOptions.find((item) => item.value === state.newValue)
+      };
+    };
+
+    const syncSearch = (kind, selected, options, showCount) => {
+      const root = overlay.querySelector(`[data-batch-search="${kind}"]`);
+      if (!root) return;
+      const trigger = root.querySelector('.ledger-batch-search-trigger span');
+      const optionList = root.querySelector('.ledger-batch-search-options');
+      const input = root.querySelector('input');
+      if (trigger) trigger.textContent = selected?.label || (kind === 'old' ? '请选择原值' : '请选择新值');
+      if (input) input.value = '';
+      if (optionList) {
+        optionList.innerHTML = options.map((item) => `
+          <button type="button" data-batch-value="${this.escapeHtml(item.value)}">
+            <span>${this.escapeHtml(item.label)}</span>${showCount ? `<em>${item.count}条</em>` : ''}
+          </button>`).join('');
+        optionList.querySelectorAll('[data-batch-value]').forEach((button) => {
+          button.addEventListener('click', () => {
+            if (kind === 'old') {
+              state.oldValue = button.dataset.batchValue;
+              state.newValue = '';
+            } else {
+              state.newValue = button.dataset.batchValue;
+            }
+            root.querySelector('.ledger-batch-search-menu')?.classList.add('hidden');
+            syncEditor();
+          });
+        });
+      }
+    };
+
+    const syncEditor = () => {
+      const context = getContext();
+      syncSearch('old', context.oldOption, context.oldOptions, true);
+      syncSearch('new', context.newOption, context.newOptions, false);
+      const nextButton = overlay.querySelector('#ledger-batch-next');
+      if (nextButton) nextButton.disabled = !state.oldValue || !state.newValue || !context.affectedRows.length;
+    };
+
+    overlay.querySelector('.ledger-batch-close')?.addEventListener('click', close);
+    overlay.querySelector('.ledger-batch-cancel')?.addEventListener('click', close);
+    overlay.querySelector('#ledger-batch-field')?.addEventListener('change', (event) => {
+      state.field = event.target.value;
+      state.oldValue = '';
+      state.newValue = '';
+      syncEditor();
+    });
+    ['old', 'new'].forEach((kind) => {
+      const root = overlay.querySelector(`[data-batch-search="${kind}"]`);
+      const menu = root?.querySelector('.ledger-batch-search-menu');
+      root?.querySelector('.ledger-batch-search-trigger')?.addEventListener('click', () => menu?.classList.toggle('hidden'));
+      root?.querySelector('input')?.addEventListener('input', (event) => {
+        const keyword = event.target.value.trim().toLowerCase();
+        root.querySelectorAll('[data-batch-value]').forEach((button) => {
+          button.classList.toggle('hidden', !button.textContent.toLowerCase().includes(keyword));
+        });
+      });
+    });
+    overlay.querySelector('#ledger-batch-next')?.addEventListener('click', () => {
+      const context = getContext();
+      this.openBatchConfirmation({ ...state, scopeRows, ...context, scope });
+    });
+    syncEditor();
+  },
+
+  renderBatchSearchSelect(kind, label, selected, options, showCount) {
+    return `
+      <div class="ledger-batch-search" data-batch-search="${kind}">
+        <label>${label}</label>
+        <button type="button" class="ledger-batch-search-trigger" aria-expanded="false">
+          <span>${this.escapeHtml(selected?.label || (kind === 'old' ? '请选择原值' : '请选择新值'))}</span><i class="fa-solid fa-chevron-down"></i>
+        </button>
+        <div class="ledger-batch-search-menu hidden">
+          <div class="ledger-batch-search-input"><i class="fa-solid fa-magnifying-glass"></i><input type="search" placeholder="搜索编码或客户系统"></div>
+          <div class="ledger-batch-search-options">
+            ${options.map((item) => `<button type="button" data-batch-value="${this.escapeHtml(item.value)}"><span>${this.escapeHtml(item.label)}</span>${showCount ? `<em>${item.count}条</em>` : ''}</button>`).join('')}
+          </div>
+        </div>
+      </div>`;
+  },
+
+  bindBatchSearchSelect(overlay, kind, options, onSelect) {
+    const root = overlay.querySelector(`[data-batch-search="${kind}"]`);
+    const menu = root?.querySelector('.ledger-batch-search-menu');
+    root?.querySelector('.ledger-batch-search-trigger')?.addEventListener('click', () => menu?.classList.toggle('hidden'));
+    root?.querySelector('input')?.addEventListener('input', (event) => {
+      const keyword = event.target.value.trim().toLowerCase();
+      root.querySelectorAll('[data-batch-value]').forEach((button) => {
+        button.classList.toggle('hidden', !button.textContent.toLowerCase().includes(keyword));
+      });
+    });
+    root?.querySelectorAll('[data-batch-value]').forEach((button) => {
+      button.addEventListener('click', () => onSelect(button.dataset.batchValue));
+    });
+  },
+
+  openBatchConfirmation(context) {
+    const { field, oldValue, newValue, affectedRows, oldOption, newOption, scope } = context;
+    const config = this.getBatchFieldConfig(field);
+    const overlay = document.getElementById('overlay-container');
+    overlay.innerHTML = `
+      <div class="ledger-batch-backdrop">
+        <section class="ledger-batch-confirm" role="alertdialog" aria-modal="true">
+          <div class="ledger-batch-warning-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+          <h2>确认批量修改 ${affectedRows.length} 条数据？</h2>
+          <p class="ledger-batch-confirm-lead">当前组合条件下共 <strong>${scope.total}</strong> 条数据，本次实际影响 <strong>${affectedRows.length}</strong> 条。</p>
+          <div class="ledger-batch-confirm-scope">${scope.items.map((item) => `<span>${this.escapeHtml(item)}</span>`).join('')}</div>
+          <div class="ledger-batch-diff">
+            <small>${this.escapeHtml(config.label)}</small>
+            <div><code>${this.escapeHtml(oldOption?.label || oldValue)}</code><i class="fa-solid fa-arrow-right"></i><code>${this.escapeHtml(newOption?.label || newValue)}</code></div>
+          </div>
+          <div class="ledger-batch-danger"><strong>此操作执行后不可回退</strong><span>修改范围包含所有符合上述时间及组合筛选条件的数据，不受当前可见范围限制。</span></div>
+          <label class="ledger-batch-ack"><input id="ledger-batch-ack" type="checkbox"><span>我已核对筛选条件、影响数量和替换内容，并知晓修改后不可回退。</span></label>
+          <footer><button type="button" id="ledger-batch-back">返回修改</button><button type="button" id="ledger-batch-confirm-action" disabled>确认修改 ${affectedRows.length} 条数据</button></footer>
+        </section>
+      </div>`;
+    const checkbox = overlay.querySelector('#ledger-batch-ack');
+    const confirm = overlay.querySelector('#ledger-batch-confirm-action');
+    checkbox?.addEventListener('change', () => { confirm.disabled = !checkbox.checked; });
+    overlay.querySelector('#ledger-batch-back')?.addEventListener('click', () => this.openBatchEditor({ field, oldValue, newValue }));
+    confirm?.addEventListener('click', () => this.executeBatchEdit(context));
+  },
+
+  executeBatchEdit(context) {
+    const { field, oldValue, newValue, affectedRows, scope } = context;
+    affectedRows.forEach((row) => {
+      const key = this.getLedgerRowKey(row);
+      this.edits.set(key, { ...(this.edits.get(key) || {}), [field]: field === 'partnerErp' ? `${newValue} ERP` : newValue });
+    });
+    if (typeof SettingsView !== 'undefined' && Array.isArray(SettingsView.logs)) {
+      const now = new Date();
+      const pad = (value) => String(value).padStart(2, '0');
+      SettingsView.logs.unshift({
+        id: `log-batch-${Date.now()}`,
+        time: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
+        user: 'Aiden',
+        account: 'aiden.pos',
+        module: '台账与汇总',
+        action: '批量修改',
+        target: `${this.getBatchFieldConfig(field).label}（${affectedRows.length}条）`,
+        detail: `${scope.items.join('；')}；${oldValue} → ${newValue}；影响${affectedRows.length}条；不可回退`,
+        before: oldValue,
+        after: newValue,
+        ip: '127.0.0.1',
+        device: 'Mac / Chrome',
+        result: '成功'
+      });
+    }
+    document.getElementById('overlay-container').innerHTML = '';
+    this.refreshTable();
+    Dialog.toast(`批量修改完成，已更新 ${affectedRows.length} 条数据，操作记录已写入系统日志`);
+  },
+
   exportCurrentRows() {
     const rows = this.getFilteredRows();
     const columns = this.getVisibleColumns();
@@ -832,7 +1489,7 @@ const LedgerView = {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `POS明细单据_${this.filters.year}${this.filters.month}_${rows.length}条.csv`;
+    link.download = `POS明细单据_${this.filters.startMonth}_${this.filters.endMonth}_${rows.length}条.csv`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -847,11 +1504,90 @@ const LedgerView = {
   bindEvents() {
     this.syncFilterControls();
     this.loadDataMock();
+    this.mountCompoundFilterPortal();
 
     document.getElementById('ledger-filter-panel')?.addEventListener('click', (event) => {
       const orgButton = event.target.closest('.ledger-org-chip');
       if (orgButton) this.handleOrgAction(orgButton);
     });
+    this.bindCompoundFilterPanelEvents();
+
+    document.getElementById('ledger-compound-filter-btn')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.compoundFiltersExpanded = !this.compoundFiltersExpanded;
+      this.renderCompoundFilterPanelIntoDom();
+      this.updateCompoundFilterButton();
+    });
+
+    const monthButton = document.getElementById('ledger-month-range-button');
+    const monthPicker = document.getElementById('ledger-month-picker');
+    if (monthPicker) monthPicker.onclick = (event) => {
+      event.stopPropagation();
+      const navButton = event.target.closest('[data-ledger-month-nav]');
+      if (navButton && !navButton.disabled) {
+        this.monthPickerViewYear += Number(navButton.dataset.ledgerMonthNav);
+        monthPicker.innerHTML = this.renderLedgerMonthPicker();
+        return;
+      }
+      const monthOption = event.target.closest('[data-ledger-month]');
+      if (!monthOption || monthOption.disabled) return;
+      const value = monthOption.dataset.ledgerMonth;
+      if (!this.monthRangeSelectingEnd) {
+        this.selectedStartMonth = value;
+        this.selectedEndMonth = value;
+        this.monthRangeError = '';
+        this.monthRangeSelectingEnd = true;
+        monthPicker.innerHTML = this.renderLedgerMonthPicker();
+        return;
+      }
+      if (value < this.selectedStartMonth) {
+        this.selectedStartMonth = value;
+        this.selectedEndMonth = value;
+        this.monthRangeError = '';
+        monthPicker.innerHTML = this.renderLedgerMonthPicker();
+        return;
+      }
+      this.selectedEndMonth = value;
+      this.monthRangeSelectingEnd = false;
+      this.monthRangeError = this.getSelectedMonthCount() > 24 ? '时间范围最多选择24个月' : '';
+      const buttonLabel = monthButton?.querySelectorAll('span');
+      if (buttonLabel?.[0]) buttonLabel[0].textContent = this.formatMonthChinese(this.selectedStartMonth);
+      if (buttonLabel?.[2]) buttonLabel[2].textContent = this.formatMonthChinese(this.selectedEndMonth);
+      monthButton?.classList.toggle('invalid', Boolean(this.monthRangeError));
+      const errorEl = document.getElementById('ledger-month-range-error');
+      if (errorEl) {
+        errorEl.textContent = this.monthRangeError;
+        errorEl.classList.toggle('hidden', !this.monthRangeError);
+      }
+      monthPicker.classList.add('hidden');
+      monthButton?.setAttribute('aria-expanded', 'false');
+    };
+
+    if (monthButton) monthButton.onclick = (event) => {
+      event.stopPropagation();
+      const willOpen = monthPicker?.classList.contains('hidden');
+      if (willOpen) {
+        this.monthPickerViewYear = Number(this.selectedStartMonth.slice(0, 4));
+        this.monthRangeSelectingEnd = false;
+        monthPicker.innerHTML = this.renderLedgerMonthPicker();
+      }
+      monthPicker?.classList.toggle('hidden', !willOpen);
+      monthButton.setAttribute('aria-expanded', String(willOpen));
+    };
+    if (this.monthPickerOutsideHandler) document.removeEventListener('click', this.monthPickerOutsideHandler);
+    this.monthPickerOutsideHandler = (event) => {
+      if (event.target.closest('.ledger-month-range-filter')) return;
+      monthPicker?.classList.add('hidden');
+      monthButton?.setAttribute('aria-expanded', 'false');
+    };
+    document.addEventListener('click', this.monthPickerOutsideHandler);
+
+    if (!this.compoundPositionBound) {
+      const repositionCompoundPanel = () => this.positionCompoundFilterPanel();
+      window.addEventListener('resize', repositionCompoundPanel);
+      window.addEventListener('scroll', repositionCompoundPanel, true);
+      this.compoundPositionBound = true;
+    }
 
     document.getElementById('ledger-search-field-btn')?.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -866,15 +1602,26 @@ const LedgerView = {
       document.getElementById('ledger-search-field-dropdown')?.classList.add('hidden');
     });
 
-    document.getElementById('ledger-filter-submit')?.addEventListener('click', () => {
+    const runLedgerSearch = () => {
+      if (this.getSelectedMonthCount() > 24) {
+        this.monthRangeError = '时间范围最多选择24个月，请重新选择';
+        const errorEl = document.getElementById('ledger-month-range-error');
+        if (errorEl) {
+          errorEl.textContent = this.monthRangeError;
+          errorEl.classList.remove('hidden');
+        }
+        monthButton?.classList.add('invalid');
+        return;
+      }
       this.readFilters();
       this.loadDataMock();
-    });
+    };
+
+    document.getElementById('ledger-filter-submit')?.addEventListener('click', runLedgerSearch);
 
     document.getElementById('ledger-filter-keyword')?.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter') return;
-      this.readFilters();
-      this.loadDataMock();
+      runLedgerSearch();
     });
 
     if (!this.searchDropdownCloseBound) {
@@ -901,6 +1648,8 @@ const LedgerView = {
       const groupToggle = event.target.closest('.ledger-group-toggle');
       const detailButton = event.target.closest('.ledger-detail-btn');
       const editButton = event.target.closest('.ledger-edit-btn');
+      const saveButton = event.target.closest('.ledger-save-btn');
+      const cancelButton = event.target.closest('.ledger-cancel-btn');
       if (event.target.closest('#ledger-column-reset')) {
         this.resetColumnsToDefault();
         return;
@@ -908,7 +1657,15 @@ const LedgerView = {
       if (editButton) {
         const rowKey = editButton.getAttribute('data-ledger-key');
         const row = this.getFilteredRows().find(item => this.getLedgerRowKey(item) === rowKey);
-        this.openLedgerEditDialog(row);
+        this.startInlineEdit(row);
+        return;
+      }
+      if (saveButton) {
+        this.saveInlineEdit(saveButton);
+        return;
+      }
+      if (cancelButton) {
+        this.cancelInlineEdit();
         return;
       }
       if (detailButton) {
@@ -968,6 +1725,10 @@ const LedgerView = {
           return;
         }
         this.exportCurrentRows();
+        return;
+      }
+      if (event.target.closest('#ledger-batch-edit-btn')) {
+        this.openBatchEditor();
         return;
       }
       if (groupToggle) {

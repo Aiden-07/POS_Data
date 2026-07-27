@@ -78,6 +78,7 @@ const SettingsView = {
         '质量检查/异常数据:通过',
         '质量检查/异常数据:单据详情',
         '台账与汇总/标准POS明细:查看',
+        '台账与汇总/标准POS明细:编辑',
         '台账与汇总/标准POS明细:单据详情',
         '台账与汇总/标准POS明细:导出'
       ],
@@ -132,7 +133,7 @@ const SettingsView = {
     {
       group: '台账与汇总',
       children: [
-        { name: '标准POS明细', actions: ['查看', '单据详情', '导出'] }
+        { name: '标准POS明细', actions: ['查看', '编辑', '单据详情', '导出'] }
       ]
     },
     {
@@ -655,7 +656,7 @@ const SettingsView = {
           </select>
           <select id="settings-log-action" class="settings-select">
             <option>全部操作</option>
-            ${['登录', '退出', '查看', '编辑', '修改', '审核通过', '驳回', '导出'].map((item) => `<option>${item}</option>`).join('')}
+            ${['登录', '退出', '查看', '编辑', '修改', '批量修改', '审核通过', '驳回', '导出'].map((item) => `<option>${item}</option>`).join('')}
           </select>
           <label class="settings-search settings-log-search">
             <i class="fa-solid fa-magnifying-glass"></i>
@@ -754,7 +755,7 @@ const SettingsView = {
 
   getLogActionClass(action) {
     if (['登录', '退出'].includes(action)) return 'session';
-    if (['修改', '编辑'].includes(action)) return 'edit';
+    if (['修改', '编辑', '批量修改'].includes(action)) return 'edit';
     if (['驳回'].includes(action)) return 'reject';
     if (['导出'].includes(action)) return 'export';
     return 'view';

@@ -9,7 +9,7 @@
   <!-- FontAwesome via CDN -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Custom Style -->
-  <link rel="stylesheet" href="style.css?v=20260720-three-column-org-v5">
+  <link rel="stylesheet" href="style.css?v=20260727-ledger-search-width-v38">
   <!-- Tailwind Config -->
   <script>
     tailwind.config = {
@@ -59,6 +59,10 @@
         <a href="#ledger" class="nav-item">
           <i class="fa-solid fa-table-list"></i>
           <span data-i18n="nav_ledger">台账与汇总</span>
+        </a>
+        <a href="#analytics" class="nav-item">
+          <i class="fa-solid fa-chart-pie"></i>
+          <span>数据分析</span>
         </a>
         <div class="nav-group" id="settings-nav-group">
           <button id="settings-nav-toggle" class="nav-item nav-parent" type="button" aria-expanded="false">
@@ -209,10 +213,11 @@
   <script src="js/views/login.js?v=20260714-dual-account-workflow"></script>
   <script src="js/views/dashboard.js?v=20260707-qa-detail-preview"></script>
     <script src="js/views/ingestion.js?v=20260723-quality-mode-config-v61"></script>
-    <script src="js/views/qa.js?v=20260723-customer-system-label-v17"></script>
-  <script src="js/views/ledger.js?v=20260723-org-filter-labels-v8"></script>
-  <script src="js/views/settings.js?v=20260721-document-detail-permission-v7"></script>
-  <script src="js/core/app.js?v=20260723-settings-quality-icon-v4"></script>
+    <script src="js/views/qa.js?v=20260727-qa-org-hierarchy-v26"></script>
+  <script src="js/views/ledger.js?v=20260727-ledger-batch-confirm-v30"></script>
+  <script src="js/views/analytics.js?v=20260727-mapping-org-select-v31"></script>
+  <script src="js/views/settings.js?v=20260727-ledger-batch-log-v9"></script>
+  <script src="js/core/app.js?v=20260727-hide-analytics-period-v4"></script>
 <script>
 (function () {
   const STATUS_OPTIONS = ['全部状态', '正常', '驳回', '待处理'];

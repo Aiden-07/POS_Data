@@ -265,6 +265,43 @@ const IngestionView = {
     return row.aiNote || '未校验到门店编码/所属关系，请检查门店主数据。';
   },
 
+  getStashAbnormalItems(row = {}, index = 0) {
+    if (Array.isArray(row.abnormalItems) && row.abnormalItems.length) return row.abnormalItems;
+    const seedText = String(row.storeCode || row.customerStoreCode || row.fileName || row.storeName || index);
+    const seed = [...seedText].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    const scenarios = [
+      { problem: '客户门店编码缺失，无法匹配门店主数据', resolution: '请营业担当根据门店名称、地址及经销商信息补充客户门店编码后提交复核' },
+      { problem: '客户门店名称与主数据中的标准名称不一致', resolution: '请核对客户系统门店名称，并选择对应的标准门店主数据完成修正' },
+      { problem: '门店所属营业Team与当前组织关系不一致', resolution: '请依据最新组织关系调整营业Team、区域及营业所后提交复核' },
+      { problem: '同一客户门店存在重复销售数据', resolution: '请核对销售日期与产品明细，确认覆盖历史数据或忽略本次重复数据' },
+      { problem: '客户交易处编码未在主数据中登记', resolution: '请补充有效客户交易处编码，或选择已维护的好丽友交易处完成匹配' }
+    ];
+    const explicit = this.getStashAbnormalReason(row);
+    const items = [];
+    if (explicit && explicit !== '-') {
+      items.push({
+        problem: explicit.replace(/[。.]$/, ''),
+        resolution: '请根据异常内容补充或修正门店主数据，完成后提交POS担当复核'
+      });
+    }
+    for (let offset = 0; items.length < 3; offset += 1) {
+      const item = scenarios[(seed + offset) % scenarios.length];
+      if (!items.some(current => current.problem === item.problem)) items.push(item);
+    }
+    return items;
+  },
+
+  renderStashAbnormalCell(row = {}, index = 0) {
+    const items = this.getStashAbnormalItems(row, index);
+    const first = items[0] || { problem: '-', resolution: '' };
+    return `<div class="anomaly-list-cell" tabindex="0">
+      <span class="anomaly-list-cell__summary">${this.escapeHtml(first.problem)}</span>
+      <div class="anomaly-list-cell__popover" role="tooltip">
+        <ul>${items.map(item => `<li><div class="anomaly-list-cell__problem">${this.escapeHtml(item.problem)}</div></li>`).join('')}</ul>
+      </div>
+    </div>`;
+  },
+
   getSalesOfficeMap() {
     return {
       '北部本部': ['石家庄营业所', '北京营业所', '天津营业所'],
@@ -5543,7 +5580,7 @@ const IngestionView = {
         <td class="px-5 py-3">${this.escapeHtml(deliveryFields.acc)}</td>
         <td class="px-5 py-3 font-mono text-brand"><span class="stash-edit-display">${this.escapeHtml(deliveryFields.orionTradeCode)}</span><input type="text" class="stash-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm font-mono bg-white focus:outline-none focus:border-brand" data-edit-field="orionStoreCode" value="${this.escapeHtml(deliveryFields.orionTradeCode === '-' ? '' : deliveryFields.orionTradeCode)}"></td>
         <td class="px-5 py-3">${this.escapeHtml(deliveryFields.orionTradeName)}</td>
-        <td class="px-5 py-3 text-amber-700"><div class="truncate max-w-[240px]" title="${this.escapeHtml(abnormalReason)}">${this.escapeHtml(abnormalReason)}</div></td>
+        <td class="px-5 py-3 text-amber-700">${this.renderStashAbnormalCell(row, index)}</td>
         <td class="px-5 py-3 font-medium text-[#1d2129]">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
         <td class="px-5 py-3 text-[#4e5969]">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
         <td class="px-5 py-3"><span class="inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${stashStatus === '营业担当处理中' ? 'border-blue-100 bg-blue-50 text-brand' : 'border-amber-100 bg-amber-50 text-amber-700'}">${this.escapeHtml(this.getStashDisplayStatus(key))}</span></td>
