@@ -801,6 +801,10 @@ const IngestionView = {
     };
     this.pagination.page = 1;
     this.saveFiltersToCache();
+    if (!document.getElementById('original-attachment')?.classList.contains('hidden')) {
+      this.renderInbox();
+      return;
+    }
     this.applyFilters();
   },
 
@@ -985,6 +989,12 @@ const IngestionView = {
               </select>
               <i class="fa-solid fa-chevron-down pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#86909c]"></i>
             </div>
+
+            <!-- 搜索按钮 -->
+            <button type="button" id="btn-search"
+              class="px-4 py-2 bg-brand hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:shadow-brand/30 hover:-translate-y-0.5">
+              <i class="fa-solid fa-magnifying-glass mr-1"></i>${cn ? '搜索' : '검색'}
+            </button>
             
             <!-- 重置按钮 -->
             <button type="button" id="btn-reset-filter" 
@@ -1365,6 +1375,22 @@ const IngestionView = {
         item.attachments.some(attachment => this.inboxStatusFilter.includes(attachment.status))
       );
     }
+
+    const keyword = String(this.filters.fileName || '').trim().toLowerCase();
+    if (keyword) {
+      filteredInboxData = filteredInboxData.filter(item => {
+        const searchableText = [
+          item.subject,
+          item.title,
+          item.content,
+          item.sender,
+          item.uploadUser,
+          ...(item.attachments || []).map(attachment => attachment.name)
+        ].filter(Boolean).join(' ').toLowerCase();
+        return searchableText.includes(keyword);
+      });
+    }
+
     filteredInboxData.forEach((item, index) => {
       item.index = index + 1;
     });
@@ -6701,19 +6727,22 @@ const IngestionView = {
   bindFilterEvents() {
     // 文件名称搜索
     const filenameInput = document.getElementById('filter-filename');
-    if (filenameInput) {
-      filenameInput.addEventListener('input', (e) => {
-        this.debounce(() => {
-          this.filters.fileName = e.target.value;
-          if (!document.getElementById('original-attachment')?.classList.contains('hidden')) {
-            this.saveFiltersToCache();
-            this.renderInbox();
-            return;
-          }
-          this.applyFilters();
-        }, 300);
-      });
-    }
+    const runSearch = () => {
+      this.filters.fileName = filenameInput?.value || '';
+      if (!document.getElementById('original-attachment')?.classList.contains('hidden')) {
+        this.saveFiltersToCache();
+        this.renderInbox();
+        return;
+      }
+      this.applyFilters();
+    };
+
+    document.getElementById('btn-search')?.addEventListener('click', runSearch);
+    filenameInput?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      runSearch();
+    });
 
     const searchFieldBtn = document.getElementById('search-field-btn');
     const searchFieldDropdown = document.getElementById('search-field-dropdown');

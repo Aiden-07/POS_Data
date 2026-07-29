@@ -26,6 +26,9 @@ const AnalyticsView = {
   selectedFieldListMonth: '',
   appliedFieldListMonth: '',
   fieldListMonthViewYear: 0,
+  fieldListValueFilters: [],
+  appliedFieldListValueFilters: [],
+  fieldListValueFiltersExpanded: false,
   selectedStartMonth: '',
   selectedEndMonth: '',
   appliedStartMonth: '',
@@ -145,6 +148,31 @@ const AnalyticsView = {
     ];
   },
 
+  getFieldListAvailabilityOptions() {
+    return [
+      ['customerStoreCode', '客户门店编码'],
+      ['customerStoreName', '客户门店名称'],
+      ['customerProductCode', '客户产品编码'],
+      ['customerProductName', '客户产品名称'],
+      ['customerBarcode', '客户条形码'],
+      ['salesQuantity', '销售数量'],
+      ['salesAmount', '销售金额'],
+      ['retailCost', '零售成本']
+    ];
+  },
+
+  createFieldListValueFilter(relation = 'AND', field = '') {
+    const fallbackField = this.getFieldListAvailabilityOptions()
+      .find(([key]) => !this.fieldListValueFilters.some((condition) => condition.field === key))?.[0]
+      || this.getFieldListAvailabilityOptions()[0][0];
+    return {
+      id: `field-value-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      relation,
+      field: field || fallbackField,
+      presence: 'present'
+    };
+  },
+
   getFieldListRows() {
     const monthValue = this.appliedFieldListMonth || this.getCurrentMonthValue();
     const [snapshotYear, snapshotMonth] = monthValue.split('-').map(Number);
@@ -177,12 +205,71 @@ const AnalyticsView = {
   getFilteredFieldListRows() {
     const keyword = this.appliedFieldListSearchKeyword.trim().toLowerCase();
     return this.getFieldListRows().filter((row) => {
-      if (!keyword) return true;
       const fields = this.appliedFieldListSearchField === 'all'
         ? ['acc', 'orionTransactionCode', 'orionTransactionName']
         : [this.appliedFieldListSearchField];
-      return fields.some((field) => String(row[field] || '').toLowerCase().includes(keyword));
+      const keywordMatched = !keyword
+        || fields.some((field) => String(row[field] || '').toLowerCase().includes(keyword));
+      if (!keywordMatched) return false;
+      if (!this.appliedFieldListValueFilters.length) return true;
+      return this.appliedFieldListValueFilters.reduce((matched, condition, index) => {
+        const conditionMatched = Boolean(row[condition.field]) === (condition.presence === 'present');
+        if (index === 0) return conditionMatched;
+        return condition.relation === 'OR'
+          ? matched || conditionMatched
+          : matched && conditionMatched;
+      }, true);
     });
+  },
+
+  renderFieldListValueFilterPanel() {
+    const conditions = this.fieldListValueFilters;
+    const options = this.getFieldListAvailabilityOptions();
+    return `
+      <div id="field-list-value-filter-panel" class="ledger-compound-filter-panel field-list-value-filter-panel ${this.fieldListValueFiltersExpanded ? '' : 'hidden'}">
+        <div class="ledger-compound-filter-head">
+          <div>
+            <strong>字段值筛选</strong>
+            <span>组合判断表头是否有值，支持 AND / OR</span>
+          </div>
+          <button type="button" class="ledger-compound-close" data-field-value-action="close" aria-label="关闭字段值筛选">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <div class="ledger-compound-conditions">
+          ${conditions.length ? conditions.map((condition, index) => `
+            <div class="ledger-compound-condition" data-field-value-id="${this.escapeHtml(condition.id)}">
+              ${index === 0 ? '<span class="ledger-compound-relation-placeholder">条件</span>' : `
+                <select class="ledger-compound-relation" data-field-value-property="relation" aria-label="条件关系">
+                  <option value="AND" ${condition.relation === 'AND' ? 'selected' : ''}>AND</option>
+                  <option value="OR" ${condition.relation === 'OR' ? 'selected' : ''}>OR</option>
+                </select>
+              `}
+              <select class="ledger-compound-field" data-field-value-property="field" aria-label="字段">
+                ${options.map(([key, label]) => `
+                  <option value="${key}" ${condition.field === key ? 'selected' : ''} ${conditions.some((item) => item.id !== condition.id && item.field === key) ? 'disabled' : ''}>${label}</option>
+                `).join('')}
+              </select>
+              <select class="ledger-compound-value" data-field-value-property="presence" aria-label="字段值状态">
+                <option value="present" ${condition.presence === 'present' ? 'selected' : ''}>有值</option>
+                <option value="missing" ${condition.presence === 'missing' ? 'selected' : ''}>无值</option>
+              </select>
+              <button type="button" class="ledger-compound-remove" data-field-value-action="remove" title="删除条件" aria-label="删除条件">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+            </div>
+          `).join('') : '<div class="field-list-filter-empty">尚未添加筛选条件</div>'}
+        </div>
+        <button type="button" class="ledger-compound-add" data-field-value-action="add" ${conditions.length >= options.length ? 'disabled' : ''}>
+          <i class="fa-solid fa-plus"></i>
+          <span>${conditions.length >= options.length ? '已添加全部字段' : '添加条件'}</span>
+        </button>
+        <div class="ledger-compound-actions">
+          <button type="button" class="ledger-filter-secondary" data-field-value-action="clear">清空</button>
+          <button type="button" class="ledger-filter-secondary" data-field-value-action="close">取消</button>
+          <button type="button" class="ledger-filter-primary" data-field-value-action="apply">应用筛选</button>
+        </div>
+      </div>`;
   },
 
   renderFieldAvailability(value) {
@@ -322,10 +409,12 @@ const AnalyticsView = {
     const fields = ['customerSystem', 'customerStoreCode', 'customerTransactionCode', 'customerTransactionName', 'acc', 'orionTransactionCode', 'orionTransactionName'];
     return this.getDeduplicatedStoreMappings().filter((row) => {
       if (this.appliedMappingStatus !== 'all' && row.status !== this.appliedMappingStatus) return false;
-      const org = this.appliedMappingHierarchyFilter;
-      if (org.teams.length && !org.teams.includes(row.headquarters)) return false;
-      if (org.regions.length && !org.regions.includes(row.region)) return false;
-      if (org.offices.length && !org.offices.includes(row.salesOffice)) return false;
+      if (this.activeTab === 'monthly-store') {
+        const org = this.appliedMappingHierarchyFilter;
+        if (org.teams.length && !org.teams.includes(row.headquarters)) return false;
+        if (org.regions.length && !org.regions.includes(row.region)) return false;
+        if (org.offices.length && !org.offices.includes(row.salesOffice)) return false;
+      }
       const searchableFields = this.mappingSearchField === 'all' ? fields : [this.mappingSearchField];
       return !keyword || searchableFields.some((field) => String(row[field] || '').toLowerCase().includes(keyword));
     });
@@ -563,16 +652,7 @@ const AnalyticsView = {
   renderFieldList() {
     const rows = this.getFilteredFieldListRows();
     const fieldLabel = this.getFieldListSearchOptions().find(([key]) => key === this.fieldListSearchField)?.[1] || '全部';
-    const availabilityFields = [
-      ['customerStoreCode', '客户门店编码'],
-      ['customerStoreName', '客户门店名称'],
-      ['customerProductCode', '客户产品编码'],
-      ['customerProductName', '客户产品名称'],
-      ['customerBarcode', '客户条形码'],
-      ['salesQuantity', '销售数量'],
-      ['salesAmount', '销售金额'],
-      ['retailCost', '零售成本']
-    ];
+    const availabilityFields = this.getFieldListAvailabilityOptions();
     return `
       <div class="analytics-monitor analytics-field-list animate-[fadeIn_0.25s_ease-out]">
         <div class="analytics-filter-toolbar">
@@ -605,6 +685,13 @@ const AnalyticsView = {
                 ${this.renderFieldListMonthPicker()}
               </div>
             </span>
+          </div>
+          <div class="ledger-compound-filter-wrap field-list-value-filter-wrap">
+            <button id="field-list-value-filter-button" class="ledger-filter-secondary ledger-compound-filter-btn" type="button" aria-expanded="${this.fieldListValueFiltersExpanded}">
+              <i class="fa-solid fa-filter"></i>
+              <span>字段筛选（${this.appliedFieldListValueFilters.length}）</span>
+            </button>
+            ${this.renderFieldListValueFilterPanel()}
           </div>
           <button id="field-list-search-button" class="analytics-search-button" type="button">
             <i class="fa-solid fa-magnifying-glass"></i>
@@ -655,6 +742,9 @@ const AnalyticsView = {
   renderStoreMapping() {
     const rows = this.getFilteredStoreMappings();
     const fieldLabel = this.getMappingSearchOptions().find(([key]) => key === this.mappingSearchField)?.[1] || '全部';
+    const showOrganizationColumns = this.activeTab === 'monthly-store';
+    const showOperationTime = this.activeTab !== 'monthly-store';
+    const mappingColumnCount = 8 + (showOrganizationColumns ? 3 : 0) + (showOperationTime ? 1 : 0);
     return `
       <div class="analytics-monitor analytics-mapping animate-[fadeIn_0.25s_ease-out]">
         <div class="analytics-filter-toolbar">
@@ -690,16 +780,18 @@ const AnalyticsView = {
               </span>
             </div>
           ` : ''}
-          <div class="mapping-org-filter">
-            <span class="mapping-org-filter-label">组织架构</span>
-            <button id="mapping-org-button" class="mapping-org-button" type="button" aria-expanded="false">
-              <span id="mapping-org-label">${this.getMappingHierarchyLabel()}</span>
-              <i class="fa-solid fa-chevron-down"></i>
-            </button>
-            <div id="mapping-org-dropdown" class="mapping-org-dropdown hidden">
-              ${this.renderMappingHierarchyDropdown()}
+          ${this.activeTab === 'monthly-store' ? `
+            <div class="mapping-org-filter">
+              <span class="mapping-org-filter-label">组织架构</span>
+              <button id="mapping-org-button" class="mapping-org-button" type="button" aria-expanded="false">
+                <span id="mapping-org-label">${this.getMappingHierarchyLabel()}</span>
+                <i class="fa-solid fa-chevron-down"></i>
+              </button>
+              <div id="mapping-org-dropdown" class="mapping-org-dropdown hidden">
+                ${this.renderMappingHierarchyDropdown()}
+              </div>
             </div>
-          </div>
+          ` : ''}
           <label class="analytics-filter-item analytics-status-filter">
             <span>匹配状态</span>
             <span class="analytics-select-wrap">
@@ -707,6 +799,7 @@ const AnalyticsView = {
                 <option value="all" ${this.selectedMappingStatus === 'all' ? 'selected' : ''}>全部</option>
                 <option value="matched" ${this.selectedMappingStatus === 'matched' ? 'selected' : ''}>已匹配</option>
                 <option value="unmatched" ${this.selectedMappingStatus === 'unmatched' ? 'selected' : ''}>未匹配</option>
+                <option value="unsubmitted" ${this.selectedMappingStatus === 'unsubmitted' ? 'selected' : ''}>未提交</option>
               </select>
               <i class="fa-solid fa-chevron-down"></i>
             </span>
@@ -735,11 +828,22 @@ const AnalyticsView = {
                 <th>ACC</th>
                 <th>好丽友交易处编码</th>
                 <th>好丽友交易处名称</th>
-                <th>TEAM</th>
-                <th>区域</th>
-                <th>营业所</th>
-                <th>状态</th>
-                <th>操作时间</th>
+                ${showOrganizationColumns ? `
+                  <th>TEAM</th>
+                  <th>区域</th>
+                  <th>营业所</th>
+                ` : ''}
+                <th>
+                  <span class="analytics-header-with-help">
+                    状态
+                    <span class="analytics-header-help" tabindex="0" role="img"
+                      aria-label="状态：记录上月该门店数据提交状态"
+                      data-tooltip="状态：记录上月该门店数据提交状态">
+                      <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+                    </span>
+                  </span>
+                </th>
+                ${showOperationTime ? '<th>操作时间</th>' : ''}
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-100">
@@ -752,14 +856,16 @@ const AnalyticsView = {
                   <td>${row.acc || '-'}</td>
                   <td class="font-mono text-xs">${row.orionTransactionCode || '-'}</td>
                   <td>${row.orionTransactionName || '-'}</td>
-                  <td>${row.headquarters || '-'}</td>
-                  <td>${row.region || '-'}</td>
-                  <td>${row.salesOffice || '-'}</td>
+                  ${showOrganizationColumns ? `
+                    <td>${row.headquarters || '-'}</td>
+                    <td>${row.region || '-'}</td>
+                    <td>${row.salesOffice || '-'}</td>
+                  ` : ''}
                   <td><span class="analytics-match-status ${row.status}">${row.status === 'matched' ? '已匹配' : '未匹配'}</span></td>
-                  <td class="font-mono text-xs">${row.operationTime || '-'}</td>
+                  ${showOperationTime ? `<td class="font-mono text-xs">${row.operationTime || '-'}</td>` : ''}
                 </tr>
               `).join('') : `
-                <tr><td colspan="12" class="px-4 py-16 text-center text-[#86909c]">未找到匹配的门店数据</td></tr>
+                <tr><td colspan="${mappingColumnCount}" class="px-4 py-16 text-center text-[#86909c]">未找到匹配的门店数据</td></tr>
               `}
             </tbody>
           </table>
@@ -1226,11 +1332,24 @@ const AnalyticsView = {
     const input = document.getElementById('field-list-search-input');
     const monthButton = document.getElementById('field-list-month-button');
     const monthPicker = document.getElementById('field-list-month-picker');
+    const valueFilterButton = document.getElementById('field-list-value-filter-button');
+    const valueFilterWrap = document.querySelector('.field-list-value-filter-wrap');
+    const renderValueFilterPanel = () => {
+      const currentPanel = document.getElementById('field-list-value-filter-panel');
+      if (currentPanel) currentPanel.outerHTML = this.renderFieldListValueFilterPanel();
+    };
+    const closeValueFilterPanel = () => {
+      this.fieldListValueFilters = this.appliedFieldListValueFilters.map((condition) => ({ ...condition }));
+      this.fieldListValueFiltersExpanded = false;
+      document.getElementById('field-list-value-filter-panel')?.classList.add('hidden');
+      valueFilterButton?.setAttribute('aria-expanded', 'false');
+    };
     const runSearch = () => {
       this.fieldListSearchKeyword = document.getElementById('field-list-search-input')?.value || '';
       this.appliedFieldListSearchField = this.fieldListSearchField;
       this.appliedFieldListSearchKeyword = this.fieldListSearchKeyword;
       this.appliedFieldListMonth = this.selectedFieldListMonth;
+      this.appliedFieldListValueFilters = this.fieldListValueFilters.map((condition) => ({ ...condition }));
       this.refreshContent();
     };
     fieldButton?.addEventListener('click', (event) => {
@@ -1288,6 +1407,68 @@ const AnalyticsView = {
       monthButton?.setAttribute('aria-expanded', 'false');
     };
     document.addEventListener('click', this.fieldListMonthOutsideHandler);
+
+    valueFilterButton?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const willOpen = !this.fieldListValueFiltersExpanded;
+      if (willOpen) {
+        this.fieldListValueFilters = this.appliedFieldListValueFilters.map((condition) => ({ ...condition }));
+        if (!this.fieldListValueFilters.length) {
+          this.fieldListValueFilters = [this.createFieldListValueFilter()];
+        }
+      }
+      this.fieldListValueFiltersExpanded = willOpen;
+      if (willOpen) {
+        renderValueFilterPanel();
+      } else {
+        closeValueFilterPanel();
+      }
+      valueFilterButton.setAttribute('aria-expanded', String(willOpen));
+    });
+    valueFilterWrap?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const actionButton = event.target.closest('[data-field-value-action]');
+      if (actionButton) {
+        const action = actionButton.dataset.fieldValueAction;
+        if (action === 'add') {
+          this.fieldListValueFilters.push(this.createFieldListValueFilter());
+        } else if (action === 'remove') {
+          const id = actionButton.closest('[data-field-value-id]')?.dataset.fieldValueId;
+          this.fieldListValueFilters = this.fieldListValueFilters.filter((condition) => condition.id !== id);
+          if (!this.fieldListValueFilters.length) {
+            this.fieldListValueFilters = [this.createFieldListValueFilter()];
+          }
+        } else if (action === 'clear') {
+          this.fieldListValueFilters = [this.createFieldListValueFilter('AND', 'customerStoreCode')];
+        } else if (action === 'apply') {
+          this.appliedFieldListValueFilters = this.fieldListValueFilters.map((condition) => ({ ...condition }));
+          this.fieldListValueFiltersExpanded = false;
+          this.refreshContent();
+          return;
+        } else if (action === 'close') {
+          closeValueFilterPanel();
+          return;
+        }
+        renderValueFilterPanel();
+        return;
+      }
+    });
+    valueFilterWrap?.addEventListener('change', (event) => {
+      const control = event.target.closest('[data-field-value-property]');
+      if (!control) return;
+      const id = control.closest('[data-field-value-id]')?.dataset.fieldValueId;
+      const condition = this.fieldListValueFilters.find((item) => item.id === id);
+      if (!condition) return;
+      condition[control.dataset.fieldValueProperty] = control.value;
+      if (control.dataset.fieldValueProperty === 'field') renderValueFilterPanel();
+    });
+    if (this.fieldListValueFilterOutsideHandler) document.removeEventListener('click', this.fieldListValueFilterOutsideHandler);
+    this.fieldListValueFilterOutsideHandler = (event) => {
+      if (!this.fieldListValueFiltersExpanded || event.target.closest('.field-list-value-filter-wrap')) return;
+      closeValueFilterPanel();
+    };
+    document.addEventListener('click', this.fieldListValueFilterOutsideHandler);
+
     document.getElementById('field-list-search-button')?.addEventListener('click', runSearch);
     document.getElementById('field-list-reset-button')?.addEventListener('click', () => {
       const currentMonth = this.getCurrentMonthValue();
@@ -1298,6 +1479,9 @@ const AnalyticsView = {
       this.selectedFieldListMonth = currentMonth;
       this.appliedFieldListMonth = currentMonth;
       this.fieldListMonthViewYear = Number(currentMonth.slice(0, 4));
+      this.fieldListValueFilters = [];
+      this.appliedFieldListValueFilters = [];
+      this.fieldListValueFiltersExpanded = false;
       this.refreshContent();
     });
     document.getElementById('field-list-export-button')?.addEventListener('click', () => this.exportFieldList());
@@ -1328,7 +1512,14 @@ const AnalyticsView = {
   },
 
   exportStoreMappings() {
-    const headers = ['客户系统', '客户门店号', '客户交易处编码', '客户交易处名称', 'ACC', '好丽友交易处编码', '好丽友交易处名称', 'TEAM', '区域', '营业所', '状态', '操作时间'];
+    const showOrganizationColumns = this.activeTab === 'monthly-store';
+    const showOperationTime = this.activeTab !== 'monthly-store';
+    const headers = [
+      '客户系统', '客户门店号', '客户交易处编码', '客户交易处名称', 'ACC', '好丽友交易处编码', '好丽友交易处名称',
+      ...(showOrganizationColumns ? ['TEAM', '区域', '营业所'] : []),
+      '状态',
+      ...(showOperationTime ? ['操作时间'] : [])
+    ];
     const rows = this.getFilteredStoreMappings().map((row) => [
       row.customerSystem || '-',
       row.customerStoreCode || '-',
@@ -1337,11 +1528,9 @@ const AnalyticsView = {
       row.acc || '-',
       row.orionTransactionCode || '-',
       row.orionTransactionName || '-',
-      row.headquarters || '-',
-      row.region || '-',
-      row.salesOffice || '-',
+      ...(showOrganizationColumns ? [row.headquarters || '-', row.region || '-', row.salesOffice || '-'] : []),
       row.status === 'matched' ? '已匹配' : '未匹配',
-      row.operationTime || '-'
+      ...(showOperationTime ? [row.operationTime || '-'] : [])
     ]);
     const csv = `\uFEFF${[headers, ...rows].map((row) => row.map((value) => this.escapeCsv(value)).join(',')).join('\n')}`;
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));

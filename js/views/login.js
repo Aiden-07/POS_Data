@@ -4,17 +4,15 @@ const LoginView = {
 
   render() {
     return `
-      <div class="relative w-full max-w-[440px] bg-white/95 backdrop-blur-xl p-10 rounded-2xl shadow-xl shadow-slate-200/50 border border-white flex flex-col items-center animate-[fadeIn_0.6s_ease-out]">
-        
-        <!-- Language Toggle Dropdown -->
-        <div class="absolute top-6 right-6">
+      <div class="login-stage">
+        <div class="login-language">
           <div class="relative" id="lang-dropdown-container">
-            <button type="button" id="login-lang-toggle" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-50 hover:bg-gray-100 text-slate-600 transition-colors text-xs font-semibold border border-gray-200 focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/20">
+            <button type="button" id="login-lang-toggle" class="login-language-button">
               <i class="fa-solid fa-language text-brand"></i>
               <span id="login-lang-text">中文</span>
               <i class="fa-solid fa-chevron-down text-[10px] ml-0.5 transition-transform duration-200" id="lang-chevron"></i>
             </button>
-            <div id="lang-dropdown-menu" class="absolute right-0 mt-1.5 w-28 bg-white border border-gray-100 rounded-lg shadow-lg py-1 hidden z-50 transform origin-top-right transition-all">
+            <div id="lang-dropdown-menu" class="login-language-menu hidden">
               <button type="button" class="lang-option w-full text-left px-3 py-2 text-xs font-medium bg-blue-50 text-brand flex items-center justify-between" data-lang="cn">
                 中文 <i class="fa-solid fa-check"></i>
               </button>
@@ -25,41 +23,42 @@ const LoginView = {
           </div>
         </div>
 
-        <div class="w-16 h-16 bg-brand/10 text-brand rounded-full flex items-center justify-center text-3xl mb-5 shadow-sm border border-brand/20">
-          <i class="fa-solid fa-layer-group"></i>
-        </div>
-        <h2 class="text-2xl font-bold mb-8 flex items-center justify-center gap-1.5">
-          <span class="text-brand font-black tracking-tight">POS</span>
-          <span class="text-slate-800" data-i18n="login_title_suffix">数据管理平台</span>
-        </h2>
-        
-        <form id="login-form" class="w-full flex flex-col gap-5">
-          <div class="relative group">
-            <i class="fa-solid fa-user absolute left-4 top-1/2 -translate-y-1/2 text-brand/70 group-focus-within:text-brand transition-colors"></i>
-            <input type="text" id="login-account" data-i18n="username_placeholder" placeholder="请输入账号" class="w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 focus:bg-white transition-all text-sm text-slate-800 font-medium placeholder-slate-400">
-          </div>
-          
-          <div class="relative group">
-            <i class="fa-solid fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-brand/70 group-focus-within:text-brand transition-colors"></i>
-            <input type="password" id="login-password" data-i18n="password_placeholder" placeholder="请输入密码" class="w-full pl-11 pr-12 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 focus:bg-white transition-all text-sm text-slate-800 font-medium placeholder-slate-400">
-            <button type="button" id="toggle-password" class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-brand transition-colors focus:outline-none" aria-label="显示密码" aria-pressed="false" title="显示密码">
-              <i class="fa-solid fa-eye-slash" id="toggle-password-icon"></i>
-            </button>
-          </div>
+        <section class="login-card" aria-labelledby="login-title">
+          <img class="login-brand-logo" src="assets/pos-data-brand.png" alt="POS DATA">
+          <h2 id="login-title">好丽友POS数据管理系统</h2>
 
-          <p id="login-error-message" class="hidden -mt-2 text-sm text-red-600 font-medium leading-5">
-            账号或密码不正确，忘记密码请联系管理员重置密码
-          </p>
+          <form id="login-form" class="login-form">
+            <label class="login-field" for="login-account">
+              <span>用户名</span>
+              <div class="login-input-wrap">
+                <i class="fa-solid fa-user"></i>
+                <input type="text" id="login-account" data-i18n="username_placeholder" placeholder="请输入用户名">
+              </div>
+            </label>
 
-          <label class="flex items-center gap-2 -mt-1 text-sm text-slate-600 cursor-pointer select-none">
-            <input id="remember-password" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-brand focus:ring-brand/30">
-            <span>记住密码</span>
-          </label>
-          
-          <button type="submit" class="w-full bg-brand hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl mt-4 transition-all duration-300 shadow-lg shadow-brand/30 hover:shadow-brand/50 hover:-translate-y-0.5 flex items-center justify-center gap-2" data-i18n="login_btn">
-            登录
-          </button>
-        </form>
+            <label class="login-field" for="login-password">
+              <span>密码</span>
+              <div class="login-input-wrap">
+                <i class="fa-solid fa-lock"></i>
+                <input type="password" id="login-password" data-i18n="password_placeholder" placeholder="请输入密码">
+                <button type="button" id="toggle-password" class="login-password-toggle" aria-label="显示密码" aria-pressed="false" title="显示密码">
+                  <i class="fa-solid fa-eye-slash" id="toggle-password-icon"></i>
+                </button>
+              </div>
+            </label>
+
+            <p id="login-error-message" class="hidden login-error-message">
+              账号或密码不正确，忘记密码请联系管理员重置密码
+            </p>
+
+            <label class="login-remember">
+              <input id="remember-password" type="checkbox">
+              <span>记住密码</span>
+            </label>
+
+            <button type="submit" class="login-submit" data-i18n="login_btn">登录</button>
+          </form>
+        </section>
       </div>
     `;
   },

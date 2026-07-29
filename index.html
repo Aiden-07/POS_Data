@@ -9,7 +9,7 @@
   <!-- FontAwesome via CDN -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Custom Style -->
-  <link rel="stylesheet" href="style.css?v=20260727-ledger-search-width-v38">
+  <link rel="stylesheet" href="style.css?v=20260729-login-balance-v42">
   <!-- Tailwind Config -->
   <script>
     tailwind.config = {
@@ -32,15 +32,10 @@
   <div id="app-layout" class="hidden flex-1 h-screen app-shell">
     <aside id="sidebar" class="app-sidebar">
       <div class="sidebar-brand">
-        <div class="brand-mark">
-          <i class="fa-solid fa-database"></i>
+        <div class="sidebar-brand-assets" aria-label="POS DATA">
+          <img class="sidebar-brand-logo" src="assets/pos-data-brand.png" alt="POS DATA">
+          <img class="sidebar-brand-mark" src="assets/pos-data-mark.png" alt="">
         </div>
-        <div class="brand-copy">
-          <span class="brand-title">POS DATA</span>
-        </div>
-        <button id="sidebar-collapse-toggle" class="sidebar-collapse-button" type="button" aria-label="折叠左侧目录" aria-expanded="true">
-          <i class="fa-solid fa-angles-left"></i>
-        </button>
       </div>
 
       <nav class="sidebar-nav" id="main-nav">
@@ -78,6 +73,11 @@
         </div>
       </nav>
 
+      <div class="sidebar-footer">
+        <button id="sidebar-collapse-toggle" class="sidebar-collapse-button" type="button" aria-label="折叠左侧目录" aria-expanded="true">
+          <i class="fa-solid fa-outdent"></i>
+        </button>
+      </div>
     </aside>
 
     <div class="app-main">
@@ -186,17 +186,10 @@
   </div>
 
   <!-- Login View Container -->
-  <div id="login-container" class="h-screen w-screen flex items-center justify-center relative overflow-hidden px-4 login-shell">
-    <!-- Subtle tech dots background -->
-    <div class="absolute inset-0 z-0 opacity-[0.03]" style="background-image: radial-gradient(#2563eb 1.5px, transparent 1.5px); background-size: 32px 32px;"></div>
-    
-    <!-- Decorative abstract blobs -->
-    <div class="absolute -top-24 -right-24 w-96 h-96 bg-brand/10 rounded-full blur-3xl z-0"></div>
-    <div class="absolute -bottom-24 -left-24 w-96 h-96 bg-blue-400/10 rounded-full blur-3xl z-0"></div>
-
-    <div id="login-view-slot" class="relative z-10 w-full flex items-center justify-center"></div>
-    <div class="absolute bottom-8 text-slate-400 text-xs font-medium z-10">
-      Copyright 2019 by ORION. All right reserved
+  <div id="login-container" class="h-screen w-screen flex relative overflow-hidden login-shell">
+    <div id="login-view-slot" class="relative z-10 w-full"></div>
+    <div class="login-copyright">
+      Copyright 2026 by ORION. All right reserved
     </div>
   </div>
 
@@ -210,14 +203,14 @@
   <script src="js/components/dialog.js?v=20260611-merge"></script>
   <script src="js/components/drawer.js?v=20260611-merge"></script>
   <script src="js/components/ai-assistant.js?v=20260626-ai-fab-drag"></script>
-  <script src="js/views/login.js?v=20260714-dual-account-workflow"></script>
+  <script src="js/views/login.js?v=20260729-login-visual-v2"></script>
   <script src="js/views/dashboard.js?v=20260707-qa-detail-preview"></script>
-    <script src="js/views/ingestion.js?v=20260723-quality-mode-config-v61"></script>
+    <script src="js/views/ingestion.js?v=20260729-ingestion-search-button-v63"></script>
     <script src="js/views/qa.js?v=20260727-qa-org-hierarchy-v26"></script>
   <script src="js/views/ledger.js?v=20260727-ledger-batch-confirm-v30"></script>
-  <script src="js/views/analytics.js?v=20260727-mapping-org-select-v31"></script>
+  <script src="js/views/analytics.js?v=20260729-field-value-filter-v38"></script>
   <script src="js/views/settings.js?v=20260727-ledger-batch-log-v9"></script>
-  <script src="js/core/app.js?v=20260727-hide-analytics-period-v4"></script>
+  <script src="js/core/app.js?v=20260729-sidebar-footer-v5"></script>
 <script>
 (function () {
   const STATUS_OPTIONS = ['全部状态', '正常', '驳回', '待处理'];

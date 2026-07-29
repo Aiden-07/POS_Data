@@ -117,9 +117,10 @@ const App = {
       const collapsed = !layout?.classList.contains('sidebar-collapsed');
       layout?.classList.toggle('sidebar-collapsed', collapsed);
       collapseBtn.setAttribute('aria-expanded', String(!collapsed));
+      collapseBtn.setAttribute('aria-label', collapsed ? '展开左侧目录' : '折叠左侧目录');
       collapseBtn.querySelector('i').className = collapsed
-        ? 'fa-solid fa-angles-right'
-        : 'fa-solid fa-angles-left';
+        ? 'fa-solid fa-indent'
+        : 'fa-solid fa-outdent';
       if (collapsed) closeSettings();
     });
 
