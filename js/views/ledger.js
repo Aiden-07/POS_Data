@@ -10,6 +10,8 @@ const LedgerView = {
   compoundFiltersExpanded: false,
   compoundFilters: [],
   appliedCompoundFilters: [],
+  compoundFilterMode: 'AND',
+  appliedCompoundFilterMode: 'AND',
   compoundPositionBound: false,
   compoundEventsBound: false,
   filters: {
@@ -373,11 +375,11 @@ const LedgerView = {
     `;
   },
 
-  createCompoundFilter(relation = 'AND') {
+  createCompoundFilter() {
     return {
       id: `condition-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      relation,
       field: 'partnerErp',
+      operator: 'contains',
       value: ''
     };
   },
@@ -392,7 +394,6 @@ const LedgerView = {
         <div class="ledger-compound-filter-head">
           <div>
             <strong>组合筛选</strong>
-            <span>文本包含匹配，支持 AND / OR</span>
           </div>
           <div class="ledger-compound-head-actions">
             <button type="button" class="ledger-compound-close" data-compound-action="close" aria-label="关闭组合筛选">
@@ -400,34 +401,50 @@ const LedgerView = {
             </button>
           </div>
         </div>
-        <div class="ledger-compound-conditions">
-          ${conditions.map((condition, index) => `
-            <div class="ledger-compound-condition" data-condition-id="${this.escapeHtml(condition.id)}">
-              ${index === 0 ? '<span class="ledger-compound-relation-placeholder">条件</span>' : `
-                <select class="ledger-compound-relation" data-condition-property="relation" aria-label="条件关系">
-                  <option value="AND" ${condition.relation === 'AND' ? 'selected' : ''}>AND</option>
-                  <option value="OR" ${condition.relation === 'OR' ? 'selected' : ''}>OR</option>
+        <div class="ledger-compound-condition-group">
+          <div class="ledger-compound-logic-column">
+            <select data-compound-mode-select aria-label="条件关系">
+              <option value="AND" ${this.compoundFilterMode === 'AND' ? 'selected' : ''}>且</option>
+              <option value="OR" ${this.compoundFilterMode === 'OR' ? 'selected' : ''}>或</option>
+            </select>
+          </div>
+          <div class="ledger-compound-logic-rail">
+            <span class="ledger-compound-bracket" aria-hidden="true"></span>
+          </div>
+          <div class="ledger-compound-conditions">
+            ${conditions.map((condition) => `
+              <div class="ledger-compound-condition ledger-compound-tree-condition" data-condition-id="${this.escapeHtml(condition.id)}">
+                <select class="ledger-compound-field" data-condition-property="field" aria-label="筛选字段">
+                  ${this.compoundFilterFieldOptions.map((option) => `
+                    <option value="${option.value}" ${condition.field === option.value ? 'selected' : ''}>${option.label}</option>
+                  `).join('')}
                 </select>
-              `}
-              <select class="ledger-compound-field" data-condition-property="field" aria-label="筛选字段">
-                ${this.compoundFilterFieldOptions.map((option) => `
-                  <option value="${option.value}" ${condition.field === option.value ? 'selected' : ''}>${option.label}</option>
-                `).join('')}
-              </select>
-              <input class="ledger-compound-value" data-condition-property="value" type="text" value="${this.escapeHtml(condition.value)}" placeholder="请输入搜索内容" aria-label="搜索内容">
-              <button type="button" class="ledger-compound-remove" data-compound-action="remove" title="删除条件" aria-label="删除条件" ${conditions.length === 1 ? 'disabled' : ''}>
-                <i class="fa-solid fa-trash-can"></i>
+                <select class="ledger-compound-operator" data-condition-property="operator" aria-label="匹配方式">
+                  <option value="contains" ${(condition.operator || 'contains') === 'contains' ? 'selected' : ''}>包含</option>
+                  <option value="notContains" ${condition.operator === 'notContains' ? 'selected' : ''}>不包含</option>
+                  <option value="equals" ${condition.operator === 'equals' ? 'selected' : ''}>等于</option>
+                  <option value="notEquals" ${condition.operator === 'notEquals' ? 'selected' : ''}>不等于</option>
+                  <option value="isEmpty" ${condition.operator === 'isEmpty' ? 'selected' : ''}>为空</option>
+                  <option value="isNotEmpty" ${condition.operator === 'isNotEmpty' ? 'selected' : ''}>不为空</option>
+                </select>
+                <input class="ledger-compound-value" data-condition-property="value" type="text"
+                  value="${this.escapeHtml(['isEmpty', 'isNotEmpty'].includes(condition.operator) ? '' : condition.value)}"
+                  placeholder="${['isEmpty', 'isNotEmpty'].includes(condition.operator) ? '无需输入' : '请输入'}"
+                  aria-label="筛选值" ${['isEmpty', 'isNotEmpty'].includes(condition.operator) ? 'disabled' : ''}>
+                <button type="button" class="ledger-compound-remove" data-compound-action="remove" title="删除条件" aria-label="删除条件" ${conditions.length === 1 ? 'disabled' : ''}>
+                  <i class="fa-solid fa-circle-minus"></i>
+                </button>
+              </div>
+            `).join('')}
+            <div class="ledger-compound-add-row">
+              <button type="button" class="ledger-compound-add ledger-compound-add-compact" data-compound-action="add" title="添加条件" aria-label="添加条件" ${conditions.length >= 20 ? 'disabled' : ''}>
+                <i class="fa-solid fa-circle-plus"></i>
               </button>
             </div>
-          `).join('')}
+          </div>
         </div>
-        <button type="button" class="ledger-compound-add" data-compound-action="add" ${conditions.length >= 20 ? 'disabled' : ''}>
-          <i class="fa-solid fa-plus"></i>
-          <span>${conditions.length >= 20 ? '已达 20 条上限' : '添加条件'}</span>
-        </button>
         <div class="ledger-compound-actions">
           <button type="button" class="ledger-filter-secondary" data-compound-action="clear">清空</button>
-          <button type="button" class="ledger-filter-secondary" data-compound-action="close">取消</button>
           <button type="button" class="ledger-filter-primary" data-compound-action="apply">应用筛选</button>
         </div>
       </div>
@@ -474,6 +491,10 @@ const LedgerView = {
     });
     document.addEventListener('change', (event) => {
       if (!event.target.closest('#ledger-compound-filter-panel')) return;
+      if (event.target.matches('[data-compound-mode-select]')) {
+        this.compoundFilterMode = event.target.value === 'OR' ? 'OR' : 'AND';
+        return;
+      }
       if (event.target.matches('[data-condition-property]')) this.syncCompoundCondition(event.target);
     });
     window.addEventListener('hashchange', () => {
@@ -524,7 +545,18 @@ const LedgerView = {
     const row = target.closest('[data-condition-id]');
     const condition = this.compoundFilters.find((item) => item.id === row?.dataset.conditionId);
     const property = target.dataset.conditionProperty;
-    if (condition && property) condition[property] = target.value;
+    if (!condition || !property) return;
+    condition[property] = target.value;
+    if (property === 'operator') {
+      const input = row.querySelector('[data-condition-property="value"]');
+      const hasNoValue = ['isEmpty', 'isNotEmpty'].includes(condition.operator);
+      if (hasNoValue) condition.value = '';
+      if (input) {
+        input.disabled = hasNoValue;
+        input.value = hasNoValue ? '' : condition.value;
+        input.placeholder = hasNoValue ? '无需输入' : '请输入';
+      }
+    }
   },
 
   handleCompoundFilterAction(action, target) {
@@ -535,7 +567,7 @@ const LedgerView = {
         Dialog.toast('最多添加 20 个筛选条件', 'warning');
         return;
       }
-      this.compoundFilters.push(this.createCompoundFilter('AND'));
+      this.compoundFilters.push(this.createCompoundFilter());
     } else if (action === 'remove') {
       const id = target.closest('[data-condition-id]')?.dataset.conditionId;
       this.compoundFilters = this.compoundFilters.filter((item) => item.id !== id);
@@ -543,11 +575,14 @@ const LedgerView = {
     } else if (action === 'clear') {
       this.compoundFilters = [this.createCompoundFilter()];
       this.appliedCompoundFilters = [];
+      this.compoundFilterMode = 'AND';
+      this.appliedCompoundFilterMode = 'AND';
       this.refreshTable();
     } else if (action === 'apply') {
       this.appliedCompoundFilters = this.compoundFilters
-        .map((item, index) => ({ ...item, relation: index === 0 ? 'AND' : item.relation, value: item.value.trim() }))
-        .filter((item) => item.value);
+        .map((item) => ({ ...item, value: item.value.trim() }))
+        .filter((item) => ['isEmpty', 'isNotEmpty'].includes(item.operator) || item.value);
+      this.appliedCompoundFilterMode = this.compoundFilterMode;
       this.compoundFiltersExpanded = false;
       this.refreshTable();
       Dialog.toast(this.appliedCompoundFilters.length ? '组合筛选已应用' : '组合筛选已清空', 'success');
@@ -560,7 +595,11 @@ const LedgerView = {
     const button = document.getElementById('ledger-compound-filter-btn');
     const label = document.getElementById('ledger-compound-filter-label');
     if (button) button.setAttribute('aria-expanded', String(this.compoundFiltersExpanded));
-    if (label) label.textContent = `筛选（${this.appliedCompoundFilters.length}）`;
+    if (label) {
+      label.textContent = this.appliedCompoundFilters.length
+        ? `筛选（${this.appliedCompoundFilters.length} · ${this.appliedCompoundFilterMode}）`
+        : '筛选（0）';
+    }
   },
 
   getKeywordFieldLabel(value = this.filters.keywordField) {
@@ -791,12 +830,27 @@ const LedgerView = {
         orionBarcode: item.barcode,
         orionProductName: item.productName
       };
-      const groups = [];
-      this.appliedCompoundFilters.forEach((condition, index) => {
-        if (index === 0 || condition.relation === 'OR') groups.push([]);
-        groups[groups.length - 1].push(condition);
-      });
-      return groups.some((group) => group.every((condition) => contains(values[condition.field], condition.value)));
+      const matches = (condition) => {
+        const actual = normalize(values[condition.field]);
+        const expected = normalize(condition.value);
+        switch (condition.operator || 'contains') {
+          case 'notContains':
+            return !actual.includes(expected);
+          case 'equals':
+            return actual === expected;
+          case 'notEquals':
+            return actual !== expected;
+          case 'isEmpty':
+            return actual === '';
+          case 'isNotEmpty':
+            return actual !== '';
+          default:
+            return actual.includes(expected);
+        }
+      };
+      return this.appliedCompoundFilterMode === 'OR'
+        ? this.appliedCompoundFilters.some(matches)
+        : this.appliedCompoundFilters.every(matches);
     };
 
     return this.getAllRows().filter((item) => {
@@ -1108,6 +1162,8 @@ const LedgerView = {
     };
     this.compoundFilters = [this.createCompoundFilter()];
     this.appliedCompoundFilters = [];
+    this.compoundFilterMode = 'AND';
+    this.appliedCompoundFilterMode = 'AND';
     this.compoundFiltersExpanded = false;
     this.syncFilterControls();
     this.renderCompoundFilterPanelIntoDom();
@@ -1218,6 +1274,10 @@ const LedgerView = {
     }[field] || { label: field, nameField: '' };
   },
 
+  normalizeBatchCustomerSystem(value) {
+    return String(value || '').replace(/\s*ERP\s*$/i, '').trim().slice(0, 50);
+  },
+
   getBatchOptions(field, rows) {
     const options = new Map();
     rows.forEach((row) => {
@@ -1241,9 +1301,20 @@ const LedgerView = {
     if (this.filters.org.region) items.push(`区域：${this.filters.org.region}`);
     if (this.filters.org.office) items.push(`营业所：${this.filters.org.office}`);
     if (this.filters.org.dealer) items.push(`经销商：${this.filters.org.dealer}`);
-    this.appliedCompoundFilters.forEach((condition, index) => {
+    this.appliedCompoundFilters.forEach((condition) => {
       const label = this.compoundFilterFieldOptions.find((item) => item.value === condition.field)?.label || condition.field;
-      items.push(`${index ? condition.relation : 'AND'} · ${label}包含“${condition.value}”`);
+      const operatorLabel = {
+        contains: '包含',
+        notContains: '不包含',
+        equals: '等于',
+        notEquals: '不等于',
+        isEmpty: '为空',
+        isNotEmpty: '不为空'
+      }[condition.operator || 'contains'];
+      const valueText = ['isEmpty', 'isNotEmpty'].includes(condition.operator)
+        ? ''
+        : `“${condition.value}”`;
+      items.push(`${this.appliedCompoundFilterMode === 'AND' ? '且' : '或'} · ${label}${operatorLabel}${valueText}`);
     });
     if (items.length === 1) items.push('其他条件：无');
     return { items, total: rows.length };
@@ -1258,7 +1329,6 @@ const LedgerView = {
     const overlay = document.getElementById('overlay-container');
     const state = {
       field: initialState?.field || 'productCode',
-      oldValue: initialState?.oldValue || '',
       newValue: initialState?.newValue || ''
     };
     const close = () => { overlay.innerHTML = ''; };
@@ -1268,7 +1338,6 @@ const LedgerView = {
           <section class="ledger-batch-drawer" role="dialog" aria-modal="true" aria-labelledby="ledger-batch-title">
             <header class="ledger-batch-head">
               <div>
-                <span class="ledger-batch-eyebrow">范围锁定 · 智能替换</span>
                 <h2 id="ledger-batch-title">批量修改</h2>
                 <p>修改当前全部筛选结果，不受滚动位置或可见行限制。</p>
               </div>
@@ -1284,10 +1353,16 @@ const LedgerView = {
                     <option value="partnerErp" ${state.field === 'partnerErp' ? 'selected' : ''}>客户系统</option>
                   </select>
                 </label>
-                <div class="ledger-batch-replace-grid">
-                  ${this.renderBatchSearchSelect('old', '原值', null, [], true)}
-                  <span class="ledger-batch-arrow"><i class="fa-solid fa-arrow-right"></i></span>
-                  ${this.renderBatchSearchSelect('new', '修改为', null, [], false)}
+                <div class="ledger-batch-target-control">
+                  <div class="ledger-batch-new-control">
+                    ${this.renderBatchSearchSelect('new', '目标值', null, [], false)}
+                    <label class="ledger-batch-text-value hidden" for="ledger-batch-new-text">
+                      <span>目标值</span>
+                      <input id="ledger-batch-new-text" type="text" maxlength="50"
+                        placeholder="请输入新的客户系统名称" autocomplete="off"
+                        value="${this.escapeHtml(state.field === 'partnerErp' ? this.normalizeBatchCustomerSystem(state.newValue) : '')}">
+                    </label>
+                  </div>
                 </div>
               </section>
               <section class="ledger-batch-scope ledger-batch-scope-compact">
@@ -1298,7 +1373,7 @@ const LedgerView = {
                 <div class="ledger-batch-scope-chips">
                   ${scope.items.map((item) => `<span>${this.escapeHtml(item)}</span>`).join('')}
                 </div>
-                <p>实际影响条数将在下一步确认时展示。</p>
+                <p id="ledger-batch-impact">选择目标值后显示实际影响条数。</p>
               </section>
             </div>
             <footer class="ledger-batch-actions">
@@ -1309,21 +1384,36 @@ const LedgerView = {
         </div>`;
 
     const getContext = () => {
-      const oldOptions = this.getBatchOptions(state.field, scopeRows);
-      const allNewOptions = this.getBatchOptions(state.field, this.getAllRows());
-      if (!oldOptions.some((item) => item.value === state.oldValue)) state.oldValue = '';
-      const newOptions = allNewOptions.filter((item) => item.value !== state.oldValue);
-      if (!newOptions.some((item) => item.value === state.newValue)) state.newValue = '';
-      const affectedRows = scopeRows.filter((row) => {
-        const value = String(row[state.field] || '').replace(state.field === 'partnerErp' ? /\s*ERP\s*$/i : /$^/, '').trim();
-        return value === state.oldValue;
-      });
+      const usesTextNewValue = state.field === 'partnerErp';
+      const allNewOptions = usesTextNewValue ? [] : this.getBatchOptions(state.field, this.getAllRows());
+      const newOptions = allNewOptions;
+      if (usesTextNewValue) {
+        state.newValue = this.normalizeBatchCustomerSystem(state.newValue);
+      } else if (!newOptions.some((item) => item.value === state.newValue)) {
+        state.newValue = '';
+      }
+      const getCurrentValue = (row) => String(row[state.field] || '')
+        .replace(state.field === 'partnerErp' ? /\s*ERP\s*$/i : /$^/, '')
+        .trim();
+      const affectedRows = state.newValue
+        ? scopeRows.filter((row) => getCurrentValue(row) !== state.newValue)
+        : [];
+      const unchangedRows = state.newValue
+        ? scopeRows.filter((row) => getCurrentValue(row) === state.newValue)
+        : [];
+      const sourceValues = [...new Set(affectedRows.map((row) => getCurrentValue(row) || '空值'))];
+      const sourceSummary = sourceValues.length === 1
+        ? sourceValues[0]
+        : `多个原值（${sourceValues.length}种）`;
       return {
-        oldOptions,
         newOptions,
         affectedRows,
-        oldOption: oldOptions.find((item) => item.value === state.oldValue),
-        newOption: newOptions.find((item) => item.value === state.newValue)
+        unchangedRows,
+        sourceValues,
+        sourceSummary,
+        newOption: usesTextNewValue
+          ? (state.newValue ? { value: state.newValue, label: state.newValue } : null)
+          : newOptions.find((item) => item.value === state.newValue)
       };
     };
 
@@ -1333,7 +1423,7 @@ const LedgerView = {
       const trigger = root.querySelector('.ledger-batch-search-trigger span');
       const optionList = root.querySelector('.ledger-batch-search-options');
       const input = root.querySelector('input');
-      if (trigger) trigger.textContent = selected?.label || (kind === 'old' ? '请选择原值' : '请选择新值');
+      if (trigger) trigger.textContent = selected?.label || (kind === 'old' ? '请选择原值' : '请选择目标值');
       if (input) input.value = '';
       if (optionList) {
         optionList.innerHTML = options.map((item) => `
@@ -1342,12 +1432,7 @@ const LedgerView = {
           </button>`).join('');
         optionList.querySelectorAll('[data-batch-value]').forEach((button) => {
           button.addEventListener('click', () => {
-            if (kind === 'old') {
-              state.oldValue = button.dataset.batchValue;
-              state.newValue = '';
-            } else {
-              state.newValue = button.dataset.batchValue;
-            }
+            state.newValue = button.dataset.batchValue;
             root.querySelector('.ledger-batch-search-menu')?.classList.add('hidden');
             syncEditor();
           });
@@ -1357,21 +1442,36 @@ const LedgerView = {
 
     const syncEditor = () => {
       const context = getContext();
-      syncSearch('old', context.oldOption, context.oldOptions, true);
+      const usesTextNewValue = state.field === 'partnerErp';
+      const newSearch = overlay.querySelector('[data-batch-search="new"]');
+      const newTextField = overlay.querySelector('.ledger-batch-text-value');
+      const newTextInput = overlay.querySelector('#ledger-batch-new-text');
+      newSearch?.classList.toggle('hidden', usesTextNewValue);
+      newTextField?.classList.toggle('hidden', !usesTextNewValue);
+      if (usesTextNewValue && newTextInput && document.activeElement !== newTextInput) {
+        newTextInput.value = state.newValue;
+      }
       syncSearch('new', context.newOption, context.newOptions, false);
+      const impact = overlay.querySelector('#ledger-batch-impact');
+      if (impact) {
+        impact.textContent = state.newValue
+          ? `已与目标值一致 ${context.unchangedRows.length} 条，将自动跳过；实际修改 ${context.affectedRows.length} 条。`
+          : '选择目标值后显示实际影响条数。';
+      }
       const nextButton = overlay.querySelector('#ledger-batch-next');
-      if (nextButton) nextButton.disabled = !state.oldValue || !state.newValue || !context.affectedRows.length;
+      if (nextButton) {
+        nextButton.disabled = !state.newValue || !context.affectedRows.length;
+      }
     };
 
     overlay.querySelector('.ledger-batch-close')?.addEventListener('click', close);
     overlay.querySelector('.ledger-batch-cancel')?.addEventListener('click', close);
     overlay.querySelector('#ledger-batch-field')?.addEventListener('change', (event) => {
       state.field = event.target.value;
-      state.oldValue = '';
       state.newValue = '';
       syncEditor();
     });
-    ['old', 'new'].forEach((kind) => {
+    ['new'].forEach((kind) => {
       const root = overlay.querySelector(`[data-batch-search="${kind}"]`);
       const menu = root?.querySelector('.ledger-batch-search-menu');
       root?.querySelector('.ledger-batch-search-trigger')?.addEventListener('click', () => menu?.classList.toggle('hidden'));
@@ -1381,6 +1481,18 @@ const LedgerView = {
           button.classList.toggle('hidden', !button.textContent.toLowerCase().includes(keyword));
         });
       });
+    });
+    const newTextInput = overlay.querySelector('#ledger-batch-new-text');
+    newTextInput?.addEventListener('input', (event) => {
+      state.newValue = this.normalizeBatchCustomerSystem(event.target.value);
+      const context = getContext();
+      const nextButton = overlay.querySelector('#ledger-batch-next');
+      if (nextButton) {
+        nextButton.disabled = !state.newValue || !context.affectedRows.length;
+      }
+    });
+    newTextInput?.addEventListener('blur', (event) => {
+      event.target.value = this.normalizeBatchCustomerSystem(event.target.value);
     });
     overlay.querySelector('#ledger-batch-next')?.addEventListener('click', () => {
       const context = getContext();
@@ -1394,7 +1506,7 @@ const LedgerView = {
       <div class="ledger-batch-search" data-batch-search="${kind}">
         <label>${label}</label>
         <button type="button" class="ledger-batch-search-trigger" aria-expanded="false">
-          <span>${this.escapeHtml(selected?.label || (kind === 'old' ? '请选择原值' : '请选择新值'))}</span><i class="fa-solid fa-chevron-down"></i>
+          <span>${this.escapeHtml(selected?.label || (kind === 'old' ? '请选择原值' : '请选择目标值'))}</span><i class="fa-solid fa-chevron-down"></i>
         </button>
         <div class="ledger-batch-search-menu hidden">
           <div class="ledger-batch-search-input"><i class="fa-solid fa-magnifying-glass"></i><input type="search" placeholder="搜索编码或客户系统"></div>
@@ -1421,34 +1533,31 @@ const LedgerView = {
   },
 
   openBatchConfirmation(context) {
-    const { field, oldValue, newValue, affectedRows, oldOption, newOption, scope } = context;
-    const config = this.getBatchFieldConfig(field);
+    const { field, newValue, affectedRows } = context;
     const overlay = document.getElementById('overlay-container');
     overlay.innerHTML = `
       <div class="ledger-batch-backdrop">
         <section class="ledger-batch-confirm" role="alertdialog" aria-modal="true">
           <div class="ledger-batch-warning-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
-          <h2>确认批量修改 ${affectedRows.length} 条数据？</h2>
-          <p class="ledger-batch-confirm-lead">当前组合条件下共 <strong>${scope.total}</strong> 条数据，本次实际影响 <strong>${affectedRows.length}</strong> 条。</p>
-          <div class="ledger-batch-confirm-scope">${scope.items.map((item) => `<span>${this.escapeHtml(item)}</span>`).join('')}</div>
-          <div class="ledger-batch-diff">
-            <small>${this.escapeHtml(config.label)}</small>
-            <div><code>${this.escapeHtml(oldOption?.label || oldValue)}</code><i class="fa-solid fa-arrow-right"></i><code>${this.escapeHtml(newOption?.label || newValue)}</code></div>
+          <h2>确认批量修改？</h2>
+          <p class="ledger-batch-confirm-lead">本次将修改 <strong>${affectedRows.length}</strong> 条数据。</p>
+          <div class="ledger-batch-danger">
+            <strong>数据修改后不可恢复</strong>
+            <span>请确认无误后继续。</span>
           </div>
-          <div class="ledger-batch-danger"><strong>此操作执行后不可回退</strong><span>修改范围包含所有符合上述时间及组合筛选条件的数据，不受当前可见范围限制。</span></div>
-          <label class="ledger-batch-ack"><input id="ledger-batch-ack" type="checkbox"><span>我已核对筛选条件、影响数量和替换内容，并知晓修改后不可回退。</span></label>
-          <footer><button type="button" id="ledger-batch-back">返回修改</button><button type="button" id="ledger-batch-confirm-action" disabled>确认修改 ${affectedRows.length} 条数据</button></footer>
+          <footer>
+            <button type="button" id="ledger-batch-back">取消</button>
+            <button type="button" id="ledger-batch-confirm-action">确认修改</button>
+          </footer>
         </section>
       </div>`;
-    const checkbox = overlay.querySelector('#ledger-batch-ack');
     const confirm = overlay.querySelector('#ledger-batch-confirm-action');
-    checkbox?.addEventListener('change', () => { confirm.disabled = !checkbox.checked; });
-    overlay.querySelector('#ledger-batch-back')?.addEventListener('click', () => this.openBatchEditor({ field, oldValue, newValue }));
+    overlay.querySelector('#ledger-batch-back')?.addEventListener('click', () => this.openBatchEditor({ field, newValue }));
     confirm?.addEventListener('click', () => this.executeBatchEdit(context));
   },
 
   executeBatchEdit(context) {
-    const { field, oldValue, newValue, affectedRows, scope } = context;
+    const { field, newValue, affectedRows, unchangedRows, sourceSummary, scope } = context;
     affectedRows.forEach((row) => {
       const key = this.getLedgerRowKey(row);
       this.edits.set(key, { ...(this.edits.get(key) || {}), [field]: field === 'partnerErp' ? `${newValue} ERP` : newValue });
@@ -1464,8 +1573,8 @@ const LedgerView = {
         module: '台账与汇总',
         action: '批量修改',
         target: `${this.getBatchFieldConfig(field).label}（${affectedRows.length}条）`,
-        detail: `${scope.items.join('；')}；${oldValue} → ${newValue}；影响${affectedRows.length}条；不可回退`,
-        before: oldValue,
+        detail: `${scope.items.join('；')}；${sourceSummary} → ${newValue}；范围${scope.total}条；跳过${unchangedRows.length}条；影响${affectedRows.length}条；不可回退`,
+        before: sourceSummary,
         after: newValue,
         ip: '127.0.0.1',
         device: 'Mac / Chrome',

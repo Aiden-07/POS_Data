@@ -28,6 +28,8 @@ const AnalyticsView = {
   fieldListMonthViewYear: 0,
   fieldListValueFilters: [],
   appliedFieldListValueFilters: [],
+  fieldListValueFilterMode: 'AND',
+  appliedFieldListValueFilterMode: 'AND',
   fieldListValueFiltersExpanded: false,
   selectedStartMonth: '',
   selectedEndMonth: '',
@@ -161,13 +163,12 @@ const AnalyticsView = {
     ];
   },
 
-  createFieldListValueFilter(relation = 'AND', field = '') {
+  createFieldListValueFilter(field = '') {
     const fallbackField = this.getFieldListAvailabilityOptions()
       .find(([key]) => !this.fieldListValueFilters.some((condition) => condition.field === key))?.[0]
       || this.getFieldListAvailabilityOptions()[0][0];
     return {
       id: `field-value-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      relation,
       field: field || fallbackField,
       presence: 'present'
     };
@@ -212,13 +213,13 @@ const AnalyticsView = {
         || fields.some((field) => String(row[field] || '').toLowerCase().includes(keyword));
       if (!keywordMatched) return false;
       if (!this.appliedFieldListValueFilters.length) return true;
-      return this.appliedFieldListValueFilters.reduce((matched, condition, index) => {
+      const matches = (condition) => {
         const conditionMatched = Boolean(row[condition.field]) === (condition.presence === 'present');
-        if (index === 0) return conditionMatched;
-        return condition.relation === 'OR'
-          ? matched || conditionMatched
-          : matched && conditionMatched;
-      }, true);
+        return conditionMatched;
+      };
+      return this.appliedFieldListValueFilterMode === 'OR'
+        ? this.appliedFieldListValueFilters.some(matches)
+        : this.appliedFieldListValueFilters.every(matches);
     });
   },
 
@@ -230,43 +231,47 @@ const AnalyticsView = {
         <div class="ledger-compound-filter-head">
           <div>
             <strong>字段值筛选</strong>
-            <span>组合判断表头是否有值，支持 AND / OR</span>
           </div>
           <button type="button" class="ledger-compound-close" data-field-value-action="close" aria-label="关闭字段值筛选">
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
-        <div class="ledger-compound-conditions">
-          ${conditions.length ? conditions.map((condition, index) => `
-            <div class="ledger-compound-condition" data-field-value-id="${this.escapeHtml(condition.id)}">
-              ${index === 0 ? '<span class="ledger-compound-relation-placeholder">条件</span>' : `
-                <select class="ledger-compound-relation" data-field-value-property="relation" aria-label="条件关系">
-                  <option value="AND" ${condition.relation === 'AND' ? 'selected' : ''}>AND</option>
-                  <option value="OR" ${condition.relation === 'OR' ? 'selected' : ''}>OR</option>
+        <div class="ledger-compound-condition-group">
+          <div class="ledger-compound-logic-column">
+            <select data-field-value-mode-select aria-label="条件关系">
+              <option value="AND" ${this.fieldListValueFilterMode === 'AND' ? 'selected' : ''}>且</option>
+              <option value="OR" ${this.fieldListValueFilterMode === 'OR' ? 'selected' : ''}>或</option>
+            </select>
+          </div>
+          <div class="ledger-compound-logic-rail">
+            <span class="ledger-compound-bracket" aria-hidden="true"></span>
+          </div>
+          <div class="ledger-compound-conditions">
+            ${conditions.length ? conditions.map((condition) => `
+              <div class="ledger-compound-condition ledger-compound-tree-condition" data-field-value-id="${this.escapeHtml(condition.id)}">
+                <select class="ledger-compound-field" data-field-value-property="field" aria-label="字段">
+                  ${options.map(([key, label]) => `
+                    <option value="${key}" ${condition.field === key ? 'selected' : ''} ${conditions.some((item) => item.id !== condition.id && item.field === key) ? 'disabled' : ''}>${label}</option>
+                  `).join('')}
                 </select>
-              `}
-              <select class="ledger-compound-field" data-field-value-property="field" aria-label="字段">
-                ${options.map(([key, label]) => `
-                  <option value="${key}" ${condition.field === key ? 'selected' : ''} ${conditions.some((item) => item.id !== condition.id && item.field === key) ? 'disabled' : ''}>${label}</option>
-                `).join('')}
-              </select>
-              <select class="ledger-compound-value" data-field-value-property="presence" aria-label="字段值状态">
-                <option value="present" ${condition.presence === 'present' ? 'selected' : ''}>有值</option>
-                <option value="missing" ${condition.presence === 'missing' ? 'selected' : ''}>无值</option>
-              </select>
-              <button type="button" class="ledger-compound-remove" data-field-value-action="remove" title="删除条件" aria-label="删除条件">
-                <i class="fa-solid fa-trash-can"></i>
+                <select class="ledger-compound-value" data-field-value-property="presence" aria-label="字段值状态">
+                  <option value="missing" ${condition.presence === 'missing' ? 'selected' : ''}>为空</option>
+                  <option value="present" ${condition.presence === 'present' ? 'selected' : ''}>不为空</option>
+                </select>
+                <button type="button" class="ledger-compound-remove" data-field-value-action="remove" title="删除条件" aria-label="删除条件">
+                  <i class="fa-solid fa-circle-minus"></i>
+                </button>
+              </div>
+            `).join('') : '<div class="field-list-filter-empty">尚未添加筛选条件</div>'}
+            <div class="ledger-compound-add-row">
+              <button type="button" class="ledger-compound-add ledger-compound-add-compact" data-field-value-action="add" title="添加条件" aria-label="添加条件" ${conditions.length >= options.length ? 'disabled' : ''}>
+                <i class="fa-solid fa-circle-plus"></i>
               </button>
             </div>
-          `).join('') : '<div class="field-list-filter-empty">尚未添加筛选条件</div>'}
+          </div>
         </div>
-        <button type="button" class="ledger-compound-add" data-field-value-action="add" ${conditions.length >= options.length ? 'disabled' : ''}>
-          <i class="fa-solid fa-plus"></i>
-          <span>${conditions.length >= options.length ? '已添加全部字段' : '添加条件'}</span>
-        </button>
         <div class="ledger-compound-actions">
           <button type="button" class="ledger-filter-secondary" data-field-value-action="clear">清空</button>
-          <button type="button" class="ledger-filter-secondary" data-field-value-action="close">取消</button>
           <button type="button" class="ledger-filter-primary" data-field-value-action="apply">应用筛选</button>
         </div>
       </div>`;
@@ -689,7 +694,9 @@ const AnalyticsView = {
           <div class="ledger-compound-filter-wrap field-list-value-filter-wrap">
             <button id="field-list-value-filter-button" class="ledger-filter-secondary ledger-compound-filter-btn" type="button" aria-expanded="${this.fieldListValueFiltersExpanded}">
               <i class="fa-solid fa-filter"></i>
-              <span>字段筛选（${this.appliedFieldListValueFilters.length}）</span>
+              <span>${this.appliedFieldListValueFilters.length
+                ? `字段筛选（${this.appliedFieldListValueFilters.length} · ${this.appliedFieldListValueFilterMode}）`
+                : '字段筛选（0）'}</span>
             </button>
             ${this.renderFieldListValueFilterPanel()}
           </div>
@@ -1340,6 +1347,7 @@ const AnalyticsView = {
     };
     const closeValueFilterPanel = () => {
       this.fieldListValueFilters = this.appliedFieldListValueFilters.map((condition) => ({ ...condition }));
+      this.fieldListValueFilterMode = this.appliedFieldListValueFilterMode;
       this.fieldListValueFiltersExpanded = false;
       document.getElementById('field-list-value-filter-panel')?.classList.add('hidden');
       valueFilterButton?.setAttribute('aria-expanded', 'false');
@@ -1350,6 +1358,7 @@ const AnalyticsView = {
       this.appliedFieldListSearchKeyword = this.fieldListSearchKeyword;
       this.appliedFieldListMonth = this.selectedFieldListMonth;
       this.appliedFieldListValueFilters = this.fieldListValueFilters.map((condition) => ({ ...condition }));
+      this.appliedFieldListValueFilterMode = this.fieldListValueFilterMode;
       this.refreshContent();
     };
     fieldButton?.addEventListener('click', (event) => {
@@ -1413,6 +1422,7 @@ const AnalyticsView = {
       const willOpen = !this.fieldListValueFiltersExpanded;
       if (willOpen) {
         this.fieldListValueFilters = this.appliedFieldListValueFilters.map((condition) => ({ ...condition }));
+        this.fieldListValueFilterMode = this.appliedFieldListValueFilterMode;
         if (!this.fieldListValueFilters.length) {
           this.fieldListValueFilters = [this.createFieldListValueFilter()];
         }
@@ -1439,9 +1449,11 @@ const AnalyticsView = {
             this.fieldListValueFilters = [this.createFieldListValueFilter()];
           }
         } else if (action === 'clear') {
-          this.fieldListValueFilters = [this.createFieldListValueFilter('AND', 'customerStoreCode')];
+          this.fieldListValueFilters = [this.createFieldListValueFilter('customerStoreCode')];
+          this.fieldListValueFilterMode = 'AND';
         } else if (action === 'apply') {
           this.appliedFieldListValueFilters = this.fieldListValueFilters.map((condition) => ({ ...condition }));
+          this.appliedFieldListValueFilterMode = this.fieldListValueFilterMode;
           this.fieldListValueFiltersExpanded = false;
           this.refreshContent();
           return;
@@ -1454,6 +1466,11 @@ const AnalyticsView = {
       }
     });
     valueFilterWrap?.addEventListener('change', (event) => {
+      const modeControl = event.target.closest('[data-field-value-mode-select]');
+      if (modeControl) {
+        this.fieldListValueFilterMode = modeControl.value === 'OR' ? 'OR' : 'AND';
+        return;
+      }
       const control = event.target.closest('[data-field-value-property]');
       if (!control) return;
       const id = control.closest('[data-field-value-id]')?.dataset.fieldValueId;
@@ -1481,6 +1498,8 @@ const AnalyticsView = {
       this.fieldListMonthViewYear = Number(currentMonth.slice(0, 4));
       this.fieldListValueFilters = [];
       this.appliedFieldListValueFilters = [];
+      this.fieldListValueFilterMode = 'AND';
+      this.appliedFieldListValueFilterMode = 'AND';
       this.fieldListValueFiltersExpanded = false;
       this.refreshContent();
     });
