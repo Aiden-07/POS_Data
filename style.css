@@ -950,6 +950,25 @@ a:active {
   background: rgba(22, 93, 255, 0.06);
 }
 
+.ledger-selection-cell {
+  width: 44px;
+  min-width: 44px;
+  padding: 10px 12px;
+  text-align: center;
+}
+
+.ledger-row-checkbox {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #165dff;
+  cursor: pointer;
+}
+
+.ledger-row-selected {
+  background: #f2f7ff;
+}
+
 .ledger-batch-backdrop {
   position: fixed;
   inset: 0;
@@ -5639,6 +5658,16 @@ textarea:focus {
   background: #0958d9 !important;
   box-shadow: 0 8px 18px rgba(22, 119, 255, 0.28);
   transform: translateY(-2px);
+}
+
+.ledger-batch-edit-button:disabled,
+.ledger-batch-edit-button:disabled:hover {
+  color: #a9b4c5 !important;
+  background: #f2f4f7 !important;
+  border-color: #e3e7ed !important;
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .user-menu-panel,

@@ -6,6 +6,7 @@ const LEDGER_DEFAULT_COLUMNS = [
 
 const LedgerView = {
   edits: new Map(),
+  selectedRowKeys: new Set(),
   editingRowKey: '',
   compoundFiltersExpanded: false,
   compoundFilters: [],
@@ -169,7 +170,8 @@ const LedgerView = {
                 ${this.renderGroupOptions()}
               </div>
             </div>
-            <button id="ledger-batch-edit-btn" class="ledger-table-tool-button ledger-batch-edit-button" type="button">
+            <button id="ledger-batch-edit-btn" class="ledger-table-tool-button ledger-batch-edit-button" type="button"
+              disabled title="请先选择需要修改的单据">
               <i class="fa-solid fa-pen-to-square"></i>
               <span>批量修改</span>
             </button>
@@ -250,12 +252,19 @@ const LedgerView = {
 
   renderTableHeader() {
     const columns = this.getVisibleColumns();
+    const filteredRows = this.getFilteredRows();
+    const selectedCount = filteredRows.filter((row) => this.selectedRowKeys.has(this.getLedgerRowKey(row))).length;
+    const allSelected = filteredRows.length > 0 && selectedCount === filteredRows.length;
     return `
       <tr>
+        <th class="ledger-selection-cell rounded-tl-lg">
+          <input id="ledger-select-all" class="ledger-row-checkbox" type="checkbox"
+            aria-label="选择当前筛选结果" ${allSelected ? 'checked' : ''}
+            data-indeterminate="${selectedCount > 0 && !allSelected}">
+        </th>
         ${columns.map((column, index) => {
           const classes = ['px-4', 'py-3', column.width || 'w-28'];
           if (column.align === 'right') classes.push('text-right');
-          if (index === 0) classes.push('rounded-tl-lg');
           return `<th class="${classes.join(' ')}">${column.label}</th>`;
         }).join('')}
         <th class="px-4 py-3 w-20 rounded-tr-lg">操作</th>
@@ -577,6 +586,7 @@ const LedgerView = {
       this.appliedCompoundFilters = [];
       this.compoundFilterMode = 'AND';
       this.appliedCompoundFilterMode = 'AND';
+      this.selectedRowKeys.clear();
       this.refreshTable();
     } else if (action === 'apply') {
       this.appliedCompoundFilters = this.compoundFilters
@@ -584,6 +594,7 @@ const LedgerView = {
         .filter((item) => ['isEmpty', 'isNotEmpty'].includes(item.operator) || item.value);
       this.appliedCompoundFilterMode = this.compoundFilterMode;
       this.compoundFiltersExpanded = false;
+      this.selectedRowKeys.clear();
       this.refreshTable();
       Dialog.toast(this.appliedCompoundFilters.length ? '组合筛选已应用' : '组合筛选已清空', 'success');
     }
@@ -715,7 +726,7 @@ const LedgerView = {
   },
   
   getSkeletonRows() {
-    const columnCount = this.getVisibleColumns().length + 1;
+    const columnCount = this.getVisibleColumns().length + 2;
     return Array(5).fill(0).map(() => `
       <tr>
         ${Array.from({ length: columnCount }).map(() => '<td class="px-4 py-3"><div class="h-4 w-24 skeleton rounded"></div></td>').join('')}
@@ -878,7 +889,7 @@ const LedgerView = {
     if (!rows.length) {
       return `
         <tr>
-          <td colspan="${this.getVisibleColumns().length + 1}" class="px-4 py-16 text-center">
+          <td colspan="${this.getVisibleColumns().length + 2}" class="px-4 py-16 text-center">
             <div class="inline-flex flex-col items-center gap-3 text-[#86909c]">
               <span class="w-12 h-12 rounded-2xl bg-blue-50 text-brand flex items-center justify-center text-lg">
                 <i class="fa-solid fa-filter-circle-xmark"></i>
@@ -895,7 +906,8 @@ const LedgerView = {
     }
 
     return rows.map((item) => `
-      <tr class="hover:bg-slate-50 transition-colors ${this.editingRowKey === this.getLedgerRowKey(item) ? 'ledger-row-editing' : ''}" data-ledger-editing="${this.editingRowKey === this.getLedgerRowKey(item)}">
+      <tr class="hover:bg-slate-50 transition-colors ${this.selectedRowKeys.has(this.getLedgerRowKey(item)) ? 'ledger-row-selected' : ''} ${this.editingRowKey === this.getLedgerRowKey(item) ? 'ledger-row-editing' : ''}" data-ledger-editing="${this.editingRowKey === this.getLedgerRowKey(item)}">
+        ${this.renderSelectionCell(item)}
         ${this.renderDataCells(item)}
       </tr>
     `).join('');
@@ -909,6 +921,38 @@ const LedgerView = {
       item.productCode || item.barcode,
       item.productName
     ].join('|');
+  },
+
+  renderSelectionCell(item) {
+    const rowKey = this.getLedgerRowKey(item);
+    return `
+      <td class="ledger-selection-cell">
+        <input class="ledger-row-checkbox" type="checkbox" data-ledger-select-row="${this.escapeHtml(rowKey)}"
+          aria-label="选择该单据" ${this.selectedRowKeys.has(rowKey) ? 'checked' : ''}>
+      </td>`;
+  },
+
+  clearRowSelection() {
+    this.selectedRowKeys.clear();
+    this.updateSelectionControls();
+  },
+
+  updateSelectionControls() {
+    const rows = this.getFilteredRows();
+    const visibleKeys = new Set(rows.map((row) => this.getLedgerRowKey(row)));
+    const selectedCount = [...this.selectedRowKeys].filter((key) => visibleKeys.has(key)).length;
+    const selectAll = document.getElementById('ledger-select-all');
+    if (selectAll) {
+      selectAll.checked = rows.length > 0 && selectedCount === rows.length;
+      selectAll.indeterminate = selectedCount > 0 && selectedCount < rows.length;
+    }
+    const button = document.getElementById('ledger-batch-edit-btn');
+    if (button) {
+      button.disabled = selectedCount === 0;
+      button.title = selectedCount ? `批量修改已选择的 ${selectedCount} 条单据` : '请先选择需要修改的单据';
+      const label = button.querySelector('span');
+      if (label) label.textContent = selectedCount ? `批量修改（${selectedCount}）` : '批量修改';
+    }
   },
 
   renderDataCells(item) {
@@ -1055,7 +1099,7 @@ const LedgerView = {
       result.get(label).push(item);
       return result;
     }, new Map());
-    const columnCount = this.getVisibleColumns().length + 1;
+    const columnCount = this.getVisibleColumns().length + 2;
 
     return [...groups.entries()].map(([label, items]) => {
       const collapsed = this.collapsedGroups.has(label);
@@ -1070,7 +1114,8 @@ const LedgerView = {
           </td>
         </tr>
         ${collapsed ? '' : items.map((item) => `
-          <tr class="hover:bg-slate-50 transition-colors ${this.editingRowKey === this.getLedgerRowKey(item) ? 'ledger-row-editing' : ''}" data-ledger-editing="${this.editingRowKey === this.getLedgerRowKey(item)}">
+          <tr class="hover:bg-slate-50 transition-colors ${this.selectedRowKeys.has(this.getLedgerRowKey(item)) ? 'ledger-row-selected' : ''} ${this.editingRowKey === this.getLedgerRowKey(item) ? 'ledger-row-editing' : ''}" data-ledger-editing="${this.editingRowKey === this.getLedgerRowKey(item)}">
+            ${this.renderSelectionCell(item)}
             ${this.renderDataCells(item)}
           </tr>
         `).join('')}
@@ -1090,6 +1135,7 @@ const LedgerView = {
       const rows = this.getFilteredRows();
       if (tb) tb.innerHTML = this.renderRows(rows);
       this.updateRecordCount(rows.length);
+      this.updateSelectionControls();
     }, 500);
   },
 
@@ -1108,6 +1154,9 @@ const LedgerView = {
     if (thead) thead.innerHTML = this.renderTableHeader();
     if (tbody) tbody.innerHTML = this.renderRows(rows);
     this.updateRecordCount(rows.length);
+    this.updateSelectionControls();
+    const selectAll = document.getElementById('ledger-select-all');
+    if (selectAll) selectAll.indeterminate = selectAll.dataset.indeterminate === 'true';
   },
 
   syncFilterControls() {
@@ -1165,6 +1214,7 @@ const LedgerView = {
     this.compoundFilterMode = 'AND';
     this.appliedCompoundFilterMode = 'AND';
     this.compoundFiltersExpanded = false;
+    this.selectedRowKeys.clear();
     this.syncFilterControls();
     this.renderCompoundFilterPanelIntoDom();
     this.updateCompoundFilterButton();
@@ -1321,9 +1371,10 @@ const LedgerView = {
   },
 
   openBatchEditor(initialState = null) {
-    const scopeRows = this.getFilteredRows();
+    const scopeRows = this.getFilteredRows()
+      .filter((row) => this.selectedRowKeys.has(this.getLedgerRowKey(row)));
     if (!scopeRows.length) {
-      Dialog.toast('当前筛选范围内没有可修改的数据', 'warning');
+      Dialog.toast('请先选择需要修改的单据', 'warning');
       return;
     }
     const overlay = document.getElementById('overlay-container');
@@ -1339,7 +1390,7 @@ const LedgerView = {
             <header class="ledger-batch-head">
               <div>
                 <h2 id="ledger-batch-title">批量修改</h2>
-                <p>修改当前全部筛选结果，不受滚动位置或可见行限制。</p>
+                <p>仅修改当前已选择的 ${scopeRows.length} 条单据。</p>
               </div>
               <button type="button" class="ledger-batch-close" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
             </header>
@@ -1367,11 +1418,8 @@ const LedgerView = {
               </section>
               <section class="ledger-batch-scope ledger-batch-scope-compact">
                 <div class="ledger-batch-section-title">
-                  <span><i class="fa-solid fa-filter"></i> 本次修改范围</span>
+                  <span><i class="fa-solid fa-check-square"></i> 已选择单据</span>
                   <strong>${scope.total} 条</strong>
-                </div>
-                <div class="ledger-batch-scope-chips">
-                  ${scope.items.map((item) => `<span>${this.escapeHtml(item)}</span>`).join('')}
                 </div>
                 <p id="ledger-batch-impact">选择目标值后显示实际影响条数。</p>
               </section>
@@ -1533,13 +1581,13 @@ const LedgerView = {
   },
 
   openBatchConfirmation(context) {
-    const { field, newValue, affectedRows } = context;
+    const { field, newValue, affectedRows, unchangedRows } = context;
     const overlay = document.getElementById('overlay-container');
     overlay.innerHTML = `
       <div class="ledger-batch-backdrop ledger-batch-confirm-backdrop">
         <section class="ledger-batch-confirm" role="alertdialog" aria-modal="true">
           <h2>确认批量修改？</h2>
-          <p class="ledger-batch-confirm-lead">本次将修改 <strong>${affectedRows.length}</strong> 条数据，修改后不可恢复。</p>
+          <p class="ledger-batch-confirm-lead">已选择 ${affectedRows.length + unchangedRows.length} 条单据，其中 ${unchangedRows.length} 条与目标值一致并自动跳过；实际修改 <strong>${affectedRows.length}</strong> 条，修改后不可恢复。</p>
           <footer>
             <button type="button" id="ledger-batch-back">取消</button>
             <button type="button" id="ledger-batch-confirm-action">确认修改</button>
@@ -1577,6 +1625,7 @@ const LedgerView = {
       });
     }
     document.getElementById('overlay-container').innerHTML = '';
+    this.selectedRowKeys.clear();
     this.refreshTable();
     Dialog.toast(`批量修改完成，已更新 ${affectedRows.length} 条数据，操作记录已写入系统日志`);
   },
@@ -1718,6 +1767,7 @@ const LedgerView = {
         return;
       }
       this.readFilters();
+      this.selectedRowKeys.clear();
       this.loadDataMock();
     };
 
@@ -1832,6 +1882,10 @@ const LedgerView = {
         return;
       }
       if (event.target.closest('#ledger-batch-edit-btn')) {
+        if (!this.selectedRowKeys.size) {
+          Dialog.toast('请先选择需要修改的单据', 'warning');
+          return;
+        }
         this.openBatchEditor();
         return;
       }
@@ -1843,7 +1897,22 @@ const LedgerView = {
     document.getElementById('ledger-table-card')?.addEventListener('change', (event) => {
       const columnInput = event.target.closest('[data-ledger-column]');
       const groupInput = event.target.closest('input[name="ledger-group-by"]');
-      if (columnInput) {
+      const rowInput = event.target.closest('[data-ledger-select-row]');
+      const selectAll = event.target.closest('#ledger-select-all');
+      if (rowInput) {
+        const rowKey = rowInput.dataset.ledgerSelectRow;
+        if (rowInput.checked) this.selectedRowKeys.add(rowKey);
+        else this.selectedRowKeys.delete(rowKey);
+        rowInput.closest('tr')?.classList.toggle('ledger-row-selected', rowInput.checked);
+        this.updateSelectionControls();
+      } else if (selectAll) {
+        this.getFilteredRows().forEach((row) => {
+          const rowKey = this.getLedgerRowKey(row);
+          if (selectAll.checked) this.selectedRowKeys.add(rowKey);
+          else this.selectedRowKeys.delete(rowKey);
+        });
+        this.refreshTable();
+      } else if (columnInput) {
         this.handleColumnToggle(columnInput);
       } else if (groupInput) {
         this.handleGroupChange(groupInput);
