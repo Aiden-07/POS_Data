@@ -1536,15 +1536,10 @@ const LedgerView = {
     const { field, newValue, affectedRows } = context;
     const overlay = document.getElementById('overlay-container');
     overlay.innerHTML = `
-      <div class="ledger-batch-backdrop">
+      <div class="ledger-batch-backdrop ledger-batch-confirm-backdrop">
         <section class="ledger-batch-confirm" role="alertdialog" aria-modal="true">
-          <div class="ledger-batch-warning-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
           <h2>确认批量修改？</h2>
-          <p class="ledger-batch-confirm-lead">本次将修改 <strong>${affectedRows.length}</strong> 条数据。</p>
-          <div class="ledger-batch-danger">
-            <strong>数据修改后不可恢复</strong>
-            <span>请确认无误后继续。</span>
-          </div>
+          <p class="ledger-batch-confirm-lead">本次将修改 <strong>${affectedRows.length}</strong> 条数据，修改后不可恢复。</p>
           <footer>
             <button type="button" id="ledger-batch-back">取消</button>
             <button type="button" id="ledger-batch-confirm-action">确认修改</button>
