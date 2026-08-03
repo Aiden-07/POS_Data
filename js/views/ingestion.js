@@ -7,6 +7,7 @@ const IngestionView = {
   rejectedStashKeys: new Set(),
   stashEdits: new Map(),
   approvedOriginalIds: new Set(),
+  expandedMatchedTeams: new Set(),
   qualityOriginalStates: {},
   checkingMinDurationMs: 10000,
   stashCheckState: {
@@ -188,10 +189,84 @@ const IngestionView = {
     if (statusText === '待处理') {
       return 'bg-amber-50 text-amber-700 border-amber-100';
     }
-    if (statusText === '驳回') {
+    if (statusText === '部分驳回') {
+      return 'bg-orange-50 text-orange-700 border-orange-100';
+    }
+    if (statusText === '整体驳回' || statusText === '驳回') {
       return 'bg-red-50 text-red-600 border-red-100';
     }
+    if (statusText === '作废') {
+      return 'bg-slate-100 text-slate-500 border-slate-200';
+    }
     return 'bg-slate-50 text-slate-600 border-slate-100';
+  },
+
+  getInboxVoidState() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('pos-inbox-void-state') || '{}');
+      return saved && typeof saved === 'object' ? saved : {};
+    } catch (error) {
+      return {};
+    }
+  },
+
+  saveInboxVoidState(state) {
+    try {
+      localStorage.setItem('pos-inbox-void-state', JSON.stringify(state));
+    } catch (error) {
+      // 本地存储不可用时，作废状态仍保留在当前会话。
+    }
+  },
+
+  getInboxFileKey(emailId, attachment = {}) {
+    return `${emailId}::${attachment.name || ''}`;
+  },
+
+  applyInboxVoidState(inboxItems) {
+    const voidState = this.getInboxVoidState();
+    inboxItems.forEach((item) => {
+      (item.attachments || []).forEach((attachment) => {
+        const record = voidState[this.getInboxFileKey(item.id, attachment)];
+        if (!record) return;
+        attachment.isVoided = true;
+        attachment.voidedAt = record.voidedAt;
+        attachment.voidedBy = record.voidedBy;
+        attachment.voidReason = record.reason;
+        attachment.previousStatus = attachment.previousStatus || record.previousStatus || attachment.status;
+        attachment.status = '作废';
+      });
+    });
+    return inboxItems;
+  },
+
+  getInboxFileStatus(inboxItem, attachment) {
+    if (attachment?.isVoided || attachment?.status === '作废') return '作废';
+    const status = attachment?.status || '';
+    if (status === '校验中' || status === '检验中') return '校验中';
+    if (status === '待处理') return '待处理';
+    const isZip = /\.zip$/i.test(attachment?.name || '');
+    if (!isZip) return status === '驳回' ? '整体驳回' : '正常';
+
+    const childStatuses = this.getZipAttachmentFiles(inboxItem, attachment).map((file) => file.status);
+    if (childStatuses.some((value) => value === '校验中' || value === '检验中')) return '校验中';
+    if (childStatuses.some((value) => value === '待处理' || value === '重复')) return '待处理';
+    if (status === '驳回') return '整体驳回';
+    const rejectedCount = childStatuses.filter((value) => value === '驳回' || value === '整体驳回').length;
+    if (rejectedCount && rejectedCount === childStatuses.length) return '整体驳回';
+    if (rejectedCount) return '部分驳回';
+    return '正常';
+  },
+
+  getInboxFileRows() {
+    return this.getInboxData().flatMap((inboxItem) =>
+      (inboxItem.attachments || []).map((attachment, attachmentIndex) => ({
+        inboxItem,
+        attachment,
+        attachmentIndex,
+        statusText: this.getInboxFileStatus(inboxItem, attachment),
+        isZip: /\.zip$/i.test(attachment.name || '')
+      }))
+    );
   },
 
   getRoutedInboxAttachments(targetStatus) {
@@ -403,8 +478,13 @@ const IngestionView = {
   recalcInboxItemStatus(inboxItem) {
     if (!inboxItem?.attachments?.length) return;
 
-    const activeAttachments = inboxItem.attachments.filter(item => !item.isHistorical);
-    if (!activeAttachments.length) return;
+    const activeAttachments = inboxItem.attachments.filter(item => !item.isHistorical && item.status !== '作废');
+    if (!activeAttachments.length) {
+      inboxItem.isNormal = false;
+      inboxItem.statusText = '作废';
+      inboxItem.suggestion = '当前单据中的文件均已作废';
+      return;
+    }
     const hasChecking = activeAttachments.some(item => item.status === '校验中' || item.status === '检验中');
     const allNormal = activeAttachments.every(item => item.status === '正常');
     const needsAttention = activeAttachments
@@ -931,7 +1011,7 @@ const IngestionView = {
                   <span class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? '全选' : '전체 선택'}</span>
                 </label>
                 <div class="border-t border-gray-100 my-1"></div>
-                ${[['正常', '정상'], ['校验中', '검사 중'], ['驳回', '반려'], ['待处理', '처리 대기']].map(([val, label]) => `
+                ${[['校验中', '검사 중'], ['正常', '정상'], ['待处理', '처리 대기'], ['部分驳回', '부분 반려'], ['整体驳回', '전체 반려'], ['作废', '무효']].map(([val, label]) => `
                   <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
                     <input type="checkbox" value="${val}" class="inbox-status-checkbox rounded border-gray-300 text-brand" ${this.inboxStatusFilter.includes(val) ? 'checked' : ''}>
                     <span class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? val : label}</span>
@@ -1345,7 +1425,7 @@ const IngestionView = {
     });
     
     const deletionState = this.getInboxDeletionState();
-    this.inboxDataCache = inboxItems
+    this.inboxDataCache = this.applyInboxVoidState(inboxItems
       .filter(item => !deletionState.parents.includes(String(item.id)))
       .map(item => {
         const deletedNames = deletionState.attachments[String(item.id)] || [];
@@ -1354,7 +1434,7 @@ const IngestionView = {
         this.recalcInboxItemStatus(item);
         return item;
       })
-      .filter(item => item.attachments.length > 0);
+      .filter(item => item.attachments.length > 0));
     return this.inboxDataCache;
   },
   
@@ -1366,34 +1446,24 @@ const IngestionView = {
     if (!tableContainer) return;
     this.renderUploadCheckStatus();
     
-    const inboxData = this.getInboxData();
-    
-    // 按子级附件状态筛选
-    let filteredInboxData = inboxData;
+    let filteredInboxData = this.getInboxFileRows();
+
     if (this.inboxStatusFilter.length > 0) {
-      filteredInboxData = inboxData.filter(item =>
-        item.attachments.some(attachment => this.inboxStatusFilter.includes(attachment.status))
-      );
+      filteredInboxData = filteredInboxData.filter(item => this.inboxStatusFilter.includes(item.statusText));
     }
 
     const keyword = String(this.filters.fileName || '').trim().toLowerCase();
     if (keyword) {
       filteredInboxData = filteredInboxData.filter(item => {
         const searchableText = [
-          item.subject,
-          item.title,
-          item.content,
-          item.sender,
-          item.uploadUser,
-          ...(item.attachments || []).map(attachment => attachment.name)
+          item.attachment.name,
+          item.inboxItem.emailSubject,
+          item.inboxItem.provider,
+          item.inboxItem.month
         ].filter(Boolean).join(' ').toLowerCase();
         return searchableText.includes(keyword);
       });
     }
-
-    filteredInboxData.forEach((item, index) => {
-      item.index = index + 1;
-    });
     
     if (filteredInboxData.length === 0) {
       if (loading) loading.classList.add('hidden');
@@ -1409,27 +1479,130 @@ const IngestionView = {
     const cn = this.getCurrentLang() === 'cn';
 
     tableContainer.innerHTML = `
-      <table class="w-full min-w-[1360px] text-left text-sm text-[#4e5969]" id="inbox-table">
+      <table class="w-full min-w-[1120px] text-left text-sm text-[#4e5969]" id="inbox-table">
         <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
           <tr>
-            <th class="px-3 py-3 w-12"></th>
-            <th class="px-3 py-3 w-12">序号</th>
-            <th class="px-4 py-3 min-w-[280px]">${cn ? '标题' : '제목'}</th>
-            <th class="px-4 py-3 min-w-[200px]">${cn ? '内容' : '내용'}</th>
-            <th class="px-4 py-3 w-24 text-center">${cn ? '状态' : '상태'}</th>
-            <th class="px-4 py-3 w-24 text-center">${cn ? '附件数' : '첨부 수'}</th>
-            <th class="px-4 py-3 w-44">${cn ? '上传用户' : '업로드 사용자'}</th>
-            <th class="px-4 py-3 w-32">${cn ? '材料提供时间' : '제공 시간'}</th>
-            <th class="px-3 py-3 w-32 text-center">${cn ? '操作' : '조작'}</th>
+            <th class="h-11 min-w-[360px] px-4 align-middle">${cn ? '文件名称' : '파일명'}</th>
+            <th class="h-11 w-36 px-4 align-middle">${cn ? '所属月份' : '소속 월'}</th>
+            <th class="h-11 w-32 px-4 text-center align-middle">${cn ? '状态' : '상태'}</th>
+            <th class="h-11 w-40 px-4 align-middle">${cn ? '上传用户' : '업로드 사용자'}</th>
+            <th class="h-11 w-48 px-4 align-middle">${cn ? '提交时间' : '제출 시간'}</th>
+            <th class="h-11 w-64 px-4 text-left align-middle">${cn ? '操作' : '조작'}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100" id="inbox-tbody">
-          ${filteredInboxData.map(item => this.renderInboxRow(item)).join('')}
+          ${filteredInboxData.map(item => this.renderInboxFileRow(item)).join('')}
         </tbody>
       </table>
     `;
     
     this.bindInboxEvents();
+  },
+
+  renderInboxFileRow(row) {
+    const { inboxItem, attachment, attachmentIndex, statusText, isZip } = row;
+    const canResolve = statusText === '待处理' && this.isPendingDuplicateAttachment(attachment);
+    const isVoided = statusText === '作废';
+    const showDisabledResolve = isVoided
+      && attachment.previousStatus === '待处理'
+      && this.isPendingDuplicateAttachment(attachment);
+    const rowId = `${inboxItem.id}-${attachmentIndex}`;
+    return `
+      <tr class="inbox-file-row hover:bg-slate-50 transition-colors"
+        data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">
+        <td class="px-4 py-3 align-middle">
+          <div class="flex min-w-0 items-center gap-2">
+            ${isZip ? `<button type="button" class="inbox-zip-expand-btn flex h-7 w-7 shrink-0 items-center justify-center rounded text-[#86909c] hover:bg-blue-50 hover:text-brand" data-row-id="${rowId}" aria-label="展开压缩包">
+              <i class="fa-solid fa-chevron-right text-xs transition-transform"></i>
+            </button>` : '<span class="inline-block h-7 w-7 shrink-0"></span>'}
+            <i class="fa-solid ${isZip ? 'fa-file-zipper text-amber-500' : 'fa-file-excel text-green-600'} shrink-0"></i>
+            <button type="button" class="inbox-file-content-preview-btn min-w-0 truncate text-left font-medium text-brand hover:underline"
+              data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}" title="${this.escapeHtml(attachment.name)}">
+              ${this.escapeHtml(this.getAttachmentDisplayName(attachment))}
+            </button>
+          </div>
+        </td>
+        <td class="px-4 py-3 align-middle">${this.escapeHtml(inboxItem.month || '-')}</td>
+        <td class="px-4 py-3 text-center align-middle">
+          <span class="inline-flex h-6 min-w-[68px] items-center justify-center rounded-full border px-2 text-xs font-semibold ${this.getInboxStatusStyle(statusText)}">${this.escapeHtml(statusText)}</span>
+        </td>
+        <td class="px-4 py-3 align-middle">${this.escapeHtml(inboxItem.provider || '-')}</td>
+        <td class="px-4 py-3 align-middle">${this.escapeHtml(inboxItem.provideTime || '-')}</td>
+        <td class="px-4 py-3 align-middle">
+          <div class="flex items-center justify-start gap-1.5 whitespace-nowrap">
+            ${!isZip ? `
+              <button type="button" class="inbox-file-preview-btn rounded-md px-2.5 py-1.5 text-xs font-medium text-brand hover:bg-blue-50"
+                data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">预览</button>
+              ${canResolve ? `
+                <button type="button" class="inbox-file-resolve-btn rounded-md border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-brand hover:bg-blue-100"
+                  data-action="cover" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">覆盖</button>
+                <button type="button" class="inbox-file-resolve-btn rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-[#4e5969] hover:bg-slate-50"
+                  data-action="ignore" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">忽略</button>
+              ` : showDisabledResolve ? `
+                <button type="button" disabled class="cursor-not-allowed rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-400">覆盖</button>
+                <button type="button" disabled class="cursor-not-allowed rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-400">忽略</button>
+              ` : ''}
+            ` : ''}
+            ${isVoided
+              ? '<button type="button" disabled class="cursor-not-allowed rounded-md bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-400">已作废</button>'
+              : `<button type="button" class="inbox-file-void-btn rounded-md px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50"
+                  data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">作废</button>`}
+          </div>
+        </td>
+      </tr>
+      ${isZip ? this.renderInboxZipDetailRow(row, rowId) : ''}
+    `;
+  },
+
+  renderInboxZipDetailRow(row, rowId) {
+    const { inboxItem, attachment, attachmentIndex } = row;
+    const files = this.getZipAttachmentFiles(inboxItem, attachment);
+    return `
+      <tr class="inbox-zip-detail-row hidden" data-row-id="${rowId}">
+        <td colspan="6" class="bg-[#f7faff] px-12 py-3">
+          <table class="w-full table-fixed overflow-hidden rounded-lg border border-blue-100 bg-white text-xs">
+            <thead class="bg-[#eef3fb] text-[#4e5969]">
+              <tr>
+                <th class="h-10 w-[38%] px-4 text-left align-middle">解压文件名称</th>
+                <th class="h-10 w-28 px-4 text-center align-middle">状态</th>
+                <th class="h-10 px-4 text-left align-middle">异常说明</th>
+                <th class="h-10 w-56 px-4 text-left align-middle">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              ${files.map((file, zipIndex) => {
+                const childPending = file.status === '待处理' || file.status === '重复';
+                return `
+                  <tr>
+                    <td class="px-4 py-2.5 align-middle">
+                      <button type="button" class="inbox-zip-preview-btn truncate text-brand hover:underline"
+                        data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}" data-zip-index="${zipIndex}">${this.escapeHtml(file.name)}</button>
+                    </td>
+                    <td class="px-4 py-2.5 text-center align-middle">
+                      <span class="inline-flex rounded-full border px-2 py-0.5 font-semibold ${this.getInboxStatusStyle(childPending ? '待处理' : file.status)}">${this.escapeHtml(childPending ? '待处理' : file.status)}</span>
+                    </td>
+                    <td class="truncate px-4 py-2.5 align-middle text-[#86909c]" title="${this.escapeHtml(file.note || '-')}">${this.escapeHtml(file.note || '-')}</td>
+                    <td class="px-4 py-2.5 align-middle">
+                      <div class="flex items-center justify-start gap-1 whitespace-nowrap">
+                        <button type="button" class="inbox-zip-preview-btn rounded px-2 py-1 text-brand hover:bg-blue-50"
+                          data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}" data-zip-index="${zipIndex}">预览</button>
+                        ${childPending ? attachment.isVoided ? `
+                          <button type="button" disabled class="cursor-not-allowed rounded bg-slate-50 px-2 py-1 text-slate-400">覆盖</button>
+                          <button type="button" disabled class="cursor-not-allowed rounded bg-slate-50 px-2 py-1 text-slate-400">忽略</button>
+                        ` : `
+                          <button type="button" class="inbox-file-resolve-btn rounded px-2 py-1 text-brand hover:bg-blue-50"
+                            data-action="cover" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">覆盖</button>
+                          <button type="button" class="inbox-file-resolve-btn rounded px-2 py-1 text-[#4e5969] hover:bg-slate-50"
+                            data-action="ignore" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">忽略</button>
+                        ` : ''}
+                      </div>
+                    </td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </td>
+      </tr>`;
   },
 
   renderUploadCheckStatus() {
@@ -1618,6 +1791,65 @@ const IngestionView = {
     this.recalcInboxItemStatus(inboxItem);
     this.renderInbox();
     Dialog.toast(resolvedText, 'success');
+  },
+
+  confirmVoidInboxFile(inboxItem, attachment) {
+    if (!inboxItem || !attachment || attachment.isVoided || attachment.status === '作废') return;
+    Dialog.show({
+      title: '作废文件',
+      content: `
+        <div class="space-y-3">
+          <p>确认作废“${this.escapeHtml(attachment.name)}”吗？</p>
+          <div class="rounded-lg border border-red-100 bg-red-50 p-3 text-sm leading-6 text-red-700">
+            作废后该文件${/\.zip$/i.test(attachment.name || '') ? '及其解压结果' : ''}将停止后续处理，历史记录仍会保留。
+          </div>
+        </div>`,
+      confirmText: '确认作废',
+      onConfirm: () => this.voidInboxFile(inboxItem, attachment)
+    });
+  },
+
+  voidInboxFile(inboxItem, attachment) {
+    const now = this.formatNowDateTime(new Date());
+    const operator = Store?.getState?.()?.userName || '当前用户';
+    const previousStatus = attachment.status || '正常';
+    attachment.previousStatus = previousStatus;
+    attachment.status = '作废';
+    attachment.isVoided = true;
+    attachment.voidedAt = now;
+    attachment.voidedBy = operator;
+    attachment.voidReason = '用户主动作废';
+
+    const voidState = this.getInboxVoidState();
+    voidState[this.getInboxFileKey(inboxItem.id, attachment)] = {
+      previousStatus,
+      voidedAt: now,
+      voidedBy: operator,
+      reason: attachment.voidReason
+    };
+    this.saveInboxVoidState(voidState);
+    this.recalcInboxItemStatus(inboxItem);
+
+    if (typeof SettingsView !== 'undefined' && Array.isArray(SettingsView.logs)) {
+      SettingsView.logs.unshift({
+        id: `log-ingestion-void-${Date.now()}`,
+        time: now,
+        user: operator,
+        account: Store?.getState?.()?.userAccount || '-',
+        module: '文件收取',
+        action: '作废',
+        target: attachment.name,
+        detail: `${attachment.name}：${previousStatus} → 作废；保留历史记录并停止后续处理`,
+        before: previousStatus,
+        after: '作废',
+        ip: '127.0.0.1',
+        device: 'Mac / Chrome',
+        result: '成功'
+      });
+    }
+
+    this.renderInbox();
+    Dialog.toast('文件已作废，历史记录已保留', 'success');
   },
 
   getInboxDeletionState() {
@@ -1963,76 +2195,99 @@ const IngestionView = {
     const self = this;
     const tbody = document.getElementById('inbox-tbody');
     if (!tbody) return;
-    
-    // 展开/收起按钮
-    tbody.querySelectorAll('.inbox-expand-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute('data-id');
-        const icon = btn.querySelector('i');
-        const detailRow = tbody.querySelector(`.inbox-detail-row[data-parent-id="${id}"]`);
-        
-        if (detailRow) {
-          // 已存在，切换显示/隐藏
-          const isHidden = detailRow.classList.contains('hidden');
-          detailRow.classList.toggle('hidden');
-          if (isHidden) {
-            icon.style.transform = 'rotate(90deg)';
-          } else {
-            icon.style.transform = 'rotate(0deg)';
-          }
-        } else {
-          // 不存在，创建detail行
-          icon.style.transform = 'rotate(90deg)';
-          const item = self.getInboxData().find(d => d.id === id);
-          if (!item) return;
-          
-          const detailHTML = self.renderInboxDetailRow(item);
-          const temp = document.createElement('tbody');
-          temp.innerHTML = detailHTML;
-          const newDetailRow = temp.firstElementChild;
-          
-          const masterRow = btn.closest('tr');
-          masterRow.after(newDetailRow);
-          newDetailRow.classList.remove('hidden');
-          
-          // 为新创建的detail绑定编辑和驳回事件
-          self.bindAttachmentEvents(newDetailRow);
-        }
-      });
-    });
-    
-    // 行点击也可展开
-    tbody.querySelectorAll('.inbox-master-row').forEach(row => {
-      row.addEventListener('click', (e) => {
-        // 不拦截已有的事件
-        if (e.target.closest('.inbox-expand-btn, .inbox-parent-delete-btn, .inbox-parent-retry-btn')) return;
-        const btn = row.querySelector('.inbox-expand-btn');
-        if (btn) btn.click();
+
+    const getAttachmentContext = (target) => {
+      const emailId = target.dataset.emailId;
+      const attachmentIndex = Number(target.dataset.attIdx || 0);
+      const inboxItem = self.getInboxData().find(item => String(item.id) === String(emailId));
+      const attachment = inboxItem?.attachments?.[attachmentIndex];
+      return { emailId, attachmentIndex, inboxItem, attachment };
+    };
+
+    tbody.querySelectorAll('.inbox-zip-expand-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const detailRow = tbody.querySelector(`.inbox-zip-detail-row[data-row-id="${button.dataset.rowId}"]`);
+        if (!detailRow) return;
+        const willOpen = detailRow.classList.contains('hidden');
+        detailRow.classList.toggle('hidden', !willOpen);
+        button.setAttribute('aria-expanded', String(willOpen));
+        const icon = button.querySelector('i');
+        if (icon) icon.style.transform = willOpen ? 'rotate(90deg)' : 'rotate(0deg)';
       });
     });
 
-    tbody.querySelectorAll('.inbox-parent-delete-btn').forEach(btn => {
-      btn.addEventListener('click', event => {
-        event.stopPropagation();
-        self.confirmDeleteInboxParent(btn.dataset.emailId);
+    tbody.querySelectorAll('.inbox-file-preview-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const context = getAttachmentContext(button);
+        if (!context.inboxItem || !context.attachment) return;
+        self.openInboxFileDetail(context.inboxItem, context.attachment, context.attachmentIndex);
       });
     });
 
-    tbody.querySelectorAll('.inbox-parent-retry-btn').forEach(btn => {
-      btn.addEventListener('click', event => {
-        event.stopPropagation();
-        self.showUploadModal({ mode: 'retry', emailId: btn.dataset.emailId });
+    tbody.querySelectorAll('.inbox-file-content-preview-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const context = getAttachmentContext(button);
+        if (!context.inboxItem || !context.attachment) return;
+        self.showInboxAttachmentPreview(context.inboxItem, context.attachment);
       });
     });
-    
-    // 绑定现有detail中的附件事件
-    tbody.querySelectorAll('.inbox-detail-row').forEach(row => {
-      self.bindAttachmentEvents(row);
+
+    tbody.querySelectorAll('.inbox-zip-preview-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const context = getAttachmentContext(button);
+        if (!context.inboxItem || !context.attachment) return;
+        self.showInboxAttachmentPreview(context.inboxItem, context.attachment, Number(button.dataset.zipIndex || 0));
+      });
     });
 
-    // 初始化悬浮提示（延迟0.5s，不受overflow裁剪）
-    self.initHoverTips(tbody);
+    tbody.querySelectorAll('.inbox-file-resolve-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const context = getAttachmentContext(button);
+        if (!context.attachment || self.getInboxFileStatus(context.inboxItem, context.attachment) !== '待处理') return;
+        self.resolveDuplicateAttachment(context.emailId, context.attachmentIndex, button.dataset.action || 'ignore');
+      });
+    });
+
+    tbody.querySelectorAll('.inbox-file-void-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const context = getAttachmentContext(button);
+        if (!context.inboxItem || !context.attachment) return;
+        self.confirmVoidInboxFile(context.inboxItem, context.attachment);
+      });
+    });
+  },
+
+  openInboxFileDetail(inboxItem, attachment, attachmentIndex) {
+    if (!this.hasIngestionPermission('文件箱', '查看') || !this.hasIngestionPermission('文件箱', '单据详情')) {
+      Dialog.toast('当前账号无单据详情权限', 'warning');
+      return;
+    }
+    this.openDocumentDetail({
+      moduleName: this.getCurrentLang() === 'cn' ? '文件收取 - 文件箱' : '파일 수집 - 받은 편지함',
+      currentNode: this.getCurrentLang() === 'cn' ? '文件箱附件' : '받은 편지함 첨부',
+      title: attachment.name,
+      nameLabel: this.getCurrentLang() === 'cn' ? '文件名称' : '파일명',
+      statusText: this.getInboxFileStatus(inboxItem, attachment),
+      row: {
+        fileName: attachment.name,
+        storeName: attachment.name,
+        sourceEmailId: inboxItem.id,
+        sourceAttIdx: attachmentIndex,
+        sourceMethod: attachment.sourceMethod,
+        reason: attachment.rejectReason
+      },
+      inboxItem,
+      attachment,
+      attachmentIndex,
+      moduleFields: [
+        { label: this.getCurrentLang() === 'cn' ? '上传用户' : '업로드 사용자', value: inboxItem.provider || '-' },
+        { label: this.getCurrentLang() === 'cn' ? '所属月份' : '소속 월', value: inboxItem.month || '-' },
+        { label: this.getCurrentLang() === 'cn' ? '文件名称' : '파일명', value: attachment.name || '-' },
+        { label: this.getCurrentLang() === 'cn' ? '文件版本' : '파일 버전', value: `V${attachment.version || 1}` },
+        { label: this.getCurrentLang() === 'cn' ? '提交时间' : '제출 시간', value: attachment.uploadedAt || inboxItem.provideTime || '-' },
+        { label: this.getCurrentLang() === 'cn' ? '异常说明' : '이상 설명', value: attachment.rejectReason || '-' }
+      ]
+    });
   },
 
   // 悬浮提示：mouseover 延迟 0.5s 后在 body 末尾插入气泡，避开 overflow 裁剪
@@ -2203,26 +2458,23 @@ const IngestionView = {
   getZipAttachmentFiles(inboxItem, attachment) {
     const cn = this.getCurrentLang() === 'cn';
     if (attachment?.repeatMultiStoreFlow) {
-      return [
-        {
-          name: cn ? '邯郸格耀人民路-销售明细.xlsx' : '한단 거야오 인민로-판매 상세.xlsx',
+      const stores = Array.isArray(attachment.splitStores) && attachment.splitStores.length
+        ? attachment.splitStores
+        : [
+            { storeName: '邯郸格耀人民路', status: '重复', reason: '与原始门店数据重复' },
+            { storeName: '邯郸格耀滏东店', status: '重复', reason: '与原始门店数据重复' },
+            { storeName: '邯郸格耀中华店', status: '已匹配', reason: '已识别并匹配门店' }
+          ];
+      return stores.map((store, index) => {
+        const resolved = store.status === '已覆盖' || store.status === '已忽略';
+        const normal = resolved || store.status === '已匹配' || store.status === '正常';
+        return {
+          name: store.sourceFileName || store.fileName || `${store.storeName || `解压文件${index + 1}`}-销售明细.xlsx`,
           type: 'XLSX',
-          status: cn ? '重复' : '중복',
-          note: cn ? '与原始门店数据重复' : '기존 매장 데이터와 중복'
-        },
-        {
-          name: cn ? '邯郸格耀滏东店-销售明细.xlsx' : '한단 거야오 푸둥점-판매 상세.xlsx',
-          type: 'XLSX',
-          status: cn ? '重复' : '중복',
-          note: cn ? '与原始门店数据重复' : '기존 매장 데이터와 중복'
-        },
-        {
-          name: cn ? '邯郸格耀中华店-销售明细.xlsx' : '한단 거야오 중화점-판매 상세.xlsx',
-          type: 'XLSX',
-          status: cn ? '正常' : '정상',
-          note: cn ? '已识别并匹配门店' : '매장 식별 및 매칭 완료'
-        }
-      ];
+          status: normal ? '正常' : store.status,
+          note: store.reason || (normal ? '已识别并匹配门店' : '与原始门店数据重复')
+        };
+      });
     }
     return [
       {
@@ -5173,43 +5425,76 @@ const IngestionView = {
     };
   },
 
+  matchedHeadquartersTeams: ['华北', '华东', '华中', '东北', '西北', '全国渠道'],
+
+  getMatchedHeadquartersTeam(row = {}, index = 0) {
+    const source = [
+      row.headquarters,
+      row.salesTeam,
+      row.team,
+      row.region,
+      row.salesOffice
+    ].filter(Boolean).join(' ');
+    const matched = this.matchedHeadquartersTeams.find(team => team !== '全国渠道' && source.includes(team));
+    if (matched) return matched;
+    if (/全国|渠道|华南|西南/.test(source)) return '全国渠道';
+    return this.matchedHeadquartersTeams[index % this.matchedHeadquartersTeams.length];
+  },
+
+  renderMatchedChildHeader() {
+    const cn = this.getCurrentLang() === 'cn';
+    return `
+      <tr class="bg-[#f7f8fa] text-[#1d2129]">
+        <th class="w-[52px] min-w-[52px] px-4 py-3"></th>
+        <th class="min-w-36 px-4 py-3">${cn ? '时间' : '시간'}</th>
+        <th class="min-w-32 px-4 py-3">${cn ? '客户系统' : '고객 시스템'}</th>
+        <th class="min-w-32 px-5 py-3">${cn ? '客户门店号' : '고객 매장 번호'}</th>
+        <th class="min-w-40 px-5 py-3">${cn ? '客户交易处编码' : '고객 거래처 코드'}</th>
+        <th class="min-w-48 px-5 py-3">${cn ? '客户交易处名称' : '고객 거래처명'}</th>
+        <th class="min-w-32 px-5 py-3">${cn ? '营业Team' : '영업 Team'}</th>
+        <th class="min-w-28 px-5 py-3">${cn ? '区域' : '지역'}</th>
+        <th class="min-w-32 px-5 py-3">${cn ? '营业所' : '영업소'}</th>
+        <th class="min-w-24 px-5 py-3">ACC</th>
+        <th class="min-w-40 px-5 py-3">${cn ? '好丽友交易处编码' : '오리온 거래처 코드'}</th>
+        <th class="min-w-48 px-5 py-3">${cn ? '好丽友交易处名称' : '오리온 거래처명'}</th>
+        <th class="min-w-72 px-5 py-3">${cn ? '异常说明' : '이상 설명'}</th>
+        <th class="min-w-32 px-5 py-3">${cn ? '最近操作人' : '최근 작업자'}</th>
+        <th class="min-w-28 px-5 py-3">${cn ? '状态' : '상태'}</th>
+        <th class="min-w-24 px-5 py-3">${cn ? '操作' : '조작'}</th>
+      </tr>`;
+  },
+
   renderTableHeader() {
     const headerRow = document.getElementById('ingestion-table-head-row');
     if (!headerRow) return;
     const cn = this.getCurrentLang() === 'cn';
     const isOriginalStoreList = this.activeDataMode === 'files';
-    const disableManualSelection = isOriginalStoreList && !this.isManualQualityCheckEnabled();
+    const table = document.getElementById('ingestion-table');
+    table?.classList.toggle('min-w-[2900px]', !isOriginalStoreList);
+    table?.classList.toggle('min-w-[900px]', isOriginalStoreList);
+    if (isOriginalStoreList) {
+      const disableManualSelection = !this.isManualQualityCheckEnabled();
+      headerRow.innerHTML = `
+        <th class="w-1/2 rounded-tl-lg px-6 py-4">
+          <div class="flex items-center gap-3">
+            <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" ${disableManualSelection ? 'disabled title="当前为自动质检模式"' : ''}>
+            <span>${cn ? '本部Team' : '본부 Team'}</span>
+          </div>
+        </th>
+        <th class="w-1/4 px-6 py-4 text-center">${cn ? '匹配门店数' : '매칭 매장 수'}</th>
+        <th class="w-1/4 rounded-tr-lg px-6 py-4 text-center">${cn ? '未匹配/提交门店' : '미매칭/제출 매장'}</th>
+      `;
+      return;
+    }
+    const disableManualSelection = false;
     const commonStart = `
       <th class="px-5 py-4 w-[60px] min-w-[60px] rounded-tl-lg sticky left-0 z-30 bg-[#f7f8fa]">
         <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" ${disableManualSelection ? 'disabled title="当前为自动质检模式"' : ''}>
       </th>
       <th class="px-4 py-4 min-w-40">${cn ? '时间' : '시간'}</th>
       <th class="px-4 py-4 min-w-36">${cn ? '客户系统' : '고객 시스템'}</th>
-      <th class="px-4 py-4 min-w-64">${cn ? '原始文件名' : '원본 파일명'}</th>
-      <th class="px-4 py-4 min-w-64">${cn ? '当前文件名' : '현재 파일명'}</th>
     `;
-    headerRow.innerHTML = isOriginalStoreList
-      ? `
-        ${commonStart}
-        <th class="px-5 py-4 min-w-36">${cn ? '客户门店号' : '고객 매장 번호'}</th>
-        <th class="px-5 py-4 min-w-40">${cn ? '客户交易处编码' : '고객 거래처 코드'}</th>
-        <th class="px-5 py-4 min-w-48">${cn ? '客户交易处名称' : '고객 거래처명'}</th>
-        <th class="px-5 py-4 min-w-36">${cn ? '营业Team' : '영업 Team'}</th>
-        <th class="px-5 py-4 min-w-32">${cn ? '区域' : '지역'}</th>
-        <th class="px-5 py-4 min-w-36">${cn ? '营业所' : '영업소'}</th>
-        <th class="px-5 py-4 min-w-24">ACC</th>
-        <th class="px-5 py-4 min-w-40">${cn ? '好丽友交易处编码' : '오리온 거래처 코드'}</th>
-        <th class="px-5 py-4 min-w-48">${cn ? '好丽友交易处名称' : '오리온 거래처명'}</th>
-        <th class="px-5 py-4 min-w-32">${cn ? '最近操作人' : '최근 작업자'}</th>
-        <th class="px-5 py-4 w-28 min-w-28 sticky right-[96px] z-20 bg-blue-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">${cn ? '状态' : '상태'}</th>
-        <th class="px-5 py-4 w-24 min-w-24 rounded-tr-lg sticky right-0 z-20 bg-blue-50">
-          <div class="flex items-center gap-1">
-            ${cn ? '操作' : '조작'}
-            <i class="fa-solid fa-circle-info text-xs text-[#86909c] cursor-help" title="${cn ? '操作按钮' : '조작 버튼'}"></i>
-          </div>
-        </th>
-      `
-      : `
+    headerRow.innerHTML = `
         ${commonStart}
         <th class="px-5 py-4 min-w-36">${cn ? '客户门店号' : '고객 매장 번호'}</th>
         <th class="px-5 py-4 min-w-40">${cn ? '客户交易处编码' : '고객 거래처 코드'}</th>
@@ -5259,7 +5544,7 @@ const IngestionView = {
     
     this.hideEmptyState();
     
-    tbody.innerHTML = pageData.map((row, index) => {
+    const renderedRows = pageData.map((row, index) => {
       const confidenceValue = Number.parseFloat(row.confidence || '0');
       const isConfidenceNormal = confidenceValue > 95;
       const isPending = row.status.includes('待处理');
@@ -5315,6 +5600,13 @@ const IngestionView = {
         dealer,
         acc
       });
+      const aiExceptionDescription = row.aiResolution
+        || row.aiNote
+        || (confidenceValue <= 95
+          ? '门店匹配置信度不足；AI已生成候选匹配，待人工确认'
+          : (isApproved || isSynced
+            ? '门店字段格式异常；AI已完成标准化与主数据匹配'
+            : '-'));
       
       // 从收件箱数据中获取来源邮件和来源附件信息
       const inboxData = this.getInboxData();
@@ -5345,8 +5637,6 @@ const IngestionView = {
           </td>
           <td class="px-4 py-3 text-[#4e5969]">${this.escapeHtml(deliveryFields.time)}</td>
           <td class="px-4 py-3"><span class="row-edit-display">${this.escapeHtml(deliveryFields.partnerErp)}</span><input type="text" class="row-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="partnerErp" value="${this.escapeHtml(deliveryFields.partnerErp === '-' ? '' : deliveryFields.partnerErp)}"></td>
-          <td class="px-4 py-3"><span class="truncate block max-w-[240px] text-[#4e5969]" title="${this.escapeHtml(deliveryFields.originalFileName)}"><i class="fa-solid fa-file-excel mr-2 text-green-600"></i>${this.escapeHtml(deliveryFields.originalFileName)}</span></td>
-          <td class="px-4 py-3"><button type="button" class="ingestion-row-preview-trigger truncate block max-w-[240px] text-brand hover:underline text-left" data-id="${row.id}" title="${this.escapeHtml(deliveryFields.currentFileName)}">${this.escapeHtml(deliveryFields.currentFileName)}</button></td>
           <td class="px-5 py-3 font-mono">${this.escapeHtml(deliveryFields.customerStoreNo)}</td>
           <td class="px-5 py-3 font-mono">${this.escapeHtml(deliveryFields.rawTradeCode)}</td>
           <td class="px-5 py-3 font-medium text-[#1d2129]">${this.escapeHtml(deliveryFields.customerStoreName)}</td>
@@ -5356,6 +5646,7 @@ const IngestionView = {
           <td class="px-5 py-3 font-medium">${this.escapeHtml(deliveryFields.acc)}</td>
           <td class="px-5 py-3 font-mono text-[#1d2129]"><span class="row-edit-display">${this.escapeHtml(deliveryFields.orionTradeCode)}</span><input type="text" class="row-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm font-mono bg-white focus:outline-none focus:border-brand" data-edit-field="orionStoreCode" value="${this.escapeHtml(deliveryFields.orionTradeCode === '-' ? '' : deliveryFields.orionTradeCode)}"></td>
           <td class="px-5 py-3">${this.escapeHtml(deliveryFields.orionTradeName)}</td>
+          ${isOriginalStoreList ? `<td class="px-5 py-3"><span class="block max-w-[300px] truncate text-[#4e5969]" title="${this.escapeHtml(aiExceptionDescription)}">${this.escapeHtml(aiExceptionDescription)}</span></td>` : ''}
           <td class="px-5 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
           ${isOriginalStoreList ? `
             <td class="px-5 py-3 sticky right-[96px] z-10 bg-white group-hover:bg-slate-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">
@@ -5384,7 +5675,79 @@ const IngestionView = {
           </td>
         </tr>
       `;
-    }).join('');
+    });
+
+    if (isOriginalStoreList) {
+      const groupedRows = new Map(this.matchedHeadquartersTeams.map(team => [team, []]));
+      pageData.forEach((row, index) => {
+        const team = this.getMatchedHeadquartersTeam(row, index);
+        groupedRows.get(team).push({ row, index });
+      });
+
+      const unmatchedCounts = new Map(this.matchedHeadquartersTeams.map(team => [team, 0]));
+      this.getStashSourceRows().forEach((item, index) => {
+        const team = this.getMatchedHeadquartersTeam(item.row, index);
+        unmatchedCounts.set(team, (unmatchedCounts.get(team) || 0) + 1);
+      });
+
+      tbody.innerHTML = this.matchedHeadquartersTeams.map((team) => {
+        const entries = groupedRows.get(team) || [];
+        const submittedCount = entries.filter(entry => this.getMatchedQualityStatus(entry.row) === '已质检').length;
+        const unmatchedOrSubmittedCount = (unmatchedCounts.get(team) || 0) + submittedCount;
+        const expanded = this.expandedMatchedTeams.has(team);
+        const teamKey = encodeURIComponent(team);
+        return `
+          <tr class="matched-team-row cursor-pointer border-b border-slate-100 bg-white transition-colors hover:bg-blue-50/60" data-team="${teamKey}">
+            <td class="px-6 py-4">
+              <button type="button" class="matched-team-expand-btn flex items-center gap-3 text-left font-semibold text-[#1d2129]" data-team="${teamKey}" aria-expanded="${expanded}">
+                <span class="flex h-7 w-7 items-center justify-center rounded-md text-[#86909c] transition-colors hover:bg-blue-100 hover:text-brand">
+                  <i class="fa-solid fa-chevron-right text-xs transition-transform ${expanded ? 'rotate-90' : ''}"></i>
+                </span>
+                <span>${this.escapeHtml(team === '全国渠道' ? team : `${team} Team`)}</span>
+              </button>
+            </td>
+            <td class="px-6 py-4 text-center">
+              <span class="inline-flex min-w-12 items-center justify-center rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-brand">${entries.length}</span>
+            </td>
+            <td class="px-6 py-4 text-center">
+              <span class="inline-flex min-w-12 items-center justify-center rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-700">${unmatchedOrSubmittedCount}</span>
+            </td>
+          </tr>
+          <tr class="matched-team-detail-row ${expanded ? '' : 'hidden'}" data-team="${teamKey}">
+            <td colspan="3" class="bg-[#f7faff] p-0">
+              <div class="overflow-x-auto border-y border-blue-100">
+                ${entries.length ? `
+                  <table class="w-full min-w-[1900px] table-fixed text-left text-xs text-[#4e5969]">
+                    <thead>${this.renderMatchedChildHeader()}</thead>
+                    <tbody class="divide-y divide-gray-100 bg-white">
+                      ${entries.map(entry => renderedRows[entry.index]).join('')}
+                    </tbody>
+                  </table>
+                ` : '<div class="px-6 py-8 text-center text-sm text-[#86909c]">该本部暂无匹配门店</div>'}
+              </div>
+            </td>
+          </tr>`;
+      }).join('');
+    } else {
+      tbody.innerHTML = renderedRows.join('');
+    }
+
+    tbody.querySelectorAll('.matched-team-row, .matched-team-expand-btn').forEach(element => {
+      element.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const teamKey = element.dataset.team;
+        const team = decodeURIComponent(teamKey || '');
+        if (!team) return;
+        if (this.expandedMatchedTeams.has(team)) this.expandedMatchedTeams.delete(team);
+        else this.expandedMatchedTeams.add(team);
+        const detailRow = tbody.querySelector(`.matched-team-detail-row[data-team="${teamKey}"]`);
+        const button = tbody.querySelector(`.matched-team-expand-btn[data-team="${teamKey}"]`);
+        const expanded = this.expandedMatchedTeams.has(team);
+        detailRow?.classList.toggle('hidden', !expanded);
+        button?.setAttribute('aria-expanded', String(expanded));
+        button?.querySelector('i')?.classList.toggle('rotate-90', expanded);
+      });
+    });
     
     this.renderPagination();
     this.bindTableEvents();
@@ -7120,23 +7483,7 @@ const IngestionView = {
           <button type="button" class="enhanced-upload-close flex h-8 w-8 items-center justify-center rounded-md text-[#86909c] hover:bg-gray-100"><i class="fa-solid fa-xmark"></i></button>
         </div>
         <form id="enhanced-upload-form" class="flex-1 space-y-5 overflow-y-auto px-6 py-5">
-          <div>
-            <div class="mb-2 text-sm font-medium text-[#1d2129]">${cn ? '上传方式' : '업로드 방식'}</div>
-            <div class="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-1.5">
-              <button type="button" class="upload-mode-btn rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors" data-mode="new">${cn ? '新建上传' : '새 업로드'}</button>
-              <button type="button" class="upload-mode-btn rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors" data-mode="retry">${cn ? '驳回重传' : '반려 재업로드'}</button>
-            </div>
-          </div>
-
           <section id="upload-new-section" class="space-y-5">
-            <label class="block">
-              <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '标题' : '제목'} <span class="text-red-500">*</span></span>
-              <input id="enhanced-upload-title" type="text" maxlength="100" class="w-full rounded-md border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" placeholder="${cn ? '请输入标题' : '제목을 입력하세요'}">
-            </label>
-            <label class="block">
-              <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '内容' : '내용'}</span>
-              <textarea id="enhanced-upload-content" rows="3" maxlength="500" class="w-full resize-none rounded-md border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand" placeholder="${cn ? '请输入内容' : '내용을 입력하세요'}"></textarea>
-            </label>
             <div>
               <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '年月' : '연월'} <span class="text-red-500">*</span></span>
               <input id="enhanced-upload-period" type="hidden" value="${defaultPeriod}">
@@ -7239,10 +7586,6 @@ const IngestionView = {
     const renderMode = () => {
       overlay.querySelector('#upload-new-section').classList.toggle('hidden', mode !== 'new');
       overlay.querySelector('#upload-retry-section').classList.toggle('hidden', mode !== 'retry');
-      overlay.querySelectorAll('.upload-mode-btn').forEach(btn => {
-        const active = btn.dataset.mode === mode;
-        btn.className = `upload-mode-btn rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${active ? 'bg-white text-brand shadow-sm' : 'text-[#86909c] hover:text-[#1d2129]'}`;
-      });
       overlay.querySelector('#enhanced-upload-subtitle').textContent = mode === 'new' ? '创建新的上传单据并进行文件校验' : '上传完整Excel新版本，保留历史原文件与已流转日志';
       overlay.querySelector('#enhanced-file-label').innerHTML = `本地文件 <span class="text-red-500">*</span>`;
       overlay.querySelector('#enhanced-file-help').textContent = '支持 .zip、.xls、.xlsx、.csv 文件上传';
@@ -7254,7 +7597,6 @@ const IngestionView = {
 
     overlay.querySelectorAll('.enhanced-upload-close').forEach(btn => btn.addEventListener('click', close));
     overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
-    overlay.querySelectorAll('.upload-mode-btn').forEach(btn => btn.addEventListener('click', () => { mode = btn.dataset.mode; selectedFiles = []; fileInput.value = ''; renderMode(); if (mode === 'retry' && !selectedDocument) renderDocumentOptions(''); }));
     overlay.querySelector('#enhanced-file-picker').addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', () => { selectedFiles = Array.from(fileInput.files || []); overlay.querySelector('#enhanced-file-error').classList.add('hidden'); renderFiles(); });
     const syncPeriod = () => { overlay.querySelector('#enhanced-upload-period').value = `${overlay.querySelector('#enhanced-upload-year').value}-${overlay.querySelector('#enhanced-upload-month').value}`; };
@@ -7295,10 +7637,10 @@ const IngestionView = {
         close();
         return;
       }
-      const titleInput = overlay.querySelector('#enhanced-upload-title');
-      const title = titleInput.value.trim();
-      if (!title) { titleInput.focus(); return; }
-      this.startUploadAutoCheck({ title, content: overlay.querySelector('#enhanced-upload-content').value.trim(), period: overlay.querySelector('#enhanced-upload-period').value, files });
+      const title = files.length === 1
+        ? String(files[0].name || '文件上传').replace(/\.(xlsx|xls|csv|zip)$/i, '')
+        : `批量文件上传（${files.length}个文件）`;
+      this.startUploadAutoCheck({ title, content: '', period: overlay.querySelector('#enhanced-upload-period').value, files });
       close();
       Dialog.toast(cn ? '文件已上传，正在自动校验' : '파일 업로드 후 자동 검사 중입니다', 'success');
     });

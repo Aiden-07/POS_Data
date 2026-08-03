@@ -154,7 +154,6 @@ const AnalyticsView = {
     return [
       ['customerStoreCode', '客户门店编码'],
       ['customerStoreName', '客户门店名称'],
-      ['customerProductCode', '客户产品编码'],
       ['customerProductName', '客户产品名称'],
       ['customerBarcode', '客户条形码'],
       ['salesQuantity', '销售数量'],
@@ -735,7 +734,7 @@ const AnalyticsView = {
                   ${availabilityFields.map(([key]) => `<td class="text-center">${this.renderFieldAvailability(row[key])}</td>`).join('')}
                   <td>${this.renderFieldListRemark(row)}</td>
                 </tr>
-              `).join('') : `<tr><td colspan="13" class="px-4 py-16 text-center text-[#86909c]">未找到字段数据</td></tr>`}
+              `).join('') : `<tr><td colspan="12" class="px-4 py-16 text-center text-[#86909c]">未找到字段数据</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -1507,8 +1506,8 @@ const AnalyticsView = {
   },
 
   exportFieldList() {
-    const headers = ['ACC', '好丽友交易处编码', '好丽友交易处名称', '日期维度', '客户门店编码', '客户门店名称', '客户产品编码', '客户产品名称', '客户条形码', '销售数量', '销售金额', '零售成本', '备注'];
-    const availabilityFields = ['customerStoreCode', 'customerStoreName', 'customerProductCode', 'customerProductName', 'customerBarcode', 'salesQuantity', 'salesAmount', 'retailCost'];
+    const headers = ['ACC', '好丽友交易处编码', '好丽友交易处名称', '日期维度', '客户门店编码', '客户门店名称', '客户产品名称', '客户条形码', '销售数量', '销售金额', '零售成本', '备注'];
+    const availabilityFields = ['customerStoreCode', 'customerStoreName', 'customerProductName', 'customerBarcode', 'salesQuantity', 'salesAmount', 'retailCost'];
     const rows = this.getFilteredFieldListRows().map((row) => [
       row.acc,
       row.orionTransactionCode,

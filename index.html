@@ -205,87 +205,11 @@
   <script src="js/components/ai-assistant.js?v=20260626-ai-fab-drag"></script>
   <script src="js/views/login.js?v=20260729-login-visual-v2"></script>
   <script src="js/views/dashboard.js?v=20260707-qa-detail-preview"></script>
-    <script src="js/views/ingestion.js?v=20260729-ingestion-search-button-v63"></script>
+    <script src="js/views/ingestion.js?v=20260731-file-detail-v72"></script>
     <script src="js/views/qa.js?v=20260727-qa-org-hierarchy-v26"></script>
   <script src="js/views/ledger.js?v=20260731-ledger-selection-v45"></script>
-  <script src="js/views/analytics.js?v=20260730-empty-enum-v44"></script>
+  <script src="js/views/analytics.js?v=20260803-remove-product-code-v45"></script>
   <script src="js/views/settings.js?v=20260727-ledger-batch-log-v9"></script>
   <script src="js/core/app.js?v=20260729-sidebar-footer-v5"></script>
-<script>
-(function () {
-  const STATUS_OPTIONS = ['全部状态', '正常', '驳回', '待处理'];
-  const REMOVED_CHILD_ACTIONS = new Set(['归档', '暂存', '移动到归档', '移动到暂存']);
-
-  function isFileBoxActive() {
-    const tab = document.getElementById('tab-original');
-    return Boolean(tab && tab.textContent.includes('文件箱') && tab.className.includes('active'));
-  }
-
-  function removeParentStatusColumn(table) {
-    const headRow = table.querySelector(':scope > thead > tr');
-    if (!headRow) return;
-
-    const statusIndex = Array.from(headRow.children).findIndex((cell) => cell.textContent.trim() === '状态');
-    if (statusIndex < 0) return;
-
-    headRow.children[statusIndex].remove();
-    table.querySelectorAll(':scope > tbody > tr.inbox-master-row').forEach((row) => {
-      const cell = row.children[statusIndex];
-      if (cell) cell.remove();
-    });
-  }
-
-  function removeChildOnlyActions(table) {
-    table.querySelectorAll('.inbox-att-reject-btn').forEach((button) => button.remove());
-    table.querySelectorAll('button, a').forEach((node) => {
-      if (REMOVED_CHILD_ACTIONS.has(node.textContent.trim())) node.remove();
-    });
-  }
-
-  function normalizeStatusButton() {
-    const button = document.getElementById('inbox-status-btn');
-    if (!button) return;
-
-    const selected = button.textContent.trim();
-    if (!STATUS_OPTIONS.includes(selected)) {
-      const label = button.querySelector('span') || button;
-      label.childNodes.forEach((node) => {
-        if (node.nodeType === Node.TEXT_NODE) node.textContent = '';
-      });
-      label.prepend('全部状态');
-    }
-  }
-
-  function normalizeStatusDropdown() {
-    const labelsToRemove = new Set(['已处理', '重复', '覆盖']);
-    document.querySelectorAll('button, [role="option"], [role="menuitem"]').forEach((node) => {
-      if (node.classList.contains('inbox-att-resolve-btn')) return;
-      const label = node.textContent.trim();
-      if (labelsToRemove.has(label)) node.remove();
-    });
-  }
-
-  function normalizeFileBox() {
-    if (!location.hash.includes('ingestion') || !isFileBoxActive()) return;
-
-    const table = document.getElementById('inbox-table');
-    if (!table) return;
-
-    removeParentStatusColumn(table);
-    removeChildOnlyActions(table);
-    normalizeStatusButton();
-  }
-
-  window.addEventListener('DOMContentLoaded', normalizeFileBox);
-  window.addEventListener('hashchange', () => setTimeout(normalizeFileBox, 50));
-  document.addEventListener('click', () => setTimeout(() => {
-    normalizeFileBox();
-    normalizeStatusDropdown();
-  }, 50));
-
-  const observer = new MutationObserver(() => normalizeFileBox());
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-})();
-</script>
 </body>
 </html>
