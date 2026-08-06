@@ -1,3 +1,117 @@
+const DataModificationSelect = {
+  escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  },
+
+  render({ id, label, value = '', options = [] }) {
+    const normalizedOptions = [...new Set(options.map(option => String(option?.code ?? option?.value ?? option).trim()).filter(Boolean))];
+    const selectedValue = String(value || '').trim();
+    return `<div class="data-modification-control data-modification-field is-editable" data-mod-select="${this.escapeHtml(id)}">
+      <span>${this.escapeHtml(label)}</span>
+      <input type="hidden" id="${this.escapeHtml(id)}" value="${this.escapeHtml(selectedValue)}">
+      <button type="button" class="data-modification-select-trigger" aria-haspopup="listbox" aria-expanded="false">
+        <span>${this.escapeHtml(selectedValue || '请选择编码')}</span><i class="fa-solid fa-chevron-down"></i>
+      </button>
+      <div class="data-modification-select-menu hidden">
+        <div class="data-modification-select-search"><i class="fa-solid fa-magnifying-glass"></i><input type="search" placeholder="搜索编码" autocomplete="off"></div>
+        <div class="data-modification-select-options" role="listbox">
+          ${normalizedOptions.map(code => `<button type="button" role="option" data-mod-code="${this.escapeHtml(code)}" aria-selected="${code === selectedValue ? 'true' : 'false'}">${this.escapeHtml(code)}</button>`).join('')}
+          <div class="data-modification-select-empty hidden">未找到匹配编码</div>
+        </div>
+      </div>
+    </div>`;
+  },
+
+  renderText({ id, label, value = '', placeholder = '' }) {
+    return `<label class="data-modification-control is-editable"><span>${this.escapeHtml(label)}</span><input id="${this.escapeHtml(id)}" type="text" maxlength="100" value="${this.escapeHtml(value)}" placeholder="${this.escapeHtml(placeholder)}"></label>`;
+  },
+
+  renderReadonly(label, value = '-') {
+    const displayValue = value === undefined || value === null || value === '' ? '-' : value;
+    return `<label class="data-modification-control is-readonly"><span>${this.escapeHtml(label)}</span><input type="text" value="${this.escapeHtml(displayValue)}" readonly tabindex="-1" title="${this.escapeHtml(displayValue)}"></label>`;
+  },
+
+  renderRow(fields = [], columns = 3) {
+    return `<div class="data-modification-row data-modification-row-${columns}">${fields.filter(Boolean).join('')}</div>`;
+  },
+
+  bind(overlay, id) {
+    const root = overlay.querySelector(`[data-mod-select="${id}"]`);
+    if (!root) return;
+    const hiddenInput = root.querySelector(`#${id}`);
+    const trigger = root.querySelector('.data-modification-select-trigger');
+    const triggerText = trigger?.querySelector('span');
+    const menu = root.querySelector('.data-modification-select-menu');
+    const search = root.querySelector('.data-modification-select-search input');
+    const empty = root.querySelector('.data-modification-select-empty');
+    const optionButtons = Array.from(root.querySelectorAll('[data-mod-code]'));
+    let activeIndex = -1;
+
+    const visibleOptions = () => optionButtons.filter(button => !button.classList.contains('hidden'));
+    const setActive = (index) => {
+      const visible = visibleOptions();
+      optionButtons.forEach(button => button.classList.remove('is-active'));
+      if (!visible.length) { activeIndex = -1; return; }
+      activeIndex = (index + visible.length) % visible.length;
+      visible[activeIndex].classList.add('is-active');
+      visible[activeIndex].scrollIntoView({ block: 'nearest' });
+    };
+    const close = () => {
+      menu?.classList.add('hidden');
+      trigger?.setAttribute('aria-expanded', 'false');
+      optionButtons.forEach(button => button.classList.remove('is-active'));
+      activeIndex = -1;
+    };
+    const select = (button) => {
+      const code = button.dataset.modCode || '';
+      hiddenInput.value = code;
+      if (triggerText) triggerText.textContent = code || '请选择编码';
+      optionButtons.forEach(item => item.setAttribute('aria-selected', item === button ? 'true' : 'false'));
+      hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+      close();
+    };
+    const filter = () => {
+      const keyword = String(search?.value || '').trim().toLowerCase();
+      let count = 0;
+      optionButtons.forEach(button => {
+        const matched = !keyword || String(button.dataset.modCode || '').toLowerCase().includes(keyword);
+        button.classList.toggle('hidden', !matched);
+        if (matched) count += 1;
+      });
+      empty?.classList.toggle('hidden', count > 0);
+      setActive(count ? 0 : -1);
+    };
+
+    trigger?.addEventListener('click', event => {
+      event.stopPropagation();
+      const willOpen = menu?.classList.contains('hidden');
+      overlay.querySelectorAll('.data-modification-select-menu').forEach(item => item.classList.add('hidden'));
+      overlay.querySelectorAll('.data-modification-select-trigger').forEach(item => item.setAttribute('aria-expanded', 'false'));
+      if (!willOpen) return;
+      menu?.classList.remove('hidden');
+      trigger.setAttribute('aria-expanded', 'true');
+      if (search) { search.value = ''; filter(); search.focus(); }
+    });
+    search?.addEventListener('input', filter);
+    search?.addEventListener('keydown', event => {
+      if (event.key === 'ArrowDown') { event.preventDefault(); setActive(activeIndex + 1); }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); setActive(activeIndex - 1); }
+      else if (event.key === 'Enter') {
+        event.preventDefault();
+        const visible = visibleOptions();
+        if (visible.length) select(visible[Math.max(0, activeIndex)]);
+      } else if (event.key === 'Escape') close();
+    });
+    optionButtons.forEach(button => button.addEventListener('click', () => select(button)));
+    overlay.addEventListener('click', event => { if (!root.contains(event.target)) close(); });
+  }
+};
+
 const App = {
   views: {
     'login': typeof LoginView !== 'undefined' ? LoginView : null,
@@ -24,6 +138,8 @@ const App = {
       document.getElementById('app-layout')?.classList.toggle('sidebar-open');
     });
     this.bindSidebarControls();
+    this.initPlatformActionMenus();
+    this.initPlatformColumnConfigurators();
     if (typeof AIAssistant !== 'undefined') {
       AIAssistant.init();
     }
@@ -43,6 +159,249 @@ const App = {
     
     // Set initial status bar time
     Store.setState({ lastUpdated: this.getCurrentTime() });
+  },
+
+  initPlatformActionMenus() {
+    const closeAll = () => {
+      document.querySelectorAll('.platform-row-actions-menu').forEach(menu => {
+        menu.classList.add('hidden');
+        const owner = menu.__platformOwnerButton;
+        if (owner?.isConnected && owner.parentElement) owner.parentElement.appendChild(menu);
+        else if (!menu.closest('#main-content')) menu.remove();
+      });
+      document.querySelectorAll('.platform-row-actions-trigger').forEach(button => button.setAttribute('aria-expanded', 'false'));
+    };
+    const enhance = (root = document) => {
+      root.querySelectorAll('table').forEach(table => {
+        const headers = Array.from(table.querySelectorAll(':scope > thead > tr > th'));
+        const actionIndex = headers.findIndex(header => header.textContent.trim().startsWith('操作'));
+        if (actionIndex < 0) return;
+        table.querySelectorAll(':scope > tbody > tr').forEach(row => {
+          const cell = row.children[actionIndex];
+          if (!cell || cell.colSpan > 1 || cell.dataset.platformActionsReady === 'true') return;
+          if (cell.querySelector('.inbox-row-actions-btn')) {
+            cell.dataset.platformActionsReady = 'true';
+            return;
+          }
+          const actionable = cell.querySelectorAll('button:not([disabled]), a[href]');
+          if (!actionable.length) return;
+          cell.dataset.platformActionsReady = 'true';
+          const wrapper = document.createElement('div');
+          wrapper.className = 'relative inline-flex';
+          const trigger = document.createElement('button');
+          trigger.type = 'button';
+          trigger.className = 'platform-row-actions-trigger flex h-8 w-8 items-center justify-center rounded-md text-[#4e5969] hover:bg-blue-50 hover:text-brand';
+          trigger.setAttribute('aria-label', '打开操作菜单');
+          trigger.setAttribute('aria-expanded', 'false');
+          trigger.innerHTML = '<i class="fa-solid fa-ellipsis"></i>';
+          const menu = document.createElement('div');
+          menu.className = 'platform-row-actions-menu fixed z-[200] hidden min-w-40 flex-col gap-1 rounded-lg border border-gray-200 bg-white p-1.5 text-left shadow-xl';
+          const originalNodes = Array.from(cell.childNodes);
+          originalNodes.forEach(node => menu.appendChild(node));
+          menu.querySelectorAll(':scope > div').forEach(container => {
+            if (!container.querySelector('button, a')) return;
+            container.classList.remove('items-center', 'justify-center', 'gap-1', 'gap-1.5', 'whitespace-nowrap');
+            container.classList.add('flex', 'flex-col', 'items-stretch', 'gap-1', 'w-full');
+          });
+          menu.querySelectorAll('button, a').forEach(action => {
+            action.classList.add('w-full', 'flex', 'items-center', 'justify-start', 'gap-2', 'whitespace-nowrap', 'rounded-md', 'px-3', 'py-2', 'text-left');
+            const actionName = action.dataset.action || '';
+            const actionLabels = {
+              detail: '单据详情',
+              preview: '单据预览',
+              approve: '通过',
+              edit: '修改数据',
+              'submit-sales-result': '提交处理结果',
+              'move-inbox': '移动到收件箱',
+              reject: '驳回',
+              'reject-disabled': '驳回',
+              'reject-batch': '驳回',
+              'approve-batch': '通过'
+            };
+            const iconLabels = [
+              ['fa-list-check', '单据详情'],
+              ['fa-pen-to-square', '修改数据'],
+              ['fa-check-double', '通过'],
+              ['fa-reply', '驳回'],
+              ['fa-inbox', '移动到收件箱'],
+              ['fa-check', '通过']
+            ];
+            const iconLabel = iconLabels.find(([className]) => action.querySelector(`.${className}`))?.[1] || '';
+            const stableLabel = action.dataset.menuLabel || actionLabels[actionName] || iconLabel || action.getAttribute('aria-label') || '';
+            if (action.textContent.trim() === '预览') {
+              const textNode = Array.from(action.childNodes).find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim() === '预览');
+              if (textNode) textNode.textContent = '单据预览';
+              else action.setAttribute('aria-label', '单据预览');
+            }
+            if (!action.textContent.trim() && stableLabel) {
+              const label = document.createElement('span');
+              label.className = 'whitespace-nowrap text-sm';
+              label.textContent = stableLabel;
+              action.appendChild(label);
+            }
+            const resolvedLabel = String(
+              action.dataset.menuLabel
+              || actionLabels[actionName]
+              || stableLabel
+              || action.textContent.trim()
+              || action.getAttribute('title')
+              || action.getAttribute('aria-label')
+              || ''
+            ).trim();
+            const iconRules = [
+              [/单据详情|详情/, 'fa-file-lines'],
+              [/单据预览|预览|查看/, 'fa-eye'],
+              [/修改数据|编辑/, 'fa-pen-to-square'],
+              [/提交复核|提交处理结果|提交/, 'fa-paper-plane'],
+              [/质检|校验|检查/, 'fa-list-check'],
+              [/通过|批准|审核通过/, 'fa-check'],
+              [/驳回|退回/, 'fa-reply'],
+              [/覆盖/, 'fa-layer-group'],
+              [/追加|新增/, 'fa-plus'],
+              [/忽略/, 'fa-ban'],
+              [/移动到收件箱|收件箱/, 'fa-inbox'],
+              [/重置密码/, 'fa-key'],
+              [/启用/, 'fa-toggle-on'],
+              [/停用/, 'fa-pause'],
+              [/删除/, 'fa-trash-can'],
+              [/作废/, 'fa-circle-xmark'],
+              [/导出/, 'fa-download']
+            ];
+            const iconClass = iconRules.find(([pattern]) => pattern.test(resolvedLabel))?.[1] || 'fa-ellipsis';
+            action.querySelectorAll('i').forEach(icon => icon.remove());
+            const menuIcon = document.createElement('i');
+            menuIcon.className = `platform-action-icon fa-solid ${iconClass}`;
+            menuIcon.setAttribute('aria-hidden', 'true');
+            action.prepend(menuIcon);
+            action.dataset.platformActionTone = resolvedLabel === '作废' ? 'danger' : 'default';
+            action.dataset.platformMenuLabel = resolvedLabel;
+            if (action.disabled || action.getAttribute('aria-disabled') === 'true') {
+              action.classList.add('text-gray-300', 'cursor-not-allowed', 'bg-transparent');
+            }
+          });
+          wrapper.append(trigger, menu);
+          trigger.__platformActionsMenu = menu;
+          menu.__platformOwnerButton = trigger;
+          cell.appendChild(wrapper);
+          cell.classList.add('text-center');
+          trigger.addEventListener('click', event => {
+            event.stopPropagation();
+            const willOpen = menu.classList.contains('hidden');
+            closeAll();
+            if (!willOpen) return;
+            // Render above the table's scroll container so the menu is not
+            // clipped when it is opened from the rightmost operation column.
+            // Ingestion action handlers resolve their owner row by document id,
+            // so they remain independent of this portal placement.
+            document.body.appendChild(menu);
+            menu.classList.remove('hidden');
+            trigger.setAttribute('aria-expanded', 'true');
+            const rect = trigger.getBoundingClientRect();
+            const menuRect = menu.getBoundingClientRect();
+            menu.style.left = `${Math.max(8, Math.min(window.innerWidth - menuRect.width - 8, rect.right - menuRect.width))}px`;
+            menu.style.top = `${rect.bottom + menuRect.height + 8 <= window.innerHeight ? rect.bottom + 6 : Math.max(8, rect.top - menuRect.height - 6)}px`;
+          });
+          menu.addEventListener('click', event => event.stopPropagation());
+          menu.querySelectorAll('button, a').forEach(action => action.addEventListener('click', closeAll));
+        });
+      });
+    };
+    let frame = null;
+    const observer = new MutationObserver(() => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => enhance(document.getElementById('main-content') || document));
+    });
+    observer.observe(document.getElementById('main-content') || document.body, { childList: true, subtree: true });
+    document.addEventListener('click', closeAll);
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') closeAll(); });
+    enhance(document);
+  },
+
+  initPlatformColumnConfigurators() {
+    const panelSelectors = ['#inbox-column-panel', '#matched-column-panel', '#stash-column-panel', '#qa-column-panel'];
+    const getTable = (panel) => {
+      if (panel.id === 'inbox-column-panel') return document.getElementById('inbox-table');
+      if (panel.id === 'matched-column-panel') return document.getElementById('ingestion-table');
+      if (panel.id === 'stash-column-panel') return document.querySelector('#ingestion-stash-container table');
+      if (panel.id === 'qa-column-panel') return typeof QAView !== 'undefined' ? QAView.getActiveQaTable?.() : null;
+      return null;
+    };
+    const applyOrder = (panel, order = null) => {
+      const table = getTable(panel);
+      const headerRow = table?.querySelector(':scope > thead > tr:first-child');
+      if (!table || !headerRow) return;
+      const count = headerRow.children.length;
+      [headerRow, ...table.querySelectorAll(':scope > tbody > tr')].forEach(row => {
+        if (row.children.length !== count) return;
+        Array.from(row.children).forEach((cell, index) => { if (!cell.dataset.platformColumnIndex) cell.dataset.platformColumnIndex = String(index); });
+      });
+      if (!order) {
+        try { order = JSON.parse(localStorage.getItem(`platform_column_order_${panel.id}`) || 'null'); } catch (error) { order = null; }
+      }
+      if (!Array.isArray(order)) return;
+      const signature = order.join(',');
+      if (table.dataset.platformColumnOrder === signature) return;
+      [headerRow, ...table.querySelectorAll(':scope > tbody > tr')].forEach(row => {
+        if (row.children.length !== count) return;
+        const cells = new Map(Array.from(row.children).map(cell => [Number(cell.dataset.platformColumnIndex), cell]));
+        order.forEach(index => { if (cells.has(index)) row.appendChild(cells.get(index)); });
+      });
+      table.dataset.platformColumnOrder = signature;
+    };
+    const enhance = () => {
+      panelSelectors.forEach(selector => {
+        const panel = document.querySelector(selector);
+        if (!panel) return;
+        if (panel.dataset.columnApplyGate !== 'true') {
+          panel.dataset.columnApplyGate = 'true';
+          panel.addEventListener('change', event => {
+            if (!panel.__applyingColumnConfig && event.target.matches('input[type="checkbox"]')) event.stopImmediatePropagation();
+          }, true);
+        }
+        const labels = Array.from(panel.querySelectorAll('label')).filter(label => label.querySelector('input[type="checkbox"]'));
+        labels.forEach(label => {
+          if (label.dataset.columnDragReady === 'true') return;
+          label.dataset.columnDragReady = 'true';
+          const required = label.classList.contains('hidden');
+          label.draggable = !required;
+          if (!required && !label.querySelector('.platform-column-grip')) {
+            const grip = document.createElement('i');
+            grip.className = 'platform-column-grip fa-solid fa-grip-vertical text-xs text-[#c9cdd4]';
+            label.prepend(grip);
+          }
+          label.addEventListener('dragstart', () => { panel.__draggedColumnLabel = label; label.classList.add('opacity-50'); });
+          label.addEventListener('dragend', () => { label.classList.remove('opacity-50'); panel.__draggedColumnLabel = null; });
+          label.addEventListener('dragover', event => {
+            const dragged = panel.__draggedColumnLabel;
+            if (!dragged || dragged === label || required) return;
+            event.preventDefault();
+            label.parentElement?.insertBefore(dragged, label);
+          });
+        });
+        if (!panel.querySelector('.platform-column-apply')) {
+          const footer = document.createElement('div');
+          footer.className = 'mt-3 flex justify-end border-t border-gray-100 pt-3';
+          footer.innerHTML = '<button type="button" class="platform-column-apply rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">应用</button>';
+          panel.appendChild(footer);
+          footer.querySelector('button').addEventListener('click', () => {
+            const table = getTable(panel);
+            const count = table?.querySelector(':scope > thead > tr:first-child')?.children.length || 0;
+            const ordered = Array.from(panel.querySelectorAll('label input[type="checkbox"]')).map(input => Number(input.value)).filter(Number.isFinite);
+            const order = [0, ...ordered.filter(index => index !== 0), ...Array.from({ length: count }, (_, index) => index).filter(index => index !== 0 && !ordered.includes(index))];
+            localStorage.setItem(`platform_column_order_${panel.id}`, JSON.stringify(order));
+            panel.__applyingColumnConfig = true;
+            panel.querySelectorAll('label input[type="checkbox"]').forEach(input => input.dispatchEvent(new Event('change', { bubbles: true })));
+            panel.__applyingColumnConfig = false;
+            applyOrder(panel, order);
+            panel.classList.add('hidden');
+          });
+        }
+        applyOrder(panel);
+      });
+    };
+    const observer = new MutationObserver(() => requestAnimationFrame(enhance));
+    observer.observe(document.getElementById('main-content') || document.body, { childList: true, subtree: true });
+    enhance();
   },
 
   bindUserMenu() {
@@ -684,7 +1043,7 @@ const App = {
   syncGlobalPeriodVisibility(hash) {
     const picker = document.getElementById('global-period-picker');
     if (!picker) return;
-    picker.classList.toggle('hidden', hash === 'ledger' || hash === 'analytics' || hash.startsWith('settings-'));
+    picker.classList.toggle('hidden', hash === 'ingestion' || hash === 'qa' || hash === 'ledger' || hash === 'analytics' || hash.startsWith('settings-'));
   },
 
   syncSettingsNav(hash) {

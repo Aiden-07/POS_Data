@@ -1,5 +1,4 @@
 const LEDGER_DEFAULT_COLUMNS = [
-  'transactionDate', 'dealerName', 'team', 'region', 'salesOffice', 'acc',
   'orionStoreCode', 'orionStoreName', 'orionProductCode', 'orionBarcode',
   'orionProductName', 'quantity', 'amount', 'cost', 'retailPrice'
 ];
@@ -35,11 +34,14 @@ const LedgerView = {
     dealer: ''
   },
   visibleColumnKeys: [...LEDGER_DEFAULT_COLUMNS],
+  columnDraftKeys: [],
+  draggedColumnKey: '',
   columnPreferenceLoaded: false,
   groupBy: '',
   collapsedGroups: new Set(),
   closePanelsBound: false,
   searchDropdownCloseBound: false,
+  portalActionsBound: false,
   advancedFiltersExpanded: false,
   selectedStartMonth: '2026-01',
   selectedEndMonth: '2026-07',
@@ -78,7 +80,7 @@ const LedgerView = {
     { key: 'customerStoreNo', label: '客户门店号', width: 'w-32', mono: true, value: (item) => item.customerStoreNo },
     { key: 'rawTransactionCode', label: '原始交易出码', width: 'w-36', mono: true, value: (item) => item.rawTransactionCode },
     { key: 'customerStoreName', label: '客户门店名称', width: 'w-44', truncate: true, value: (item) => item.customerStoreName },
-    { key: 'team', label: 'TEAM', width: 'w-28', value: (item) => item.salesTeam },
+    { key: 'team', label: '本部TEAM', width: 'w-28', value: (item) => item.salesTeam },
     { key: 'region', label: '区域', width: 'w-28', value: (item) => item.fullRegion },
     { key: 'salesOffice', label: '营业所', width: 'w-32', value: (item) => item.salesOffice },
     { key: 'acc', label: 'ACC', width: 'w-24', value: (item) => item.acc },
@@ -139,27 +141,31 @@ const LedgerView = {
     return `
       <section class="ledger-table-card" id="ledger-table-card">
         <div class="ledger-table-head">
-          <div class="ledger-table-tools">
+          <div class="ledger-table-tools ledger-table-tools-right">
             <div class="ledger-tool-popover-wrap">
               <button id="ledger-column-btn" class="ledger-table-tool-button" type="button" aria-expanded="false">
                 <i class="fa-solid fa-table-columns"></i>
-                <span>表头</span>
+                <span>字段配置</span>
               </button>
               <div id="ledger-column-panel" class="ledger-tool-panel hidden">
-                <div class="ledger-tool-panel-title">选择显示字段</div>
-                <div class="ledger-field-grid">
-                  ${this.getTableColumns().map((column) => `
-                    <label class="ledger-field-option">
+                <div class="ledger-column-panel-header">
+                  <div class="ledger-tool-panel-title">字段配置</div>
+                  <button id="ledger-column-reset" type="button">恢复默认</button>
+                </div>
+                <div class="ledger-field-grid" id="ledger-column-options">
+                  ${this.getOrderedColumnOptions().map((column) => `
+                    <label class="ledger-field-option" draggable="true" data-ledger-column-option="${column.key}">
+                      <i class="fa-solid fa-grip-vertical ledger-column-drag-handle" aria-hidden="true"></i>
                       <input type="checkbox" data-ledger-column="${column.key}" ${this.visibleColumnKeys.includes(column.key) ? 'checked' : ''}>
                       <span>${column.label}</span>
                     </label>
                   `).join('')}
                 </div>
-                <button id="ledger-column-reset" type="button" class="mt-3 text-xs font-medium text-brand hover:underline">恢复默认字段</button>
+                <div class="ledger-column-panel-footer">
+                  <button id="ledger-column-apply" type="button">应用</button>
+                </div>
               </div>
             </div>
-          </div>
-          <div class="ledger-table-tools">
             <div class="ledger-tool-popover-wrap">
               <button id="ledger-group-btn" class="ledger-table-tool-button" type="button" aria-expanded="false">
                 <i class="fa-solid fa-layer-group"></i>
@@ -175,7 +181,7 @@ const LedgerView = {
               <i class="fa-solid fa-pen-to-square"></i>
               <span>批量修改</span>
             </button>
-            <button id="ledger-export-btn" class="ledger-table-tool-button" type="button">
+            <button id="ledger-export-btn" class="ledger-table-tool-button table-export-button" type="button">
               <i class="fa-solid fa-download"></i>
               <span>导出</span>
             </button>
@@ -201,9 +207,9 @@ const LedgerView = {
   renderGroupOptions() {
     const options = [
       { value: '', label: '不分组' },
+      { value: 'team', label: '本部Team' },
       { value: 'region', label: '区域' },
       { value: 'salesOffice', label: '营业所' },
-      { value: 'dealer', label: '经销商' },
       { value: 'acc', label: 'ACC' }
     ];
     return options.map((option) => `
@@ -215,9 +221,12 @@ const LedgerView = {
   },
 
   getVisibleColumns() {
-    return this.getTableColumns()
-      .filter((column) => this.visibleColumnKeys.includes(column.key))
-      .sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+    const columns = new Map(this.getTableColumns().map((column) => [column.key, column]));
+    return this.visibleColumnKeys.map((key) => columns.get(key)).filter(Boolean);
+  },
+
+  getOrderedColumnOptions() {
+    return this.getTableColumns();
   },
 
   getTableColumns() {
@@ -228,7 +237,7 @@ const LedgerView = {
     const account = typeof Store !== 'undefined' && Store.state?.account
       ? Store.state.account
       : 'default';
-    return `pos_demo_ledger_columns_${account}`;
+    return `pos_demo_ledger_columns_v2_${account}`;
   },
 
   loadColumnPreference() {
@@ -341,7 +350,7 @@ const LedgerView = {
               <div id="ledger-search-field-dropdown" class="ledger-search-field-dropdown hidden"></div>
             </div>
             <div class="ledger-month-range-filter">
-              <span class="ledger-main-filter-caption">时间范围</span>
+              <span class="ledger-main-filter-caption">所属时间</span>
               <div class="analytics-month-picker-wrap">
                 <button id="ledger-month-range-button" class="analytics-month-range-button ledger-month-range-button ${this.monthRangeError ? 'invalid' : ''}" type="button" aria-expanded="false">
                   <i class="fa-regular fa-calendar"></i>
@@ -1009,7 +1018,7 @@ const LedgerView = {
         ${this.hasLedgerPermission('单据详情') ? `<button type="button" class="ledger-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-colors" data-ledger-key="${this.escapeHtml(this.getLedgerRowKey(item))}" title="单据详情">
           <i class="fa-solid fa-list-check"></i>
         </button>` : '<span class="text-xs text-[#86909c]">—</span>'}
-        ${this.hasLedgerPermission('编辑') ? `<button type="button" class="ledger-edit-btn px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 transition-colors" data-ledger-key="${this.escapeHtml(this.getLedgerRowKey(item))}" title="编辑">
+        ${this.hasLedgerPermission('编辑') ? `<button type="button" class="ledger-edit-btn px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50 transition-colors" data-ledger-key="${this.escapeHtml(this.getLedgerRowKey(item))}" data-menu-label="修改数据" title="修改数据">
           <i class="fa-solid fa-pen-to-square"></i>
         </button>` : ''}
         `}
@@ -1023,10 +1032,87 @@ const LedgerView = {
       Dialog.toast('当前账号无编辑权限', 'warning');
       return;
     }
-    this.editingRowKey = this.getLedgerRowKey(row);
-    this.refreshTable();
-    requestAnimationFrame(() => {
-      document.querySelector(`tr[data-ledger-editing="true"] input`)?.focus();
+    this.openModificationDialog(row);
+  },
+
+  openModificationDialog(row) {
+    document.getElementById('ledger-modification-overlay')?.remove();
+    const tradeRecords = [...new Map(this.standardData.map(item => [item.storeCode, { code: item.storeCode, name: item.storeName }])).values()];
+    const productRecords = [...new Map(this.getAllRows().map(item => [item.productCode, { code: item.productCode, name: item.productName, barcode: item.barcode }])).values()];
+    const systemName = String(row.partnerErp || '').replace(/\s*ERP\s*$/i, '');
+    const overlay = document.createElement('div');
+    overlay.id = 'ledger-modification-overlay';
+    overlay.className = 'data-modification-overlay';
+    overlay.innerHTML = `<div class="data-modification-dialog" role="dialog" aria-modal="true" aria-labelledby="ledger-modification-title">
+      <header class="data-modification-header"><div><h3 id="ledger-modification-title">修改数据</h3><p>${this.escapeHtml(row.storeName)} · ${this.escapeHtml(row.productName)}</p></div><button type="button" data-mod-close aria-label="关闭"><i class="fa-solid fa-xmark"></i></button></header>
+      <div class="data-modification-body">
+        <div class="data-modification-grid">
+          <div class="data-modification-group">
+            ${DataModificationSelect.renderRow([DataModificationSelect.renderReadonly('所属时间', row.transactionDate)])}
+          </div>
+          <div class="data-modification-group">
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.renderReadonly('客户门店名称', row.customerStoreName),
+              DataModificationSelect.renderReadonly('客户门店编码', row.rawTransactionCode),
+              DataModificationSelect.renderReadonly('好丽友交易处名称', row.storeName)
+            ])}
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.render({ id: 'ledger-mod-trade', label: '好丽友交易处编码', value: row.storeCode, options: tradeRecords })
+            ])}
+          </div>
+          <div class="data-modification-group">
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.renderText({ id: 'ledger-mod-system', label: '系统名称', value: systemName }),
+              DataModificationSelect.renderReadonly('客户门店号', row.customerStoreNo),
+              DataModificationSelect.renderReadonly('ACC', row.acc)
+            ])}
+          </div>
+          <div class="data-modification-group">
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.renderReadonly('本部Team', row.salesTeam),
+              DataModificationSelect.renderReadonly('区域', row.fullRegion),
+              DataModificationSelect.renderReadonly('营业所', row.salesOffice)
+            ])}
+          </div>
+          <div class="data-modification-group">
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.renderReadonly('客户产品名称', row.customerProductName),
+              DataModificationSelect.renderReadonly('客户产品号', row.customerProductCode),
+              DataModificationSelect.renderReadonly('客户条形码', row.customerBarcode)
+            ])}
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.renderReadonly('好丽友产品名称', row.productName),
+              DataModificationSelect.render({ id: 'ledger-mod-product', label: '好丽友产品编码', value: row.productCode, options: productRecords }),
+              DataModificationSelect.renderReadonly('好丽友条形码', row.barcode)
+            ])}
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.renderReadonly('销售数量', row.quantity),
+              DataModificationSelect.renderReadonly('销售金额', `￥${row.amount}`),
+              DataModificationSelect.renderReadonly('成本', `￥${row.cost}`)
+            ])}
+            ${DataModificationSelect.renderRow([DataModificationSelect.renderReadonly('零售单价', `￥${row.retailPrice}`)])}
+          </div>
+        </div>
+      </div>
+      <footer class="data-modification-footer"><button type="button" data-mod-cancel>取消</button><button type="button" class="is-primary" data-mod-save>确认修改</button></footer>
+    </div>`;
+    document.body.appendChild(overlay);
+    DataModificationSelect.bind(overlay, 'ledger-mod-trade');
+    DataModificationSelect.bind(overlay, 'ledger-mod-product');
+    const close = () => overlay.remove();
+    overlay.querySelectorAll('[data-mod-close],[data-mod-cancel]').forEach(button => button.addEventListener('click', close));
+    overlay.querySelector('[data-mod-save]')?.addEventListener('click', () => {
+      const nextSystem = overlay.querySelector('#ledger-mod-system').value.trim();
+      const tradeCode = overlay.querySelector('#ledger-mod-trade').value.trim();
+      const productCode = overlay.querySelector('#ledger-mod-product').value.trim();
+      const trade = tradeRecords.find(item => item.code === tradeCode);
+      const product = productRecords.find(item => item.code === productCode);
+      if (!nextSystem) return Dialog.toast('系统名称不能为空', 'warning');
+      if (!trade) return Dialog.toast('请选择有效的好丽友交易处编码', 'warning');
+      if (!product) return Dialog.toast('请选择有效的好丽友产品编码', 'warning');
+      const key = this.getLedgerRowKey(row);
+      this.edits.set(key, { ...(this.edits.get(key) || {}), partnerErp: `${nextSystem} ERP`, storeCode: trade.code, storeName: trade.name, productCode: product.code, productName: product.name, barcode: product.barcode });
+      close(); this.refreshTable(); Dialog.toast('数据修改成功', 'success');
     });
   },
 
@@ -1085,9 +1171,9 @@ const LedgerView = {
   },
 
   getGroupLabel(item) {
+    if (this.groupBy === 'team') return item.salesTeam;
     if (this.groupBy === 'region') return item.fullRegion;
     if (this.groupBy === 'salesOffice') return item.salesOffice;
-    if (this.groupBy === 'dealer') return item.dealer;
     if (this.groupBy === 'acc') return item.acc;
     return '';
   },
@@ -1274,29 +1360,43 @@ const LedgerView = {
     button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
   },
 
-  handleColumnToggle(input) {
-    const key = input.dataset.ledgerColumn;
-    if (!key) return;
+  prepareColumnDraft() {
+    this.columnDraftKeys = this.getOrderedColumnOptions().map((column) => column.key);
+    const options = document.getElementById('ledger-column-options');
+    if (!options) return;
+    const nodes = new Map(Array.from(options.children).map((node) => [node.dataset.ledgerColumnOption, node]));
+    this.columnDraftKeys.forEach((key) => {
+      const node = nodes.get(key);
+      if (!node) return;
+      const input = node.querySelector('[data-ledger-column]');
+      if (input) input.checked = this.visibleColumnKeys.includes(key);
+      options.appendChild(node);
+    });
+  },
 
-    if (input.checked) {
-      if (!this.visibleColumnKeys.includes(key)) this.visibleColumnKeys.push(key);
-    } else if (this.visibleColumnKeys.length > 1) {
-      this.visibleColumnKeys = this.visibleColumnKeys.filter((item) => item !== key);
-    } else {
-      input.checked = true;
+  applyColumnDraft() {
+    const panel = document.getElementById('ledger-column-panel');
+    const selected = Array.from(panel?.querySelectorAll('[data-ledger-column]:checked') || []).map((input) => input.dataset.ledgerColumn);
+    if (!selected.length) {
+      Dialog.toast('请至少保留一个表头字段', 'warning');
       return;
     }
+    const order = Array.from(panel.querySelectorAll('[data-ledger-column-option]')).map((item) => item.dataset.ledgerColumnOption);
+    this.visibleColumnKeys = order.filter((key) => selected.includes(key));
     this.saveColumnPreference();
     this.refreshTable();
+    panel.classList.add('hidden');
+    document.getElementById('ledger-column-btn')?.setAttribute('aria-expanded', 'false');
   },
 
   resetColumnsToDefault() {
-    this.visibleColumnKeys = [...LEDGER_DEFAULT_COLUMNS];
-    this.saveColumnPreference();
+    this.columnDraftKeys = this.getTableColumns().map((column) => column.key);
+    const options = document.getElementById('ledger-column-options');
+    const nodes = new Map(Array.from(options?.children || []).map((node) => [node.dataset.ledgerColumnOption, node]));
+    this.columnDraftKeys.forEach((key) => nodes.get(key) && options.appendChild(nodes.get(key)));
     document.querySelectorAll('[data-ledger-column]').forEach((input) => {
-      input.checked = this.visibleColumnKeys.includes(input.dataset.ledgerColumn);
+      input.checked = LEDGER_DEFAULT_COLUMNS.includes(input.dataset.ledgerColumn);
     });
-    this.refreshTable();
   },
 
   handleGroupChange(input) {
@@ -1659,6 +1759,21 @@ const LedgerView = {
     this.loadDataMock();
     this.mountCompoundFilterPortal();
 
+    if (!this.portalActionsBound) {
+      document.addEventListener('click', (event) => {
+        const action = event.target.closest('.ledger-edit-btn, .ledger-detail-btn');
+        if (!action || action.closest('#ledger-table-card')) return;
+        const card = document.getElementById('ledger-table-card');
+        if (!card) return;
+        const proxy = action.cloneNode(true);
+        proxy.hidden = true;
+        card.appendChild(proxy);
+        proxy.click();
+        proxy.remove();
+      }, true);
+      this.portalActionsBound = true;
+    }
+
     document.getElementById('ledger-filter-panel')?.addEventListener('click', (event) => {
       const orgButton = event.target.closest('.ledger-org-chip');
       if (orgButton) this.handleOrgAction(orgButton);
@@ -1808,6 +1923,10 @@ const LedgerView = {
         this.resetColumnsToDefault();
         return;
       }
+      if (event.target.closest('#ledger-column-apply')) {
+        this.applyColumnDraft();
+        return;
+      }
       if (editButton) {
         const rowKey = editButton.getAttribute('data-ledger-key');
         const row = this.getFilteredRows().find(item => this.getLedgerRowKey(item) === rowKey);
@@ -1844,7 +1963,7 @@ const LedgerView = {
               { label: '客户门店号', value: row.customerStoreNo || '-' },
               { label: '原始交易出码', value: row.rawTransactionCode || '-' },
               { label: '客户门店名称', value: row.customerStoreName || '-' },
-              { label: 'TEAM', value: row.salesTeam || '-' },
+              { label: '本部TEAM', value: row.salesTeam || '-' },
               { label: '区域', value: row.fullRegion || '-' },
               { label: '营业所', value: row.salesOffice || '-' },
               { label: 'ACC', value: row.acc || '-' },
@@ -1867,6 +1986,7 @@ const LedgerView = {
       }
       if (columnButton) {
         this.toggleToolPanel('ledger-column-panel', 'ledger-column-btn');
+        if (!document.getElementById('ledger-column-panel')?.classList.contains('hidden')) this.prepareColumnDraft();
         return;
       }
       if (groupButton) {
@@ -1913,10 +2033,32 @@ const LedgerView = {
         });
         this.refreshTable();
       } else if (columnInput) {
-        this.handleColumnToggle(columnInput);
+        return;
       } else if (groupInput) {
         this.handleGroupChange(groupInput);
       }
+    });
+
+    const ledgerCard = document.getElementById('ledger-table-card');
+    ledgerCard?.addEventListener('dragstart', (event) => {
+      const option = event.target.closest('[data-ledger-column-option]');
+      if (!option) return;
+      this.draggedColumnKey = option.dataset.ledgerColumnOption;
+      option.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+    });
+    ledgerCard?.addEventListener('dragover', (event) => {
+      const option = event.target.closest('[data-ledger-column-option]');
+      if (!option || !this.draggedColumnKey) return;
+      event.preventDefault();
+      const dragged = document.querySelector(`[data-ledger-column-option="${this.draggedColumnKey}"]`);
+      if (!dragged || dragged === option) return;
+      const bounds = option.getBoundingClientRect();
+      option.parentElement.insertBefore(dragged, event.clientY < bounds.top + bounds.height / 2 ? option : option.nextSibling);
+    });
+    ledgerCard?.addEventListener('dragend', (event) => {
+      event.target.closest('[data-ledger-column-option]')?.classList.remove('is-dragging');
+      this.draggedColumnKey = '';
     });
 
     if (!this.closePanelsBound) {

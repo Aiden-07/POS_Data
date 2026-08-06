@@ -27,6 +27,98 @@ const QAView = {
     team: '',
     office: ''
   },
+  periodFilters: null,
+
+  getQaCurrentMonth() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  },
+
+  ensureQaPeriodFilters() {
+    if (this.periodFilters) return this.periodFilters;
+    const currentMonth = this.getQaCurrentMonth();
+    const defaults = {
+      standard: { submitStart: currentMonth, submitEnd: '', periodStart: '', periodEnd: '' },
+      exception: { submitStart: '', submitEnd: '', periodStart: '', periodEnd: '' }
+    };
+    try {
+      const saved = JSON.parse(localStorage.getItem('qa_period_filters') || '{}');
+      this.periodFilters = {
+        standard: { ...defaults.standard, ...(saved.standard || {}) },
+        exception: { ...defaults.exception, ...(saved.exception || {}) }
+      };
+    } catch (error) {
+      this.periodFilters = defaults;
+    }
+    const migrationKey = 'qa_period_default_start_only_20260803';
+    if (localStorage.getItem(migrationKey) !== 'done') {
+      this.periodFilters.standard.submitStart = currentMonth;
+      this.periodFilters.standard.submitEnd = '';
+      localStorage.setItem(migrationKey, 'done');
+      localStorage.setItem('qa_period_filters', JSON.stringify(this.periodFilters));
+    }
+    return this.periodFilters;
+  },
+
+  saveQaPeriodFilters() {
+    localStorage.setItem('qa_period_filters', JSON.stringify(this.ensureQaPeriodFilters()));
+  },
+
+  normalizeQaYearMonth(value) {
+    const match = String(value || '').match(/(20\d{2})[-年/.](\d{1,2})/);
+    return match ? `${match[1]}-${String(match[2]).padStart(2, '0')}` : '';
+  },
+
+  matchesQaMonthRange(value, start, end) {
+    if (!start && !end) return true;
+    const month = this.normalizeQaYearMonth(value);
+    if (!month) return false;
+    return (!start || month >= start) && (!end || month <= end);
+  },
+
+  getQaSubmitTime(row = {}, index = 0) {
+    return row.submittedAt || row.uploadTime || row.uploadedAt || row.createdAt || this.getStandardSourceTime(index);
+  },
+
+  getQaBelongingTime(row = {}) {
+    return row.yearMonth || row.month || row.transactionDate || row.date || '2026-05';
+  },
+
+  matchesQaPeriodFilters(row, index, tab = this.activeQaTab) {
+    const period = this.ensureQaPeriodFilters()[tab];
+    return this.matchesQaMonthRange(this.getQaSubmitTime(row, index), period.submitStart, period.submitEnd)
+      && this.matchesQaMonthRange(this.getQaBelongingTime(row), period.periodStart, period.periodEnd);
+  },
+
+  formatQaRangeMonth(value, placeholder) {
+    if (!value) return placeholder;
+    const [year, month] = value.split('-').map(Number);
+    return `${year}年${month}月`;
+  },
+
+  renderQaPeriodPanel(kind, year) {
+    const period = this.ensureQaPeriodFilters()[this.activeQaTab];
+    const start = period[`${kind}Start`] || '';
+    const end = period[`${kind}End`] || '';
+    const names = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
+    return `<section class="analytics-month-panel" aria-label="${year}年"><div class="analytics-month-grid">${names.map((name, index) => {
+      const value = `${year}-${String(index + 1).padStart(2, '0')}`;
+      return `<button type="button" class="analytics-month-option ${value === start || value === end ? 'selected' : ''} ${start && end && value > start && value < end ? 'in-range' : ''}" data-qa-period-month="${value}">${name}</button>`;
+    }).join('')}</div></section>`;
+  },
+
+  renderQaPeriodPicker(kind, year) {
+    return `<div class="analytics-month-picker-header"><button type="button" class="analytics-month-nav" data-qa-period-nav="-1"><i class="fa-solid fa-angles-left"></i></button><span>${year}年</span><span>${year + 1}年</span><button type="button" class="analytics-month-nav" data-qa-period-nav="1"><i class="fa-solid fa-angles-right"></i></button></div><div class="analytics-month-picker-panels">${this.renderQaPeriodPanel(kind, year)}${this.renderQaPeriodPanel(kind, year + 1)}</div>`;
+  },
+
+  syncQaPeriodButtons() {
+    const period = this.ensureQaPeriodFilters()[this.activeQaTab];
+    ['submit', 'period'].forEach(kind => {
+      const labels = document.querySelectorAll(`#qa-${kind}-range-button [data-qa-period-label]`);
+      if (labels[0]) labels[0].textContent = this.formatQaRangeMonth(period[`${kind}Start`], '开始月份');
+      if (labels[1]) labels[1].textContent = this.formatQaRangeMonth(period[`${kind}End`], '结束月份');
+    });
+  },
   standardData: [
     { storeName: '保定市聚昊商贸有限公司', storeCode: 'S0091005', confidence: '100%', aiNote: 'POS表数据完整，校验合规，AI未发现异常', dealer: '河北聚昊商贸', salesTeam: '华北 Team', region: '华北区域', salesOffice: '石家庄营业所' },
     { storeName: '多客隆购物中心（会盟大街）', storeCode: 'S0219489', confidence: '97.9%', aiNote: '产品名称缺失，依据产品编码反检索且唯一性，已回填', dealer: '洛阳多客隆商贸', salesTeam: '华中 Team', region: '华中区域', salesOffice: '郑州营业所' },
@@ -77,10 +169,11 @@ const QAView = {
   },
 
   getStandardSourceTime(index) {
+    const [year, month] = this.getQaCurrentMonth().split('-');
     const totalMinutes = 22 * 60 + 15 + (Number(index) || 0) * 3;
     const hour = String(Math.floor(totalMinutes / 60) % 24).padStart(2, '0');
     const minute = String(totalMinutes % 60).padStart(2, '0');
-    return `2026-05-20 ${hour}:${minute}:00`;
+    return `${year}-${month}-20 ${hour}:${minute}:00`;
   },
   
   async loadData() {
@@ -373,6 +466,26 @@ const QAView = {
                 `).join('')}
               </div>
             </div>
+            <div class="ledger-month-range-filter qa-period-range" data-qa-period-kind="period">
+              <span class="ledger-main-filter-caption">所属时间</span>
+              <div class="analytics-month-picker-wrap">
+                <button id="qa-period-range-button" class="analytics-month-range-button ledger-month-range-button" type="button" aria-expanded="false">
+                  <i class="fa-regular fa-calendar"></i>
+                  <span data-qa-period-label>开始月份</span><span class="analytics-range-to">至</span><span data-qa-period-label>结束月份</span>
+                </button>
+                <div id="qa-period-month-picker" class="analytics-month-picker hidden"></div>
+              </div>
+            </div>
+            <div class="ledger-month-range-filter qa-period-range" data-qa-period-kind="submit">
+              <span class="ledger-main-filter-caption">提交时间</span>
+              <div class="analytics-month-picker-wrap">
+                <button id="qa-submit-range-button" class="analytics-month-range-button ledger-month-range-button" type="button" aria-expanded="false">
+                  <i class="fa-regular fa-calendar"></i>
+                  <span data-qa-period-label>开始月份</span><span class="analytics-range-to">至</span><span data-qa-period-label>结束月份</span>
+                </button>
+                <div id="qa-submit-month-picker" class="analytics-month-picker hidden"></div>
+              </div>
+            </div>
             <button type="button" id="qa-btn-search"
               class="px-4 py-2 bg-brand hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:shadow-brand/30 hover:-translate-y-0.5">
               <i class="fa-solid fa-magnifying-glass mr-1"></i>检索
@@ -381,24 +494,21 @@ const QAView = {
               class="px-4 py-2 text-sm text-[#86909c] hover:text-[#1d2129] hover:bg-gray-50 rounded-lg transition-all">
               <i class="fa-solid fa-rotate-left mr-1"></i>重置筛选
             </button>
-            <div class="ml-auto flex items-center gap-2">
-              <button type="button" id="qa-btn-batch-approve" disabled
-                class="px-4 py-2 bg-[#86909c] text-white rounded-lg text-sm font-medium transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
-                <i class="fa-solid fa-check mr-1"></i>通过
-              </button>
-              <button type="button" id="qa-standard-display-toggle"
-                class="w-10 h-10 rounded-lg border border-blue-100 bg-blue-50 text-brand hover:bg-blue-100 hover:border-blue-200 transition-all flex items-center justify-center"
-                title="${this.standardDisplayMode === 'table' ? '门店视图' : '产品视图'}"
-                aria-label="${this.standardDisplayMode === 'table' ? '当前为门店视图，点击切换为产品视图' : '当前为产品视图，点击切换为门店视图'}">
-                <i id="qa-standard-display-toggle-icon" class="fa-solid ${this.standardDisplayMode === 'table' ? 'fa-table-cells-large' : 'fa-list-ul'}"></i>
-              </button>
-              <button type="button" id="qa-exception-display-toggle"
-                class="hidden w-10 h-10 rounded-lg border border-blue-100 bg-blue-50 text-brand hover:bg-blue-100 hover:border-blue-200 transition-all flex items-center justify-center"
-                title="${this.exceptionDisplayMode === 'detail' ? '产品视图' : '门店视图'}"
-                aria-label="${this.exceptionDisplayMode === 'detail' ? '当前为产品视图，点击切换为门店视图' : '当前为门店视图，点击切换为产品视图'}">
-                <i id="qa-exception-display-toggle-icon" class="fa-solid ${this.exceptionDisplayMode === 'detail' ? 'fa-list-ul' : 'fa-table-cells-large'}"></i>
-              </button>
+          </div>
+        </div>
+        <div class="platform-section-gap"></div>
+        <div class="flex shrink-0 items-center justify-end border-b border-gray-100 bg-white px-6 py-3" id="qa-table-toolbar">
+          <div class="ml-auto flex items-center gap-2">
+            <div class="relative" id="qa-column-wrapper">
+              <button type="button" id="qa-column-button" class="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-[#4e5969] hover:bg-blue-50 hover:text-brand"><i class="fa-solid fa-table-columns"></i><span>字段配置</span></button>
+              <div id="qa-column-panel" class="hidden absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-xl">
+                <div class="mb-2 flex items-center justify-between"><strong class="text-sm text-[#1d2129]">字段配置</strong><button type="button" id="qa-column-reset" class="text-xs text-brand hover:underline">恢复默认</button></div>
+                <div id="qa-column-options" class="grid max-h-72 grid-cols-1 gap-0.5 overflow-auto"></div>
+              </div>
             </div>
+            <button type="button" id="qa-btn-batch-approve" disabled class="px-4 py-2 bg-[#86909c] text-white rounded-lg text-sm font-medium transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"><i class="fa-solid fa-check mr-1"></i>通过</button>
+            <button type="button" id="qa-standard-display-toggle" class="w-10 h-10 rounded-lg border border-blue-100 bg-blue-50 text-brand hover:bg-blue-100 hover:border-blue-200 transition-all flex items-center justify-center" title="${this.standardDisplayMode === 'table' ? '门店视图' : '产品视图'}" aria-label="${this.standardDisplayMode === 'table' ? '当前为门店视图，点击切换为产品视图' : '当前为产品视图，点击切换为门店视图'}"><i id="qa-standard-display-toggle-icon" class="fa-solid ${this.standardDisplayMode === 'table' ? 'fa-table-cells-large' : 'fa-list-ul'}"></i></button>
+            <button type="button" id="qa-exception-display-toggle" class="hidden w-10 h-10 rounded-lg border border-blue-100 bg-blue-50 text-brand hover:bg-blue-100 hover:border-blue-200 transition-all flex items-center justify-center" title="${this.exceptionDisplayMode === 'detail' ? '产品视图' : '门店视图'}" aria-label="${this.exceptionDisplayMode === 'detail' ? '当前为产品视图，点击切换为门店视图' : '当前为门店视图，点击切换为产品视图'}"><i id="qa-exception-display-toggle-icon" class="fa-solid ${this.exceptionDisplayMode === 'detail' ? 'fa-list-ul' : 'fa-table-cells-large'}"></i></button>
           </div>
         </div>
         <div class="flex-1 min-h-0 flex flex-col px-2" id="qa-standard-container"></div>
@@ -582,7 +692,7 @@ const QAView = {
     return `<button type="button" class="qa-standard-preview-trigger max-w-full truncate text-brand hover:text-blue-700 hover:underline transition-colors text-left font-medium" data-index="${this.escapeHtml(index)}" title="预览 ${safeValue}">${safeValue}</button>`;
   },
 
-  renderQaActionButtons({ scope, index = '', id = '', row = null, hideDetail = false } = {}) {
+  renderQaActionButtons({ scope, index = '', id = '', row = null, hideDetail = false, productKey = '' } = {}) {
     const safeScope = this.escapeHtml(scope || '');
     const safeIndex = this.escapeHtml(index);
     const safeId = this.escapeHtml(id);
@@ -591,17 +701,17 @@ const QAView = {
       return `
         <div class="flex items-center gap-1">
           ${hideDetail || !this.hasQaPermission('异常数据', '单据详情') ? '' : `
-            <button type="button" class="qa-exception-document-detail-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-id="${safeId}" title="单据详情">
+            <button type="button" class="qa-exception-document-detail-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-id="${safeId}" data-menu-label="单据详情" title="单据详情">
               <i class="fa-solid fa-list-check"></i>
             </button>
           `}
           ${actions.canEdit ? `
-            <button type="button" class="qa-inline-edit-trigger px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50" data-scope="${safeScope}" data-id="${safeId}" title="编辑">
+            <button type="button" class="qa-inline-edit-trigger px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50" data-scope="${safeScope}" data-id="${safeId}" data-menu-label="修改数据" title="修改数据">
               <i class="fa-regular fa-pen-to-square"></i>
             </button>
           ` : ''}
           ${actions.buttons.map((button) => `
-            <button type="button" class="px-2 py-1 text-xs rounded action-btn ${button.className}" data-action="${button.action}" data-id="${safeId}" title="${button.title}" ${button.disabled ? 'disabled' : ''}>
+            <button type="button" class="px-2 py-1 text-xs rounded action-btn ${button.className}" data-action="${button.action}" data-id="${safeId}" data-menu-label="${button.label || ''}" title="${button.title}" ${button.disabled ? 'disabled' : ''}>
               <i class="${button.icon}"></i>
             </button>
           `).join('')}
@@ -615,13 +725,10 @@ const QAView = {
         ${this.hasQaPermission('标准POS表', '单据详情') ? `<button type="button" class="qa-standard-detail-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-index="${safeIndex}" title="单据详情">
           <i class="fa-solid fa-list-check"></i>
         </button>` : ''}
-        ${standardActions.canEdit ? `<button type="button" class="qa-inline-edit-trigger px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50" data-scope="${safeScope}" data-index="${safeIndex}" title="编辑">
+        ${standardActions.canEdit ? `<button type="button" class="qa-inline-edit-trigger px-2 py-1 text-xs rounded text-amber-500 hover:bg-amber-50" data-scope="${safeScope}" data-index="${safeIndex}" data-product-key="${this.escapeHtml(productKey)}" data-menu-label="修改数据" title="修改数据">
           <i class="fa-regular fa-pen-to-square"></i>
         </button>` : ''}
         ${standardActions.buttons.map((button) => `<button type="button" class="qa-standard-workflow-action px-2 py-1 text-xs rounded ${button.className}" data-action="${button.action}" data-index="${safeIndex}" title="${button.title}"><i class="${button.icon}"></i></button>`).join('')}
-        ${this.isPosActor() && this.hasQaPermission('标准POS表', '删除') && ['待通过', 'POS担当待处理'].includes(this.getStandardStatus(standardRow)) ? `<button type="button" class="qa-standard-delete-trigger px-2 py-1 text-xs rounded text-red-500 hover:bg-red-50" data-index="${safeIndex}" title="删除">
-          <i class="fa-regular fa-trash-can"></i>
-        </button>` : ''}
       </div>
     `;
   },
@@ -653,7 +760,114 @@ const QAView = {
     return `<td class="${className}" data-edit-field="${field}" data-edit-value="${rawValue}">${this.renderEditableText(displayValue, '', title || displayValue)}</td>`;
   },
 
+  openQaModificationDialog(button) {
+    const scope = button.dataset.scope;
+    const index = Number(button.dataset.index);
+    const target = scope === 'standard' ? this.standardData[index] : this.data.find(item => item.id === button.dataset.id);
+    if (!target) return;
+    if (scope === 'standard' && !this.canEditStandard(target)) return Dialog.toast('当前标准POS数据尚未流转至当前账号处理', 'warning');
+    if (scope === 'exception' && !this.getExceptionActions(target).canEdit) return Dialog.toast('当前异常数据尚未流转至当前账号处理', 'warning');
+    const business = this.getQaBusinessFields(target, Number.isFinite(index) ? index : 0);
+    const productKey = button.dataset.productKey || '';
+    const isProductView = scope === 'standard' ? Boolean(productKey) : this.exceptionDisplayMode === 'detail';
+    const productIndex = productKey ? Number(productKey.split(':').pop()) : 0;
+    const productSource = scope === 'standard' && isProductView
+      ? { ...this.getStandardPreviewRows(target)[productIndex], ...(this.standardProductEdits.get(productKey) || {}) }
+      : target;
+    const product = isProductView ? this.getQaProductFields(productSource, target, productIndex) : null;
+    const tradeRecords = [...new Map(this.standardData.map((row, rowIndex) => {
+      const fields = this.getQaBusinessFields(row, rowIndex); return [fields.tradeCode, { code: fields.tradeCode, name: fields.tradeName }];
+    })).values()].filter(item => item.code && item.code !== '-');
+    const productRecords = isProductView ? [...new Map(this.getStandardPreviewRows(this.standardData[0] || {}).map((detail, rowIndex) => {
+      const fields = this.getQaProductFields(detail, this.standardData[0] || {}, rowIndex); return [fields.orionProductCode, { code: fields.orionProductCode, name: fields.orionProductName, barcode: fields.orionBarcode }];
+    })).values()].filter(item => item.code && item.code !== '-') : [];
+    const customerStoreName = target.customerStoreName || target.storeName || '-';
+    const customerStoreCode = target.rawTradeCode || target.rawStoreCode || target.customerStoreCode || target.storeCode || '-';
+    const quantity = productSource?.quantity ?? productSource?.salesQuantity ?? target.quantity ?? target.salesQuantity ?? '-';
+    const amount = productSource?.amount ?? productSource?.salesAmount ?? target.amount ?? target.salesAmount ?? '-';
+    const cost = productSource?.cost ?? productSource?.salesCost ?? target.cost ?? target.salesCost ?? '-';
+    const retailPrice = productSource?.retailPrice ?? productSource?.unitPrice ?? target.retailPrice ?? target.unitPrice ?? '-';
+    document.getElementById('qa-modification-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'qa-modification-overlay'; overlay.className = 'data-modification-overlay';
+    overlay.innerHTML = `<div class="data-modification-dialog" role="dialog" aria-modal="true"><header class="data-modification-header"><div><h3>修改数据</h3><p>${this.escapeHtml(business.tradeName || target.storeName || '当前单据')} · ${isProductView ? '产品级视图' : '门店级视图'}</p></div><button type="button" data-mod-close aria-label="关闭"><i class="fa-solid fa-xmark"></i></button></header>
+      <div class="data-modification-body"><div class="data-modification-grid">
+        <div class="data-modification-group">
+          ${DataModificationSelect.renderRow([DataModificationSelect.renderReadonly('所属时间', isProductView ? business.productDate : business.storeMonth)])}
+        </div>
+        <div class="data-modification-group">
+          ${DataModificationSelect.renderRow([
+            DataModificationSelect.renderReadonly('客户门店名称', customerStoreName),
+            DataModificationSelect.renderReadonly('客户门店编码', customerStoreCode),
+            DataModificationSelect.renderReadonly('好丽友交易处名称', business.tradeName)
+          ])}
+          ${DataModificationSelect.renderRow([
+            DataModificationSelect.render({ id: 'qa-mod-trade', label: '好丽友交易处编码', value: business.tradeCode, options: tradeRecords })
+          ])}
+        </div>
+        <div class="data-modification-group">
+          ${DataModificationSelect.renderRow([
+            DataModificationSelect.renderText({ id: 'qa-mod-system', label: '系统名称', value: String(business.partnerErp || '').replace(/\s*ERP\s*$/i, '') }),
+            DataModificationSelect.renderReadonly('客户门店号', business.customerStoreNo),
+            DataModificationSelect.renderReadonly('ACC', business.acc)
+          ])}
+        </div>
+        <div class="data-modification-group">
+          ${DataModificationSelect.renderRow([
+            DataModificationSelect.renderReadonly('本部Team', target.salesTeam || target.team || '-'),
+            DataModificationSelect.renderReadonly('区域', target.region || '-'),
+            DataModificationSelect.renderReadonly('营业所', target.salesOffice || '-')
+          ])}
+        </div>
+        ${isProductView && product ? `
+          <div class="data-modification-group">
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.renderReadonly('客户产品名称', product.customerProductName),
+              DataModificationSelect.renderReadonly('客户产品号', product.customerProductCode),
+              DataModificationSelect.renderReadonly('客户条形码', product.customerBarcode)
+            ])}
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.renderReadonly('好丽友产品名称', product.orionProductName),
+              DataModificationSelect.render({ id: 'qa-mod-product', label: '好丽友产品编码', value: product.orionProductCode || '', options: productRecords }),
+              DataModificationSelect.renderReadonly('好丽友条形码', product.orionBarcode)
+            ])}
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.renderReadonly('销售数量', quantity),
+              DataModificationSelect.renderReadonly('销售金额', amount),
+              DataModificationSelect.renderReadonly('成本', cost)
+            ])}
+            ${DataModificationSelect.renderRow([DataModificationSelect.renderReadonly('零售单价', retailPrice)])}
+          </div>
+        ` : ''}
+      </div></div>
+      <footer class="data-modification-footer"><button type="button" data-mod-cancel>取消</button><button type="button" class="is-primary" data-mod-save>确认修改</button></footer></div>`;
+    document.body.appendChild(overlay);
+    DataModificationSelect.bind(overlay, 'qa-mod-trade');
+    if (isProductView) DataModificationSelect.bind(overlay, 'qa-mod-product');
+    const close = () => overlay.remove(); overlay.querySelectorAll('[data-mod-close],[data-mod-cancel]').forEach(item => item.addEventListener('click', close));
+    overlay.querySelector('[data-mod-save]')?.addEventListener('click', () => {
+      const systemName = overlay.querySelector('#qa-mod-system').value.trim();
+      const tradeCode = overlay.querySelector('#qa-mod-trade').value.trim();
+      const tradeRecord = tradeRecords.find(item => item.code === tradeCode);
+      if (!systemName) return Dialog.toast('系统名称不能为空', 'warning');
+      if (!tradeRecord) return Dialog.toast('请选择有效的好丽友交易处编码', 'warning');
+      target.partnerErp = `${systemName} ERP`; this.applyQaTradeMaster(target, tradeRecord);
+      if (isProductView) {
+        const productCode = overlay.querySelector('#qa-mod-product').value.trim();
+        const productRecord = productRecords.find(item => item.code === productCode);
+        if (!productRecord) return Dialog.toast('请选择有效的好丽友产品编码', 'warning');
+        if (scope === 'standard') this.standardProductEdits.set(productKey, { ...(this.standardProductEdits.get(productKey) || {}), orionProductCode: productRecord.code, orionProductName: productRecord.name, orionBarcode: productRecord.barcode });
+        else Object.assign(target, { orionProductCode: productRecord.code, orionProductName: productRecord.name, orionBarcode: productRecord.barcode });
+      }
+      const actor = Store.getState();
+      if (scope === 'standard') this.saveStandardWorkflow(target, { lastOperatorName: actor.userName || '系统', lastAction: '修改数据', lastOperatedAt: new Date().toLocaleString() });
+      else { target.lastOperatorName = actor.userName || '系统'; target.lastAction = '修改数据'; this.saveWorkflowState(); }
+      close(); scope === 'standard' ? this.renderStandardTable() : this.renderExceptionTable(); Dialog.toast('数据修改成功', 'success');
+    });
+  },
+
   enterQaInlineEdit(button) {
+    return this.openQaModificationDialog(button);
     const row = button.closest('tr');
     if (!row || row.dataset.editing === 'true') return;
     if (button.dataset.scope === 'exception') {
@@ -995,7 +1209,7 @@ const QAView = {
 
   getQaBusinessColumnWidth(header = '') {
     return ({
-      时间: 128, 客户系统: 150, 客户门店号: 140, 经销商: 170, ACC: 110,
+      所属时间: 128, 客户系统: 150, 客户门店号: 140, 经销商: 170, ACC: 110,
       好丽友交易处编码: 170, 好丽友交易处名称: 220,
       客户产品号: 150, 客户产品名称: 220, 客户条形码: 170,
       好丽友产品编码: 170, 好丽友条形码: 170, 好丽友产品名称: 240,
@@ -1085,7 +1299,7 @@ const QAView = {
             <td class="px-4 py-3 font-medium">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
             <td class="px-4 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
             <td class="px-4 py-3 text-center">${this.renderStandardStatusBadge(row)}</td>
-            <td class="px-4 py-3 text-center">${this.renderQaActionButtons({ scope: 'standard', index })}</td>
+            <td class="px-4 py-3 text-center">${this.renderQaActionButtons({ scope: 'standard', index, productKey: productEditKey })}</td>
           </tr>`;
         }))
       : rows.map(({ row, index }) => {
@@ -1109,8 +1323,8 @@ const QAView = {
           </tr>`;
         });
     const headers = isProductView
-      ? ['时间','客户系统','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','客户产品号','客户产品名称','客户条形码','好丽友产品编码','好丽友条形码','好丽友产品名称','销售数量','销售金额','销售成本','零售单价','异常说明','当前责任人','最近操作人','状态','操作']
-      : ['时间','客户系统','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','异常说明','当前责任人','最近操作人','状态','操作'];
+      ? ['所属时间','客户系统','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','客户产品号','客户产品名称','客户条形码','好丽友产品编码','好丽友条形码','好丽友产品名称','销售数量','销售金额','销售成本','零售单价','异常说明','当前责任人','最近操作人','状态','操作']
+      : ['所属时间','客户系统','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','异常说明','当前责任人','最近操作人','状态','操作'];
     const count = isProductView ? body.length : rows.length;
     container.innerHTML = `<div class="animate-[fadeIn_0.22s_ease-out] flex min-h-0 flex-1 flex-col"><div class="min-h-0 flex-1 overflow-auto"><table class="table-fixed text-left text-sm text-[#4e5969]" style="width:${this.getQaBusinessTableWidth(headers)}px;min-width:100%;">${this.renderQaBusinessColGroup(headers)}<thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10"><tr><th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="qa-standard-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>${headers.map((header, index) => `<th class="${this.getQaBusinessHeaderClass(header, index, headers.length)}">${header}</th>`).join('')}</tr></thead><tbody id="qa-standard-tbody" class="divide-y divide-gray-100">${body.length ? body.join('') : `<tr><td colspan="${headers.length + 1}" class="px-4 py-16 text-center text-[#86909c]">暂无符合条件的${isProductView ? '产品' : '门店'}数据</td></tr>`}</tbody></table></div>${this.renderQaTableSummary(count)}</div>`;
     this.bindStandardSelectionEvents();
@@ -1390,7 +1604,8 @@ const QAView = {
   getFilteredStandardData() {
     return this.standardData
       .map((row, index) => ({ row, index }))
-      .filter(({ row }) => {
+      .filter(({ row, index }) => {
+        if (!this.matchesQaPeriodFilters(row, index, 'standard')) return false;
         if (!this.isPosActor() && row.salesTeam !== Store.getState().team) return false;
         if (!this.matchesQaSearch(row)) return false;
         if (this.hierarchyFilter.teams.length > 0 && !this.hierarchyFilter.teams.includes(row.salesTeam)) {
@@ -1459,9 +1674,10 @@ const QAView = {
     const workflow = this.getStandardWorkflow(row);
     const status = workflow.workflowStatus || '待通过';
     let currentOwnerName = workflow.currentOwnerName;
-    if (!currentOwnerName) {
-      if (status === '已通过') currentOwnerName = '-';
-      else if (workflow.currentOwnerType === 'sales') currentOwnerName = workflow.currentOwnerTeam || row.salesTeam || '-';
+    const hasOwner = value => Boolean(String(value || '').trim()) && String(value).trim() !== '-';
+    if (!hasOwner(currentOwnerName)) {
+      if (status === '已通过') currentOwnerName = '系统';
+      else if (workflow.currentOwnerType === 'sales') currentOwnerName = [workflow.currentOwnerTeam, row.salesTeam].find(hasOwner) || '营业担当';
       else currentOwnerName = 'POS担当';
     }
     return {
@@ -1515,7 +1731,7 @@ const QAView = {
     const responsibility = status === '营业担当处理中'
       ? { currentOwnerType: 'sales', currentOwnerName: row.salesTeam || '-', currentOwnerTeam: row.salesTeam || '' }
       : status === '已通过'
-        ? { currentOwnerType: 'none', currentOwnerName: '-', currentOwnerTeam: '' }
+        ? { currentOwnerType: 'system', currentOwnerName: '系统', currentOwnerTeam: '' }
         : { currentOwnerType: 'pos', currentOwnerName: 'POS担当', currentOwnerTeam: '' };
     return this.saveStandardWorkflow(row, {
       workflowStatus: status,
@@ -1621,7 +1837,7 @@ const QAView = {
       currentOwnerName: 'POS担当',
       lastOperatorName: row.salesSubmittedBy || row.lastOperatorName || '营业担当'
     };
-    return { currentOwnerType: 'none', currentOwnerName: '-', lastOperatorName: row.approvedBy || row.lastOperatorName || '系统' };
+    return { currentOwnerType: 'system', currentOwnerName: '系统', lastOperatorName: row.approvedBy || row.lastOperatorName || '系统' };
   },
 
   hasExceptionEditPermission() {
@@ -1657,7 +1873,7 @@ const QAView = {
       return {
         canEdit: false,
         buttons: [
-          { action: 'reject-disabled', title: '等待营业担当提交处理结果', icon: 'fa-solid fa-reply', className: 'text-gray-300 cursor-not-allowed', disabled: true }
+          { action: 'reject-disabled', label: '驳回', title: '等待营业担当提交处理结果', icon: 'fa-solid fa-reply', className: 'text-gray-300 cursor-not-allowed', disabled: true }
         ]
       };
     }
@@ -1705,7 +1921,7 @@ const QAView = {
       : status === 'POS担当待处理'
         ? { currentOwnerType: 'pos', currentOwnerName: 'POS担当', currentOwnerTeam: '' }
         : status === '已通过'
-          ? { currentOwnerType: 'none', currentOwnerName: '-', currentOwnerTeam: '' }
+          ? { currentOwnerType: 'system', currentOwnerName: '系统', currentOwnerTeam: '' }
           : { currentOwnerType: 'pos', currentOwnerName: 'POS担当', currentOwnerTeam: '' };
     this.data.forEach((item) => {
       const sameStore = row.storeCode
@@ -1781,6 +1997,7 @@ const QAView = {
     // 异常页签只展示尚未闭环的数据。复核通过后数据进入标准 POS 表，
     // 内部保留“已通过”用于审计，但不再作为异常列表的页面状态。
     let filteredData = this.data.filter((row) => this.getExceptionStatus(row) !== '已通过' && (includeResolved || row.exceptionResolutionStatus !== '已解决'));
+    filteredData = filteredData.filter((row, index) => this.matchesQaPeriodFilters(row, index, 'exception'));
     if (this.exceptionTypeFilter) {
       filteredData = filteredData.filter((row) => row.conflictType === this.exceptionTypeFilter);
     }
@@ -1918,8 +2135,8 @@ const QAView = {
       && summary.unresolvedCount > 0 && ['待处理', 'POS担当待处理'].includes(summary.status);
     return `<div class="flex items-center justify-center gap-1">
       ${this.hasQaPermission('异常数据', '单据详情') ? `<button type="button" class="qa-exception-document-detail-trigger px-2 py-1 text-xs rounded text-brand hover:bg-blue-50" data-id="${id}" title="单据详情"><i class="fa-solid fa-list-check"></i></button>` : ''}
-      <button type="button" class="px-2 py-1 text-xs rounded action-btn ${canReject ? 'text-red-500 hover:bg-red-50' : 'text-gray-300 cursor-not-allowed'}" data-action="reject-batch" data-id="${id}" title="${canReject ? '驳回该门店未解决异常' : '当前状态不可驳回'}" ${canReject ? '' : 'disabled'}><i class="fa-solid fa-reply"></i></button>
-      <button type="button" class="px-2 py-1 text-xs rounded action-btn ${canPass ? 'text-green-600 hover:bg-green-50' : 'text-gray-300 cursor-not-allowed'}" data-action="approve-batch" data-id="${id}" title="${canPass ? '整单通过并流入标准POS表' : `仍有${summary.unresolvedCount}条未解决异常`}" ${canPass ? '' : 'disabled'}><i class="fa-solid fa-check-double"></i></button>
+      <button type="button" class="px-2 py-1 text-xs rounded action-btn ${canReject ? 'text-red-500 hover:bg-red-50' : 'text-gray-300 cursor-not-allowed'}" data-action="reject-batch" data-id="${id}" data-menu-label="驳回" title="${canReject ? '驳回该门店未解决异常' : '当前状态不可驳回'}" ${canReject ? '' : 'disabled'}><i class="fa-solid fa-reply"></i></button>
+      <button type="button" class="px-2 py-1 text-xs rounded action-btn ${canPass ? 'text-green-600 hover:bg-green-50' : 'text-gray-300 cursor-not-allowed'}" data-action="approve-batch" data-id="${id}" data-menu-label="通过" title="${canPass ? '整单通过并流入标准POS表' : `仍有${summary.unresolvedCount}条未解决异常`}" ${canPass ? '' : 'disabled'}><i class="fa-solid fa-check-double"></i></button>
     </div>`;
   },
 
@@ -1975,8 +2192,8 @@ const QAView = {
       </tr>`;
     });
     const headers = isProductView
-      ? ['时间','客户系统','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','客户产品号','客户产品名称','客户条形码','好丽友产品编码','好丽友条形码','好丽友产品名称','销售数量','销售金额','销售成本','零售单价','异常说明','当前责任人','最近操作人','状态','操作']
-      : ['时间','客户系统','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','未解决','异常说明','当前责任人','最近操作人','状态','操作'];
+      ? ['所属时间','客户系统','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','客户产品号','客户产品名称','客户条形码','好丽友产品编码','好丽友条形码','好丽友产品名称','销售数量','销售金额','销售成本','零售单价','异常说明','当前责任人','最近操作人','状态','操作']
+      : ['所属时间','客户系统','客户门店号','经销商','ACC','好丽友交易处编码','好丽友交易处名称','未解决','异常说明','当前责任人','最近操作人','状态','操作'];
     container.innerHTML = `<div class="flex-1 min-h-0 overflow-auto"><table class="table-fixed text-left text-sm text-[#4e5969]" style="width:${this.getQaBusinessTableWidth(headers)}px;min-width:100%;">${this.renderQaBusinessColGroup(headers)}<thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10"><tr><th class="px-4 py-3 w-12 rounded-tl-lg"><input type="checkbox" id="qa-exception-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>${headers.map((header, index) => `<th class="${this.getQaBusinessHeaderClass(header, index, headers.length)}">${header}</th>`).join('')}</tr></thead><tbody id="qa-tbody" class="divide-y divide-gray-100">${body.length ? body.join('') : `<tr><td colspan="${headers.length + 1}" class="px-4 py-16 text-center text-[#86909c]">暂无符合条件的${isProductView ? '产品' : '门店'}异常数据</td></tr>`}</tbody></table></div>${this.renderQaTableSummary(body.length)}`;
     this.bindTableEvents();
     this.bindExceptionEvents();
@@ -2915,28 +3132,6 @@ const QAView = {
         });
       });
     });
-    document.querySelectorAll('.qa-standard-delete-trigger').forEach((trigger) => {
-      trigger.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const index = Number(trigger.dataset.index);
-        const row = this.standardData[index];
-        if (!row || !this.isPosActor() || !this.hasQaPermission('标准POS表', '删除') || !['待通过', 'POS担当待处理'].includes(this.getStandardStatus(row))) {
-          Dialog.toast('当前账号无删除权限', 'warning');
-          return;
-        }
-        Dialog.show({
-          title: '确认删除标准POS数据',
-          content: `确认删除「${this.escapeHtml(row.storeName || row.storeCode || '当前单据')}」？删除后不可恢复。`,
-          confirmText: '确认删除',
-          cancelText: '取消',
-          onConfirm: () => {
-            this.standardData.splice(index, 1);
-            this.renderStandardTable();
-            Dialog.toast('标准POS数据已删除', 'success');
-          }
-        });
-      });
-    });
     document.querySelectorAll('.qa-standard-workflow-action').forEach((trigger) => {
       trigger.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -3278,6 +3473,7 @@ const QAView = {
         approveBtn.className = checked.length > 0
           ? 'px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:bg-blue-700 hover:shadow-brand/30 hover:-translate-y-0.5'
           : 'px-4 py-2 bg-[#86909c] text-white rounded-lg text-sm font-medium transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed';
+        approveBtn.innerHTML = `<i class="fa-solid fa-check mr-1"></i>${this.isPosActor() ? '通过' : '提交复核'}${checked.length ? `（${checked.length}）` : ''}`;
       }
     };
 
@@ -3352,6 +3548,7 @@ const QAView = {
         approveBtn.className = checked.length > 0
           ? 'px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:bg-blue-700 hover:shadow-brand/30 hover:-translate-y-0.5'
           : 'px-4 py-2 bg-[#86909c] text-white rounded-lg text-sm font-medium transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed';
+        approveBtn.innerHTML = `<i class="fa-solid fa-check mr-1"></i>${this.isPosActor() ? '通过' : '提交复核'}${checked.length ? `（${checked.length}）` : ''}`;
       }
     };
 
@@ -3438,6 +3635,56 @@ const QAView = {
     button.setAttribute('aria-label', isDetailMode ? '当前为产品视图，点击切换为门店视图' : '当前为门店视图，点击切换为产品视图');
     icon.className = `fa-solid ${isDetailMode ? 'fa-list-ul' : 'fa-table-cells-large'}`;
   },
+
+  getQaColumnStorageKey() {
+    const mode = this.activeQaTab === 'standard' ? this.standardDisplayMode : this.exceptionDisplayMode;
+    return `qa_visible_columns_${this.activeQaTab}_${mode}`;
+  },
+
+  getActiveQaTable() {
+    const containerId = this.activeQaTab === 'standard' ? 'qa-standard-container' : 'qa-exception-container';
+    return document.querySelector(`#${containerId} table`);
+  },
+
+  applyQaColumnVisibility() {
+    const table = this.getActiveQaTable();
+    if (!table) return;
+    const headers = Array.from(table.querySelectorAll(':scope > thead > tr:first-child > th'));
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(this.getQaColumnStorageKey()) || 'null'); } catch (error) { saved = null; }
+    const visible = new Set(Array.isArray(saved) ? saved.map(Number) : headers.map((_, index) => index));
+    headers.forEach((header, index) => {
+      const label = header.textContent.trim();
+      const required = index === 0 || label === '状态' || label.startsWith('操作');
+      const show = required || visible.has(index);
+      const targetHeader = table.querySelector(`thead [data-platform-column-index="${index}"]`) || header;
+      targetHeader.style.display = show ? '' : 'none';
+      table.querySelectorAll(':scope > tbody > tr').forEach(row => {
+        if (row.children.length === headers.length) (row.querySelector(`[data-platform-column-index="${index}"]`) || row.children[index]).style.display = show ? '' : 'none';
+      });
+    });
+  },
+
+  syncQaColumnPanel() {
+    const table = this.getActiveQaTable();
+    const panel = document.getElementById('qa-column-options');
+    if (!table || !panel) return;
+    const headers = Array.from(table.querySelectorAll(':scope > thead > tr:first-child > th'));
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(this.getQaColumnStorageKey()) || 'null'); } catch (error) { saved = null; }
+    const visible = new Set(Array.isArray(saved) ? saved.map(Number) : headers.map((_, index) => index));
+    panel.innerHTML = headers.map((header, index) => {
+      const label = header.textContent.trim() || '选择';
+      const required = index === 0 || label === '状态' || label.startsWith('操作');
+      return `<label class="${required ? 'hidden ' : ''}flex cursor-pointer items-center gap-2 rounded-lg px-1 py-2 hover:bg-gray-50"><input type="checkbox" class="qa-column-option rounded border-gray-300 text-brand" value="${index}" ${visible.has(index) ? 'checked' : ''}><span class="text-sm text-[#4e5969]">${this.escapeHtml(label)}</span></label>`;
+    }).join('');
+    panel.querySelectorAll('.qa-column-option').forEach(option => option.addEventListener('change', () => {
+      const selected = Array.from(panel.querySelectorAll('.qa-column-option:checked')).map(item => Number(item.value));
+      [0, ...headers.map((header, index) => (header.textContent.trim() === '状态' || header.textContent.trim().startsWith('操作')) ? index : -1)].filter(index => index >= 0).forEach(index => selected.push(index));
+      localStorage.setItem(this.getQaColumnStorageKey(), JSON.stringify([...new Set(selected)]));
+      this.applyQaColumnVisibility();
+    }));
+  },
   
   bindEvents() {
     const tabStandard = document.getElementById('tab-qa-standard');
@@ -3446,6 +3693,23 @@ const QAView = {
     const exceptionContainer = document.getElementById('qa-exception-container');
     const activeClass = 'px-4 py-2 text-sm font-medium text-brand bg-blue-50 rounded-lg transition-all border border-blue-200';
     const inactiveClass = 'px-4 py-2 text-sm text-[#86909c] hover:text-[#1d2129] hover:bg-gray-50 rounded-lg transition-all border border-transparent';
+
+    const columnButton = document.getElementById('qa-column-button');
+    const columnPanel = document.getElementById('qa-column-panel');
+    columnButton?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.syncQaColumnPanel();
+      columnPanel?.classList.toggle('hidden');
+    });
+    columnPanel?.addEventListener('click', event => event.stopPropagation());
+    document.getElementById('qa-column-reset')?.addEventListener('click', () => {
+      localStorage.removeItem(this.getQaColumnStorageKey());
+      this.syncQaColumnPanel();
+      this.applyQaColumnVisibility();
+    });
+    const columnObserver = new MutationObserver(() => this.applyQaColumnVisibility());
+    if (standardContainer) columnObserver.observe(standardContainer, { childList: true, subtree: true });
+    if (exceptionContainer) columnObserver.observe(exceptionContainer, { childList: true, subtree: true });
 
     const switchTab = (target) => {
       const showStandard = target === 'standard';
@@ -3473,8 +3737,10 @@ const QAView = {
       }
       this.searchField = 'all';
       this.syncQaSearchControlUI();
+      this.syncQaPeriodButtons();
       this.updateStandardDisplayToggle();
       this.updateExceptionDisplayToggle();
+      requestAnimationFrame(() => this.applyQaColumnVisibility());
     };
 
     tabStandard?.addEventListener('click', () => switchTab('standard'));
@@ -3504,6 +3770,63 @@ const QAView = {
     toggleDropdown('qa-exception-type-select-btn', 'qa-exception-type-dropdown');
     toggleDropdown('qa-search-field-btn', 'qa-search-field-dropdown');
     this.syncQaSearchControlUI();
+    this.syncQaPeriodButtons();
+
+    ['submit', 'period'].forEach((kind) => {
+      const button = document.getElementById(`qa-${kind}-range-button`);
+      const picker = document.getElementById(`qa-${kind}-month-picker`);
+      if (!button || !picker) return;
+      let viewYear = new Date().getFullYear();
+      let selectingEnd = false;
+      const renderPicker = () => { picker.innerHTML = this.renderQaPeriodPicker(kind, viewYear); };
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const willOpen = picker.classList.contains('hidden');
+        document.querySelectorAll('.qa-period-range .analytics-month-picker').forEach(el => { if (el !== picker) el.classList.add('hidden'); });
+        if (willOpen) {
+          const start = this.ensureQaPeriodFilters()[this.activeQaTab][`${kind}Start`];
+          viewYear = Number((start || `${new Date().getFullYear()}-01`).slice(0, 4));
+          selectingEnd = false;
+          renderPicker();
+        }
+        picker.classList.toggle('hidden', !willOpen);
+        button.setAttribute('aria-expanded', String(willOpen));
+      });
+      picker.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const nav = event.target.closest('[data-qa-period-nav]');
+        if (nav) {
+          viewYear += Number(nav.dataset.qaPeriodNav || 0);
+          renderPicker();
+          return;
+        }
+        const option = event.target.closest('[data-qa-period-month]');
+        if (!option) return;
+        const value = option.dataset.qaPeriodMonth;
+        const period = this.ensureQaPeriodFilters()[this.activeQaTab];
+        if (!selectingEnd) {
+          period[`${kind}Start`] = value;
+          period[`${kind}End`] = value;
+          selectingEnd = true;
+          this.syncQaPeriodButtons();
+          renderPicker();
+          return;
+        }
+        if (value < period[`${kind}Start`]) {
+          period[`${kind}Start`] = value;
+          period[`${kind}End`] = value;
+          this.syncQaPeriodButtons();
+          renderPicker();
+          return;
+        }
+        period[`${kind}End`] = value;
+        selectingEnd = false;
+        this.syncQaPeriodButtons();
+        this.saveQaPeriodFilters();
+        picker.classList.add('hidden');
+        button.setAttribute('aria-expanded', 'false');
+      });
+    });
 
     document.getElementById('qa-search-field-dropdown')?.addEventListener('click', (event) => {
       const option = event.target.closest('[data-qa-search-field]');
@@ -3690,6 +4013,12 @@ const QAView = {
       this.exceptionTypeFilter = '';
       document.getElementById('qa-exception-type-select-label').textContent = '全部';
       this.statusFilter = '';
+      const currentMonth = this.getQaCurrentMonth();
+      this.ensureQaPeriodFilters()[this.activeQaTab] = this.activeQaTab === 'standard'
+        ? { submitStart: currentMonth, submitEnd: '', periodStart: '', periodEnd: '' }
+        : { submitStart: '', submitEnd: '', periodStart: '', periodEnd: '' };
+      this.saveQaPeriodFilters();
+      this.syncQaPeriodButtons();
       document.getElementById('qa-status-select-label').textContent = '全部';
       const teamDropdown = document.getElementById('qa-team-dropdown');
       if (teamDropdown) teamDropdown.innerHTML = this.renderHierarchyDropdownContent();
@@ -3707,6 +4036,9 @@ const QAView = {
 
     document.addEventListener('click', () => {
       document.querySelectorAll('#qa-team-dropdown, #qa-status-dropdown, #qa-confidence-dropdown, #qa-standard-status-dropdown, #qa-exception-type-dropdown, #qa-search-field-dropdown').forEach((el) => el.classList.add('hidden'));
+      document.querySelectorAll('.qa-period-range .analytics-month-picker').forEach((el) => el.classList.add('hidden'));
+      document.querySelectorAll('.qa-period-range .analytics-month-range-button').forEach((el) => el.setAttribute('aria-expanded', 'false'));
+      document.getElementById('qa-column-panel')?.classList.add('hidden');
     });
   }
 };

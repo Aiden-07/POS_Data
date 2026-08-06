@@ -41,8 +41,8 @@ const SDKView = {
             </div>
             
             <div class="pt-6 mt-6 border-t border-gray-100 flex justify-end">
-              <button id="btn-sdk-export" class="px-6 py-3 bg-brand text-white rounded-xl hover:bg-[#0e42d2] font-semibold transition-all duration-300 shadow-lg shadow-brand/20 hover:shadow-brand/40 hover:-translate-y-0.5 flex items-center gap-2" data-i18n="excel_export">
-                <i class="fa-solid fa-download"></i> Excel 结果输出
+              <button id="btn-sdk-export" class="table-export-button" type="button">
+                <i class="fa-solid fa-download"></i><span>${Store.getState().lang === 'kr' ? '내보내기' : '导出'}</span>
               </button>
             </div>
           </div>

@@ -1,4 +1,5 @@
 const SettingsView = {
+  actionDelegationBound: false,
   users: [
     {
       id: 'u-000', name: '王敏', account: 'wangmin.sales', phone: '13800010000',
@@ -679,7 +680,7 @@ const SettingsView = {
           <div class="settings-table-head">
             <span class="settings-table-title">操作日志</span>
             <div class="settings-table-head-actions">
-              <button id="settings-log-export" class="settings-table-tool-button" type="button">
+              <button id="settings-log-export" class="settings-table-tool-button table-export-button" type="button">
                 <i class="fa-solid fa-download"></i>
                 <span>导出</span>
               </button>
@@ -762,6 +763,7 @@ const SettingsView = {
   },
 
   bindEvents() {
+    this.bindDelegatedActionEvents();
     const route = Store.getState().currentView;
     if (route === 'settings-roles') {
       this.bindRoleEvents();
@@ -774,36 +776,39 @@ const SettingsView = {
     }
   },
 
+  bindDelegatedActionEvents() {
+    if (this.actionDelegationBound) return;
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-user-action], [data-role-action], [data-field-action], [data-log-action]');
+      if (!button) return;
+      if (button.dataset.userAction) {
+        this.handleUserAction(button.dataset.userAction, button.dataset.userId);
+      } else if (button.dataset.roleAction) {
+        this.handleRoleAction(button.dataset.roleAction, button.dataset.roleId);
+      } else if (button.dataset.fieldAction) {
+        this.handleFieldAction(button.dataset.fieldAction, button.dataset.fieldId);
+      } else if (button.dataset.logAction) {
+        this.openLogDetail(button.dataset.logId);
+      }
+    }, true);
+    this.actionDelegationBound = true;
+  },
+
   bindUserEvents() {
     document.getElementById('settings-new-user')?.addEventListener('click', () => this.openUserDialog());
     document.getElementById('settings-user-search')?.addEventListener('input', () => this.filterUsers());
     document.getElementById('settings-user-status')?.addEventListener('change', () => this.filterUsers());
     document.getElementById('settings-user-role')?.addEventListener('change', () => this.filterUsers());
-    document.getElementById('settings-user-tbody')?.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-user-action]');
-      if (!button) return;
-      this.handleUserAction(button.dataset.userAction, button.dataset.userId);
-    });
   },
 
   bindRoleEvents() {
     document.getElementById('settings-new-role')?.addEventListener('click', () => this.openRoleDialog());
     document.getElementById('settings-role-search')?.addEventListener('input', () => this.filterRoles());
-    document.getElementById('settings-role-tbody')?.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-role-action]');
-      if (!button) return;
-      this.handleRoleAction(button.dataset.roleAction, button.dataset.roleId);
-    });
   },
 
   bindFieldEvents() {
     document.getElementById('settings-new-field')?.addEventListener('click', () => this.openFieldDialog());
     document.getElementById('settings-save-fields')?.addEventListener('click', () => Dialog.toast('字段配置已保存，质量检查与台账表头将按最新配置生效', 'success'));
-    document.getElementById('settings-field-tbody')?.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-field-action]');
-      if (!button) return;
-      this.handleFieldAction(button.dataset.fieldAction, button.dataset.fieldId);
-    });
     document.getElementById('settings-field-tbody')?.addEventListener('change', (event) => {
       const input = event.target.closest('[data-field-toggle]');
       if (!input) return;
@@ -821,11 +826,6 @@ const SettingsView = {
     document.getElementById('settings-log-keyword')?.addEventListener('input', () => this.filterLogs());
     document.getElementById('settings-log-reset')?.addEventListener('click', () => this.resetLogFilters());
     document.getElementById('settings-log-export')?.addEventListener('click', () => this.exportLogs());
-    document.getElementById('settings-log-tbody')?.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-log-action]');
-      if (!button) return;
-      this.openLogDetail(button.dataset.logId);
-    });
   },
 
   filterUsers() {
@@ -1174,17 +1174,17 @@ const SettingsView = {
         <div class="settings-permission-head">
           <span>模块</span>
           <span>二级目录</span>
-          <span>功能权限</span>
+          <label class="settings-permission-select-label settings-permission-select-all"><input type="checkbox" data-permission-select-scope="all"><span>功能权限</span><small>全选</small></label>
         </div>
         ${this.modules.map((module) => module.children.map((child, childIndex) => `
           <div class="settings-permission-row">
-            <strong>${childIndex === 0 ? module.group : ''}</strong>
-            <span class="settings-permission-child">${child.name}</span>
+            <strong>${childIndex === 0 ? `<label class="settings-permission-select-label"><input type="checkbox" data-permission-select-scope="module" data-permission-module="${module.group}"><span>${module.group}</span><small>全选</small></label>` : ''}</strong>
+            <span class="settings-permission-child"><label class="settings-permission-select-label"><input type="checkbox" data-permission-select-scope="child" data-permission-module="${module.group}" data-permission-child="${module.group}/${child.name}"><span>${child.name}</span><small>全选</small></label></span>
             <div>
               ${child.actions.map((action) => {
                 const value = `${module.group}/${child.name}:${action}`;
                 return `
-                  <label class="settings-permission-option" data-permission-action="${action}"><input type="checkbox" name="functions" value="${value}" data-permission-action="${action}" ${this.roleHasPermission(role, value) ? 'checked' : ''}>${action}</label>
+                  <label class="settings-permission-option" data-permission-action="${action}"><input type="checkbox" name="functions" value="${value}" data-permission-action="${action}" data-permission-module="${module.group}" data-permission-child="${module.group}/${child.name}" ${this.roleHasPermission(role, value) ? 'checked' : ''}>${action}</label>
                 `;
               }).join('')}
             </div>
@@ -1192,6 +1192,59 @@ const SettingsView = {
         `).join('')).join('')}
       </div>
     `;
+  },
+
+  getPermissionFunctionInputs() {
+    return [...document.querySelectorAll('#settings-role-form input[name="functions"]')];
+  },
+
+  getPermissionInputsForController(controller) {
+    const scope = controller?.dataset.permissionSelectScope;
+    const moduleName = controller?.dataset.permissionModule;
+    const childName = controller?.dataset.permissionChild;
+    return this.getPermissionFunctionInputs().filter((input) => {
+      if (scope === 'module') return input.dataset.permissionModule === moduleName;
+      if (scope === 'child') return input.dataset.permissionChild === childName;
+      return scope === 'all';
+    });
+  },
+
+  syncPermissionSelectAllState() {
+    document.querySelectorAll('#settings-role-form [data-permission-select-scope]').forEach((controller) => {
+      const inputs = this.getPermissionInputsForController(controller).filter((input) => !input.disabled);
+      const checkedCount = inputs.filter((input) => input.checked).length;
+      controller.checked = inputs.length > 0 && checkedCount === inputs.length;
+      controller.indeterminate = checkedCount > 0 && checkedCount < inputs.length;
+      controller.disabled = inputs.length === 0;
+    });
+  },
+
+  bindPermissionSelectAllEvents() {
+    const tree = document.querySelector('#settings-role-form .settings-permission-tree');
+    if (!tree) return;
+    tree.addEventListener('change', (event) => {
+      const controller = event.target.closest('[data-permission-select-scope]');
+      if (controller) {
+        this.getPermissionInputsForController(controller).forEach((input) => {
+          if (!input.disabled) input.checked = controller.checked;
+        });
+        this.syncPermissionSelectAllState();
+        return;
+      }
+
+      const permission = event.target.closest('input[name="functions"]');
+      if (!permission) return;
+      const siblings = this.getPermissionFunctionInputs().filter((input) => input.dataset.permissionChild === permission.dataset.permissionChild);
+      const viewPermission = siblings.find((input) => input.dataset.permissionAction === '查看');
+      if (permission.dataset.permissionAction !== '查看' && permission.checked && viewPermission && !viewPermission.disabled) {
+        viewPermission.checked = true;
+      }
+      if (permission.dataset.permissionAction === '查看' && !permission.checked) {
+        siblings.forEach((input) => { if (input !== permission && !input.disabled) input.checked = false; });
+      }
+      this.syncPermissionSelectAllState();
+    });
+    this.syncPermissionSelectAllState();
   },
 
   syncRejectPermissionByDataScope() {
@@ -1207,6 +1260,7 @@ const SettingsView = {
         label.setAttribute('aria-disabled', restricted ? 'true' : 'false');
       }
     });
+    this.syncPermissionSelectAllState();
   },
 
   openRoleDialog(role = null) {
@@ -1309,6 +1363,7 @@ const SettingsView = {
     });
     this.syncRoleOrgTree();
     this.syncRejectPermissionByDataScope();
+    this.bindPermissionSelectAllEvents();
     document.getElementById('settings-role-form')?.addEventListener('submit', (event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);

@@ -80,13 +80,22 @@ const IngestionView = {
     const status = this.getWorkflowStatus(row);
     let currentOwnerType = row.currentOwnerType;
     let currentOwnerName = row.currentOwnerName;
-    if (!currentOwnerType) currentOwnerType = status === '营业担当处理中' ? 'sales' : (status === '质检中' ? 'system' : 'pos');
-    if (!currentOwnerName) {
-      if (currentOwnerType === 'sales') currentOwnerName = row.currentOwnerTeam || row.handler || row.team || '-';
-      else if (currentOwnerType === 'system') currentOwnerName = '系统';
-      else currentOwnerName = status === '已同步' ? '-' : 'POS担当';
+    if (status === '已同步') {
+      currentOwnerType = 'pos';
+      currentOwnerName = 'POS担当';
     }
-    const lastOperatorName = row.lastOperatorName || row.salesSubmittedBy || row.rejectedBy || row.approvedBy || '系统';
+    if (!currentOwnerType) currentOwnerType = status === '营业担当处理中' ? 'sales' : (status === '质检中' ? 'system' : 'pos');
+    const hasOwner = value => Boolean(String(value || '').trim()) && String(value).trim() !== '-';
+    if (!hasOwner(currentOwnerName)) {
+      if (currentOwnerType === 'sales') {
+        currentOwnerName = [row.currentOwnerTeam, row.handler, row.team].find(hasOwner) || '营业担当';
+      }
+      else if (currentOwnerType === 'system') currentOwnerName = '系统';
+      else currentOwnerName = 'POS担当';
+    }
+    const lastOperatorName = status === '已同步'
+      ? 'POS担当'
+      : (row.lastOperatorName || row.salesSubmittedBy || row.rejectedBy || row.approvedBy || '系统');
     return { currentOwnerType, currentOwnerName, lastOperatorName };
   },
 
@@ -133,14 +142,14 @@ const IngestionView = {
     const isPos = this.isPosActor();
     const id = this.escapeHtml(row.id);
     if (this.getMatchedQualityStatus(row) === '已质检') return `
-      ${this.isManualQualityCheckEnabled() && this.hasIngestionPermission('单门店已匹配数据', '质检') ? `<button class="px-2 py-1 text-xs rounded text-gray-300 cursor-not-allowed" type="button" disabled title="该单据已完成质检，不可重复质检"><i class="fa-solid fa-check"></i></button>` : ''}
-      <button class="px-2 py-1 text-xs rounded text-gray-300 cursor-not-allowed" type="button" disabled title="该单据已完成质检，不可编辑"><i class="fa-solid fa-pen-to-square"></i></button>`;
+      ${this.isManualQualityCheckEnabled() && this.hasIngestionPermission('单门店已匹配数据', '质检') ? `<button class="px-2 py-1 text-xs rounded text-gray-300 cursor-not-allowed" type="button" data-menu-label="质检" disabled title="该单据已完成质检，不可重复质检"><i class="fa-solid fa-check"></i></button>` : ''}
+      <button class="px-2 py-1 text-xs rounded text-gray-300 cursor-not-allowed" type="button" data-menu-label="编辑" disabled title="该单据已完成质检，不可编辑"><i class="fa-solid fa-pen-to-square"></i></button>`;
     if (isPos && this.canEditMatchedRow(row)) return `
       ${this.isManualQualityCheckEnabled() && this.hasIngestionPermission('单门店已匹配数据', '质检') ? `<button class="px-2 py-1 text-xs rounded action-btn text-green-600 hover:bg-green-50" data-action="approve" data-id="${id}" title="进入质量检查"><i class="fa-solid fa-check"></i></button>` : ''}
-      <button class="px-2 py-1 text-xs rounded action-btn row-edit-btn text-amber-500 hover:bg-amber-50" data-action="edit" data-id="${id}" title="编辑"><i class="fa-solid fa-pen-to-square row-edit-icon"></i></button>`;
+      <button class="px-2 py-1 text-xs rounded action-btn row-edit-btn text-amber-500 hover:bg-amber-50" data-action="edit" data-id="${id}" data-menu-label="修改数据" title="修改数据"><i class="fa-solid fa-pen-to-square row-edit-icon"></i></button>`;
     if (!isPos && this.canEditMatchedRow(row)) return `
       <button class="px-2 py-1 text-xs rounded action-btn text-green-600 hover:bg-green-50" data-action="submit-sales-result" data-id="${id}" title="提交处理结果"><i class="fa-solid fa-check"></i></button>
-      <button class="px-2 py-1 text-xs rounded action-btn row-edit-btn text-amber-500 hover:bg-amber-50" data-action="edit" data-id="${id}" title="编辑"><i class="fa-solid fa-pen-to-square row-edit-icon"></i></button>`;
+      <button class="px-2 py-1 text-xs rounded action-btn row-edit-btn text-amber-500 hover:bg-amber-50" data-action="edit" data-id="${id}" data-menu-label="修改数据" title="修改数据"><i class="fa-solid fa-pen-to-square row-edit-icon"></i></button>`;
     return '<span class="px-2 text-xs text-[#86909c]">只读</span>';
   },
   
@@ -189,16 +198,44 @@ const IngestionView = {
     if (statusText === '待处理') {
       return 'bg-amber-50 text-amber-700 border-amber-100';
     }
-    if (statusText === '部分驳回') {
-      return 'bg-orange-50 text-orange-700 border-orange-100';
-    }
-    if (statusText === '整体驳回' || statusText === '驳回') {
+    if (statusText === '部分驳回' || statusText === '整体驳回' || statusText === '驳回') {
       return 'bg-red-50 text-red-600 border-red-100';
     }
     if (statusText === '作废') {
       return 'bg-slate-100 text-slate-500 border-slate-200';
     }
     return 'bg-slate-50 text-slate-600 border-slate-100';
+  },
+
+  getInboxAiDescription(inboxItem, attachment, childFile = null) {
+    const status = childFile?.status || this.getInboxFileStatus(inboxItem, attachment);
+    const failedZip = !childFile && /\.zip$/i.test(attachment?.name || '')
+      && (attachment?.zipExtractFailed || attachment?.status === '驳回' || /无法解压|解压失败|压缩包损坏|文件损坏|打不开/.test(attachment?.rejectReason || ''));
+    if (!childFile && /\.zip$/i.test(attachment?.name || '') && !failedZip) return '-';
+    const reason = childFile?.note || attachment?.rejectReason || attachment?.voidReason || '';
+    if (status === '校验中' || status === '检验中') return 'AI正在解析文件并执行字段、格式和重复数据检查';
+    if (status === '作废' || childFile?.isVoided || attachment?.isVoided) {
+      return `问题：${reason && reason !== '-' ? reason : '用户主动终止处理'}；处理：文件已作废并停止后续处理`;
+    }
+    if (status === '待处理' || status === '重复') {
+      return `问题：${reason && reason !== '-' ? reason : '检测到待人工确认的数据问题'}；处理：待选择覆盖、追加或忽略`;
+    }
+    if (status === '整体驳回' || status === '部分驳回' || status === '驳回') {
+      return `问题：${reason && reason !== '-' ? reason : '文件校验异常'}；处理：已驳回`;
+    }
+    if (/已覆盖|覆盖/.test(reason)) return `问题：重复门店数据；处理：${reason}`;
+    if (/已追加|追加|已增量|增量/.test(reason)) return `问题：重复门店数据；处理：${reason.replace(/已增量/g, '已追加').replace(/增量/g, '追加')}`;
+    if (/已忽略|忽略/.test(reason)) return `问题：重复门店数据；处理：${reason}`;
+    if (reason && reason !== '-' && !/已识别|已匹配|校验通过/.test(reason)) return `问题：${reason}；处理：已处理`;
+    return '-';
+  },
+
+  getInboxAiDescriptionClass(description = '') {
+    if (description === '-') return 'text-[#86909c]';
+    if (/驳回|异常|无法|缺失/.test(description)) return 'text-red-600';
+    if (/待选择|待人工|重复/.test(description) && !/已覆盖|已追加|已增量|已忽略/.test(description)) return 'text-amber-700';
+    if (/已覆盖|已追加|已增量|已忽略|校验通过|已处理/.test(description)) return 'text-emerald-700';
+    return 'text-[#4e5969]';
   },
 
   getInboxVoidState() {
@@ -218,22 +255,75 @@ const IngestionView = {
     }
   },
 
+  getInboxResolutionState() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('pos-inbox-resolution-state') || '{}');
+      return saved && typeof saved === 'object' ? saved : {};
+    } catch (error) {
+      return {};
+    }
+  },
+
+  saveInboxResolutionState(state) {
+    try {
+      localStorage.setItem('pos-inbox-resolution-state', JSON.stringify(state));
+    } catch (error) {
+      // 本地存储不可用时，处理结果仍保留在当前会话。
+    }
+  },
+
   getInboxFileKey(emailId, attachment = {}) {
     return `${emailId}::${attachment.name || ''}`;
   },
 
+  getInboxZipFileKey(emailId, attachment = {}, fileName = '') {
+    return `${this.getInboxFileKey(emailId, attachment)}::zip::${fileName}`;
+  },
+
   applyInboxVoidState(inboxItems) {
     const voidState = this.getInboxVoidState();
+    const resolutionState = this.getInboxResolutionState();
     inboxItems.forEach((item) => {
       (item.attachments || []).forEach((attachment) => {
         const record = voidState[this.getInboxFileKey(item.id, attachment)];
-        if (!record) return;
-        attachment.isVoided = true;
-        attachment.voidedAt = record.voidedAt;
-        attachment.voidedBy = record.voidedBy;
-        attachment.voidReason = record.reason;
-        attachment.previousStatus = attachment.previousStatus || record.previousStatus || attachment.status;
-        attachment.status = '作废';
+        const attachmentResolution = resolutionState[this.getInboxFileKey(item.id, attachment)];
+        if (attachmentResolution && !record) {
+          attachment.status = attachmentResolution.status || '正常';
+          attachment.rejectReason = attachmentResolution.reason || '-';
+          attachment.duplicateResolution = attachmentResolution.action;
+          attachment.resolvedAt = attachmentResolution.resolvedAt;
+        }
+        if (record) {
+          attachment.isVoided = true;
+          attachment.voidedAt = record.voidedAt;
+          attachment.voidedBy = record.voidedBy;
+          attachment.voidReason = record.reason;
+          attachment.previousStatus = attachment.previousStatus || record.previousStatus || attachment.status;
+          attachment.status = '作废';
+        }
+        (attachment.splitStores || []).forEach((store, index) => {
+          const fileName = store.sourceFileName || store.fileName || `${store.storeName || `解压文件${index + 1}`}-销售明细.xlsx`;
+          const resolutionRecord = resolutionState[this.getInboxZipFileKey(item.id, attachment, fileName)];
+          if (resolutionRecord && store.status !== '作废') {
+            store.status = resolutionRecord.status;
+            store.reason = resolutionRecord.reason;
+            store.resolvedAt = resolutionRecord.resolvedAt;
+            store.resolvedBy = resolutionRecord.resolvedBy;
+          }
+          const childRecord = voidState[this.getInboxZipFileKey(item.id, attachment, fileName)];
+          if (!childRecord) return;
+          store.previousStatus = store.previousStatus || childRecord.previousStatus || store.status;
+          store.status = '作废';
+          store.isVoided = true;
+          store.voidedAt = childRecord.voidedAt;
+          store.voidedBy = childRecord.voidedBy;
+          store.reason = childRecord.reason || '用户主动作废';
+        });
+        if (attachment.splitStores?.length && attachment.splitStores.every(store => store.status === '作废')) {
+          attachment.status = '作废';
+        } else if (attachment.splitStores?.length && !attachment.splitStores.some(store => store.status === '重复' || store.status === '待处理')) {
+          attachment.status = '正常';
+        }
       });
     });
     return inboxItems;
@@ -245,28 +335,49 @@ const IngestionView = {
     if (status === '校验中' || status === '检验中') return '校验中';
     if (status === '待处理') return '待处理';
     const isZip = /\.zip$/i.test(attachment?.name || '');
-    if (!isZip) return status === '驳回' ? '整体驳回' : '正常';
+    if (!isZip) return status === '驳回' ? '驳回' : '正常';
+    if (status === '驳回' || attachment?.zipExtractFailed) return '驳回';
 
     const childStatuses = this.getZipAttachmentFiles(inboxItem, attachment).map((file) => file.status);
+    if (childStatuses.length && childStatuses.every((value) => value === '作废')) return '作废';
     if (childStatuses.some((value) => value === '校验中' || value === '检验中')) return '校验中';
     if (childStatuses.some((value) => value === '待处理' || value === '重复')) return '待处理';
-    if (status === '驳回') return '整体驳回';
     const rejectedCount = childStatuses.filter((value) => value === '驳回' || value === '整体驳回').length;
-    if (rejectedCount && rejectedCount === childStatuses.length) return '整体驳回';
-    if (rejectedCount) return '部分驳回';
+    if (rejectedCount) return '驳回';
     return '正常';
   },
 
   getInboxFileRows() {
     return this.getInboxData().flatMap((inboxItem) =>
-      (inboxItem.attachments || []).map((attachment, attachmentIndex) => ({
-        inboxItem,
-        attachment,
-        attachmentIndex,
-        statusText: this.getInboxFileStatus(inboxItem, attachment),
-        isZip: /\.zip$/i.test(attachment.name || '')
-      }))
+      (inboxItem.attachments || []).flatMap((attachment, attachmentIndex) => {
+        const isZip = /\.zip$/i.test(attachment.name || '');
+        if (!isZip) return [{ inboxItem, attachment, attachmentIndex, statusText: this.getInboxFileStatus(inboxItem, attachment), isZip: false }];
+        const failedToExtract = attachment.zipExtractFailed
+          || attachment.status === '驳回'
+          || /无法解压|解压失败|压缩包损坏|文件损坏|打不开/.test(attachment.rejectReason || '');
+        if (failedToExtract) {
+          return [{ inboxItem, attachment, attachmentIndex, statusText: this.getInboxFileStatus(inboxItem, attachment), isZip: true, isFailedZip: true }];
+        }
+        return this.getZipAttachmentFiles(inboxItem, attachment).map((childFile, zipIndex) => ({
+          inboxItem,
+          attachment,
+          attachmentIndex,
+          statusText: childFile.status === '重复'
+            ? '待处理'
+            : ['整体驳回', '部分驳回', '驳回'].includes(childFile.status) ? '驳回' : childFile.status,
+          isZip: false,
+          isExtractedZipChild: true,
+          childFile,
+          zipIndex,
+          displayName: childFile.name
+        }));
+      })
     );
+  },
+
+  getInboxBatchNumber(inboxItem = {}) {
+    const digits = String(inboxItem.provideTime || '').replace(/\D/g, '').slice(0, 14);
+    return digits.length === 14 ? digits : '-';
   },
 
   getRoutedInboxAttachments(targetStatus) {
@@ -533,9 +644,198 @@ const IngestionView = {
     approvalStatus: 'all',
     stashStatus: 'all'
   },
+
+  activeIngestionTab: 'original',
+  periodFilters: null,
+  matchedGroupingFields: null,
+  expandedMatchedGroups: new Set(),
+  collapsedMatchedGroups: new Set(),
+
+  getMatchedGroupingOptions() {
+    return [
+      { value: 'none', label: '不分组' },
+      { value: 'team', label: '本部Team' },
+      { value: 'region', label: '区域' },
+      { value: 'salesOffice', label: '营业所' },
+      { value: 'acc', label: 'ACC' }
+    ];
+  },
+
+  getMatchedColumnOptions() {
+    return [
+      { index: 1, label: '所属时间' },
+      { index: 2, label: '原始文件名', defaultVisible: false },
+      { index: 3, label: '当前文件名', defaultVisible: false },
+      { index: 4, label: '客户系统', defaultVisible: false }, { index: 5, label: '客户门店号', defaultVisible: false },
+      { index: 6, label: '客户交易处编码', defaultVisible: false }, { index: 7, label: '客户交易处名称', defaultVisible: false },
+      { index: 8, label: '好丽友交易处编码' }, { index: 9, label: '好丽友交易处名称' },
+      { index: 10, label: '异常说明' }, { index: 11, label: '本部TEAM' },
+      { index: 12, label: '区域' }, { index: 13, label: '营业所' }, { index: 14, label: 'ACC' },
+      { index: 15, label: '当前责任人' }, { index: 16, label: '最近操作人' },
+      { index: 17, label: '状态' }
+    ];
+  },
+
+  loadMatchedVisibleColumns() {
+    const options = this.getMatchedColumnOptions();
+    const allowed = options.map(item => item.index);
+    const defaults = options.filter(item => item.defaultVisible !== false).map(item => item.index);
+    try {
+      const saved = JSON.parse(localStorage.getItem('ingestion_matched_visible_columns_v3') || 'null');
+      return Array.isArray(saved) ? saved.map(Number).filter(index => allowed.includes(index)) : defaults;
+    } catch (error) {
+      return defaults;
+    }
+  },
+
+  applyMatchedColumnVisibility() {
+    const table = document.getElementById('ingestion-table');
+    const header = document.getElementById('ingestion-table-head-row');
+    if (!table || !header || this.activeIngestionTab !== 'files') return;
+    const visible = new Set(this.loadMatchedVisibleColumns());
+    this.getMatchedColumnOptions().forEach(({ index }) => {
+      (header.querySelector(`[data-platform-column-index="${index}"]`) || header.children[index])?.classList.toggle('hidden', !visible.has(index));
+      table.querySelectorAll('tbody > tr:not(.matched-dynamic-group-row)').forEach(row => {
+        if (row.children.length === header.children.length) (row.querySelector(`[data-platform-column-index="${index}"]`) || row.children[index])?.classList.toggle('hidden', !visible.has(index));
+      });
+    });
+  },
+
+  loadMatchedGroupingFields() {
+    if (this.matchedGroupingFields) return this.matchedGroupingFields;
+    try {
+      const saved = JSON.parse(localStorage.getItem('ingestion_matched_grouping') || '[]');
+      const allowed = new Set(this.getMatchedGroupingOptions().map(item => item.value));
+      const selected = Array.isArray(saved) ? saved.find(value => allowed.has(value) && value !== 'none') : null;
+      this.matchedGroupingFields = selected ? [selected] : [];
+    } catch (error) {
+      this.matchedGroupingFields = [];
+    }
+    return this.matchedGroupingFields;
+  },
+
+  saveMatchedGroupingFields() {
+    localStorage.setItem('ingestion_matched_grouping', JSON.stringify(this.loadMatchedGroupingFields()));
+  },
+
+  getMatchedGroupValue(row = {}, field, index = 0) {
+    if (field === 'team') return String(row.salesTeam || row.team || '未分类').split(/\s*\/\s*/)[0] || '未分类';
+    if (field === 'salesOffice') return row.salesOffice || row.customerSalesOffice || '未分类';
+    if (field === 'region') return row.region || '未分类';
+    if (field === 'acc') return this.getAccName(row.acc, index) || '未分类';
+    return '未分类';
+  },
+
+  getCurrentYearMonth() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  },
+
+  getDefaultPeriodFilters() {
+    const currentMonth = this.getCurrentYearMonth();
+    return {
+      original: { submitStart: currentMonth, submitEnd: currentMonth, monthStart: '', monthEnd: '' },
+      files: { submitStart: currentMonth, submitEnd: currentMonth, monthStart: '', monthEnd: '' },
+      stash: { submitStart: '', submitEnd: '', monthStart: '', monthEnd: '' }
+    };
+  },
+
+  ensurePeriodFilters() {
+    if (!this.periodFilters) this.periodFilters = this.getDefaultPeriodFilters();
+    return this.periodFilters;
+  },
+
+  normalizeYearMonth(value) {
+    const match = String(value || '').match(/(20\d{2})[-年/.](\d{1,2})/);
+    return match ? `${match[1]}-${String(match[2]).padStart(2, '0')}` : '';
+  },
+
+  matchesMonthRange(value, start, end) {
+    if (!start && !end) return true;
+    const month = this.normalizeYearMonth(value);
+    if (!month) return false;
+    return (!start || month >= start) && (!end || month <= end);
+  },
+
+  getRowSubmitTime(row = {}) {
+    return row.provideTime || row.uploadTime || row.uploadedAt || row.submitTime || row.createdAt || '';
+  },
+
+  getRowDataMonth(row = {}) {
+    return row.month || row.dataMonth || row.period || '';
+  },
+
+  matchesPeriodFilters(row, tab = this.activeIngestionTab) {
+    const period = this.ensurePeriodFilters()[tab] || {};
+    return this.matchesMonthRange(this.getRowSubmitTime(row), period.submitStart, period.submitEnd)
+      && this.matchesMonthRange(this.getRowDataMonth(row), period.monthStart, period.monthEnd);
+  },
+
+  syncPeriodFilterUI() {
+    this.ensurePeriodFilters();
+    this.updatePeriodRangeButton('submit');
+    this.updatePeriodRangeButton('month');
+  },
+
+  readPeriodFilterUI() {
+    const period = this.ensurePeriodFilters()[this.activeIngestionTab];
+    if ((period.submitStart && period.submitEnd && period.submitStart > period.submitEnd)
+      || (period.monthStart && period.monthEnd && period.monthStart > period.monthEnd)) {
+      Dialog.toast('开始月份不能晚于结束月份', 'warning');
+      return false;
+    }
+    return true;
+  },
+
+  formatPeriodMonth(value, placeholder = '未选择') {
+    if (!value) return placeholder;
+    const [year, month] = value.split('-').map(Number);
+    return `${year}年${month}月`;
+  },
+
+  renderIngestionMonthPanel(kind, year) {
+    const period = this.ensurePeriodFilters()[this.activeIngestionTab];
+    const start = period[`${kind}Start`] || '';
+    const end = period[`${kind}End`] || '';
+    const names = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
+    return `
+      <section class="analytics-month-panel" aria-label="${year}年">
+        <div class="analytics-month-grid">
+          ${names.map((name, index) => {
+            const value = `${year}-${String(index + 1).padStart(2, '0')}`;
+            const selected = value === start || value === end;
+            const inRange = start && end && value > start && value < end;
+            return `<button type="button" class="analytics-month-option ${selected ? 'selected' : ''} ${inRange ? 'in-range' : ''}" data-ingestion-period-month="${value}">${name}</button>`;
+          }).join('')}
+        </div>
+      </section>`;
+  },
+
+  renderIngestionMonthPicker(kind, viewYear) {
+    return `
+      <div class="analytics-month-picker-header">
+        <button type="button" class="analytics-month-nav" data-ingestion-period-nav="-1" aria-label="上一年"><i class="fa-solid fa-angles-left"></i></button>
+        <span>${viewYear}年</span>
+        <span>${viewYear + 1}年</span>
+        <button type="button" class="analytics-month-nav" data-ingestion-period-nav="1" aria-label="下一年"><i class="fa-solid fa-angles-right"></i></button>
+      </div>
+      <div class="analytics-month-picker-panels">
+        ${this.renderIngestionMonthPanel(kind, viewYear)}
+        ${this.renderIngestionMonthPanel(kind, viewYear + 1)}
+      </div>`;
+  },
+
+  updatePeriodRangeButton(kind) {
+    const period = this.ensurePeriodFilters()[this.activeIngestionTab];
+    const button = document.getElementById(`ingestion-${kind}-range-button`);
+    if (!button) return;
+    const labels = button.querySelectorAll('[data-period-label]');
+    if (labels[0]) labels[0].textContent = this.formatPeriodMonth(period[`${kind}Start`], '开始月份');
+    if (labels[1]) labels[1].textContent = this.formatPeriodMonth(period[`${kind}End`], '结束月份');
+  },
   
   // 收件箱状态筛选
-  inboxStatusFilter: [],
+  inboxStatusFilter: ['校验中', '正常', '待处理', '驳回'],
   uploadCheckState: {
     active: false,
     count: 0
@@ -558,7 +858,7 @@ const IngestionView = {
   
   async loadData() {
     try {
-      const res = await fetch('data/files_mock.json?v=20260710-exception-table-route');
+      const res = await fetch('data/files_mock.json?v=20260803-current-month-data');
       this.data = await res.json();
       const workflowState = this.loadWorkflowState();
       this.migrateOriginalStatusToPending();
@@ -574,6 +874,7 @@ const IngestionView = {
       }));
       this.resumeQualityChecks();
       this.loadFiltersFromCache();
+      this.syncPeriodFilterUI();
       this.applyFilters();
       this.renderInbox();
     } catch (e) {
@@ -594,11 +895,13 @@ const IngestionView = {
   saveFiltersToCache() {
     localStorage.setItem('ingestion_filters', JSON.stringify(this.filters));
     localStorage.setItem('ingestion_pagination', JSON.stringify({ page: this.pagination.page }));
+    localStorage.setItem('ingestion_period_filters', JSON.stringify(this.ensurePeriodFilters()));
   },
   
   loadFiltersFromCache() {
     const savedFilters = localStorage.getItem('ingestion_filters');
     const savedPagination = localStorage.getItem('ingestion_pagination');
+    const savedPeriodFilters = localStorage.getItem('ingestion_period_filters');
     
     if (savedFilters) {
       const parsed = JSON.parse(savedFilters);
@@ -624,6 +927,21 @@ const IngestionView = {
     if (savedPagination) {
       const parsed = JSON.parse(savedPagination);
       this.pagination.page = parsed.page || 1;
+    }
+    if (savedPeriodFilters) {
+      try {
+        const parsed = JSON.parse(savedPeriodFilters);
+        const defaults = this.getDefaultPeriodFilters();
+        this.periodFilters = {
+          original: { ...defaults.original, ...(parsed.original || {}) },
+          files: { ...defaults.files, ...(parsed.files || {}) },
+          stash: { ...defaults.stash, ...(parsed.stash || {}) }
+        };
+      } catch (error) {
+        this.periodFilters = this.getDefaultPeriodFilters();
+      }
+    } else {
+      this.periodFilters = this.getDefaultPeriodFilters();
     }
   },
 
@@ -732,7 +1050,7 @@ const IngestionView = {
           status: '已同步',
           route
         });
-        Object.assign(row, { workflowStatus: '已同步', currentOwnerType: 'none', currentOwnerName: '-', lastOperatorName: '系统', lastOperatorRole: '系统', lastAction: '完成质量校验', lastOperatedAt: this.formatNowDateTime() });
+        Object.assign(row, { workflowStatus: '已同步', currentOwnerType: 'pos', currentOwnerName: 'POS担当', lastOperatorName: 'POS担当', lastOperatorRole: 'POS担当', lastAction: '完成质量校验', lastOperatedAt: this.formatNowDateTime() });
         completedRows.push({ id, row, route });
         this.approvedOriginalIds.add(id);
       });
@@ -805,6 +1123,10 @@ const IngestionView = {
   // 筛选逻辑
   applyFilters() {
     let result = [...this.data];
+
+    if (this.activeDataMode === 'files') {
+      result = result.filter(row => this.matchesPeriodFilters(row, 'files'));
+    }
 
     if (this.activeDataMode === 'archive') {
       const archivedAttachmentRows = this.getRoutedInboxAttachments('已归档').map(({ attachment, attachmentIndex, inboxItem, sourceRow }) => ({
@@ -879,6 +1201,20 @@ const IngestionView = {
       approvalStatus: 'all',
       stashStatus: 'all'
     };
+    this.inboxStatusFilter = ['校验中', '正常', '待处理', '驳回'];
+    document.querySelectorAll('.inbox-status-checkbox').forEach(checkbox => {
+      checkbox.checked = this.inboxStatusFilter.includes(checkbox.value);
+    });
+    const inboxSelectAll = document.getElementById('inbox-status-select-all');
+    if (inboxSelectAll) {
+      inboxSelectAll.checked = true;
+      inboxSelectAll.indeterminate = false;
+    }
+    const inboxStatusLabel = document.getElementById('inbox-status-label');
+    if (inboxStatusLabel) inboxStatusLabel.textContent = this.getCurrentLang() === 'cn' ? '全部状态' : '전체 상태';
+    const defaults = this.getDefaultPeriodFilters();
+    this.ensurePeriodFilters()[this.activeIngestionTab] = { ...defaults[this.activeIngestionTab] };
+    this.syncPeriodFilterUI();
     this.pagination.page = 1;
     this.saveFiltersToCache();
     if (!document.getElementById('original-attachment')?.classList.contains('hidden')) {
@@ -1008,15 +1344,43 @@ const IngestionView = {
               <div id="inbox-status-dropdown" class="hidden absolute top-full left-0 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-2">
                 <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
                   <input type="checkbox" id="inbox-status-select-all" class="rounded border-gray-300 text-brand">
-                  <span class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? '全选' : '전체 선택'}</span>
+                  <span class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? '全部状态' : '전체 상태'}</span>
                 </label>
                 <div class="border-t border-gray-100 my-1"></div>
-                ${[['校验中', '검사 중'], ['正常', '정상'], ['待处理', '처리 대기'], ['部分驳回', '부분 반려'], ['整体驳回', '전체 반려'], ['作废', '무효']].map(([val, label]) => `
+                ${[['校验中', '검사 중'], ['正常', '정상'], ['待处理', '처리 대기'], ['驳回', '반려'], ['作废', '무효']].map(([val, label]) => `
                   <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
                     <input type="checkbox" value="${val}" class="inbox-status-checkbox rounded border-gray-300 text-brand" ${this.inboxStatusFilter.includes(val) ? 'checked' : ''}>
                     <span class="text-sm text-[#4e5969]">${this.getCurrentLang() === 'cn' ? val : label}</span>
                   </label>
                 `).join('')}
+              </div>
+            </div>
+
+            <!-- 月度时间（月度范围） -->
+            <div class="ledger-month-range-filter ingestion-period-range" data-period-kind="month">
+              <span class="ledger-main-filter-caption">所属时间</span>
+              <div class="analytics-month-picker-wrap">
+                <button id="ingestion-month-range-button" class="analytics-month-range-button ledger-month-range-button" type="button" aria-expanded="false">
+                  <i class="fa-regular fa-calendar"></i>
+                  <span data-period-label>${this.formatPeriodMonth(this.ensurePeriodFilters().original.monthStart, '开始月份')}</span>
+                  <span class="analytics-range-to">至</span>
+                  <span data-period-label>${this.formatPeriodMonth(this.ensurePeriodFilters().original.monthEnd, '结束月份')}</span>
+                </button>
+                <div id="ingestion-month-month-picker" class="analytics-month-picker hidden"></div>
+              </div>
+            </div>
+
+            <!-- 提交时间（月度范围） -->
+            <div class="ledger-month-range-filter ingestion-period-range" data-period-kind="submit">
+              <span class="ledger-main-filter-caption">提交时间</span>
+              <div class="analytics-month-picker-wrap">
+                <button id="ingestion-submit-range-button" class="analytics-month-range-button ledger-month-range-button" type="button" aria-expanded="false">
+                  <i class="fa-regular fa-calendar"></i>
+                  <span data-period-label>${this.formatPeriodMonth(this.ensurePeriodFilters().original.submitStart, '开始月份')}</span>
+                  <span class="analytics-range-to">至</span>
+                  <span data-period-label>${this.formatPeriodMonth(this.ensurePeriodFilters().original.submitEnd, '结束月份')}</span>
+                </button>
+                <div id="ingestion-submit-month-picker" class="analytics-month-picker hidden"></div>
               </div>
             </div>
             
@@ -1096,19 +1460,10 @@ const IngestionView = {
                 class="hidden px-3 py-2 rounded-lg border border-blue-100 bg-blue-50 text-brand text-sm font-medium hover:bg-blue-100 transition-all">
                 <i class="fa-solid fa-spinner fa-spin mr-1"></i><span id="stash-checking-count">0</span> 条校验中
               </button>
-              <button type="button" id="btn-upload-file"
-                class="${this.hasIngestionPermission('文件箱', '上传') ? '' : 'hidden '}px-4 py-2 bg-brand hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:shadow-brand/30 hover:-translate-y-0.5">
-                <i class="fa-solid fa-upload mr-1"></i>${this.getCurrentLang() === 'cn' ? '上传文件' : '파일 업로드'}
-              </button>
               <button type="button" id="btn-batch-archive" disabled
                 class="hidden px-4 py-2 border border-gray-200 text-[#86909c] rounded-lg bg-gray-50 text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 data-action="archive" title="${this.getCurrentLang() === 'cn' ? '请先勾选至少一条数据' : '최소 1개 데이터를 선택하세요'}">
                 <i class="fa-solid fa-folder-minus mr-1"></i>${this.getCurrentLang() === 'cn' ? '归档(非POS表)' : '보관'}
-              </button>
-              <button type="button" id="btn-batch-approve" disabled
-                class="hidden px-4 py-2 bg-[#86909c] text-white rounded-lg text-sm font-medium transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                data-action="approve" title="${this.getCurrentLang() === 'cn' ? '请先勾选至少一条数据' : '최소 1개 데이터를 선택하세요'}">
-                <i class="fa-solid fa-check mr-1"></i>${this.getCurrentLang() === 'cn' ? '质检' : '검사'}
               </button>
               <button type="button" id="btn-batch-reject" disabled
                 class="hidden px-4 py-2 border border-gray-200 bg-gray-100 text-[#86909c] rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1118,16 +1473,59 @@ const IngestionView = {
             </div>
           </div>
         </div>
+
+        <div id="inbox-table-separator" class="platform-section-gap"></div>
+        <div id="inbox-table-toolbar" class="flex shrink-0 items-center justify-end border-b border-gray-100 bg-white px-6 py-3">
+          <div class="ml-auto flex items-center gap-2">
+            <div class="relative">
+              <button type="button" id="inbox-column-button" class="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-[#4e5969] hover:bg-blue-50 hover:text-brand"><i class="fa-solid fa-table-columns"></i><span>字段配置</span></button>
+              <div id="inbox-column-panel" class="hidden absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-xl">
+                <div class="mb-2 flex items-center justify-between"><strong class="text-sm text-[#1d2129]">字段配置</strong><button type="button" id="inbox-column-reset" class="text-xs text-brand hover:underline">恢复默认</button></div>
+                <div id="inbox-column-options" class="grid max-h-72 grid-cols-1 gap-0.5 overflow-auto"></div>
+              </div>
+            </div>
+            <button type="button" id="btn-upload-file" class="${this.hasIngestionPermission('文件箱', '上传') ? '' : 'hidden '}px-4 py-2 bg-brand hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-sm shadow-brand/20 hover:shadow-brand/30 hover:-translate-y-0.5"><i class="fa-solid fa-upload mr-1"></i>${this.getCurrentLang() === 'cn' ? '上传文件' : '파일 업로드'}</button>
+          </div>
+        </div>
+
+        <div id="matched-table-separator" class="platform-section-gap hidden"></div>
+        <div id="matched-table-toolbar" class="hidden shrink-0 items-center justify-end border-b border-gray-100 bg-white px-6 py-3">
+          <div class="ml-auto flex items-center gap-2">
+            <div id="matched-column-wrapper" class="relative">
+              <button type="button" id="btn-matched-columns" class="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-[#4e5969] hover:bg-blue-50 hover:text-brand">
+                <i class="fa-solid fa-table-columns"></i><span>字段配置</span>
+              </button>
+              <div id="matched-column-panel" class="hidden absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-xl">
+                <div class="mb-2 flex items-center justify-between"><strong class="text-sm text-[#1d2129]">字段配置</strong><button type="button" id="matched-column-reset" class="text-xs text-brand hover:underline">恢复默认</button></div>
+                <div class="grid max-h-72 grid-cols-1 gap-0.5 overflow-auto">
+                  ${this.getMatchedColumnOptions().map(option => `<label class="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-2 hover:bg-gray-50"><input type="checkbox" class="matched-column-option rounded border-gray-300 text-brand focus:ring-brand" value="${option.index}"><span class="text-sm text-[#4e5969]">${option.label}</span></label>`).join('')}
+                </div>
+              </div>
+            </div>
+            <div id="matched-grouping-wrapper" class="relative">
+              <button type="button" id="btn-matched-grouping" class="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-[#4e5969] hover:bg-blue-50 hover:text-brand">
+                <i class="fa-solid fa-layer-group"></i><span>分组</span><span id="matched-grouping-count" class="text-xs text-[#86909c]"></span>
+              </button>
+              <div id="matched-grouping-panel" class="hidden absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-blue-100 bg-white p-3 shadow-xl">
+                <strong class="mb-2 block text-sm font-semibold text-[#1d2129]">选择分组方式</strong>
+                <div class="space-y-0.5">${this.getMatchedGroupingOptions().map(option => `<label class="flex cursor-pointer items-center gap-2 rounded-lg px-0 py-2 hover:bg-blue-50"><input type="radio" name="matched-grouping" class="matched-grouping-option h-4 w-4 border-gray-300 text-brand focus:ring-brand" value="${option.value}"><span class="text-sm font-medium text-[#4e5969]">${option.label}</span></label>`).join('')}</div>
+              </div>
+            </div>
+            <button type="button" id="btn-batch-approve" disabled class="rounded-lg bg-[#86909c] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50" data-action="approve" title="请先勾选至少一条数据">
+              <i class="fa-solid fa-check mr-1"></i>质检<span id="matched-quality-selected-count"></span>
+            </button>
+          </div>
+        </div>
         
         <!-- 收件箱视图 -->
-        <div class="overflow-auto flex-1 relative px-2" id="original-attachment">
+        <div class="min-h-0 flex-1 relative pl-2 pr-0 overflow-hidden flex flex-col" id="original-attachment">
           <div id="inbox-loading" class="flex items-center justify-center py-16">
             <div class="flex flex-col items-center gap-3">
               <div class="w-10 h-10 border-4 border-blue-200 border-t-brand rounded-full animate-spin"></div>
               <span class="text-sm text-[#86909c]">${this.getCurrentLang() === 'cn' ? '加载中...' : '로딩 중...'}</span>
             </div>
           </div>
-          <div id="inbox-table-container" class="hidden"></div>
+          <div id="inbox-table-container" class="hidden min-h-0 flex-1 overflow-auto"></div>
           <div id="inbox-empty" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-white z-10">
             <div class="w-24 h-24 mb-4 text-[#d1d5db]">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -1140,7 +1538,7 @@ const IngestionView = {
         </div>
         
         <!-- 表格区 -->
-        <div class="overflow-auto flex-1 relative px-2 hidden" id="table-container">
+        <div class="overflow-auto flex-1 relative pl-2 pr-0 hidden" id="table-container">
           <div id="loading-state" class="hidden absolute inset-0 bg-white/80 flex items-center justify-center z-20">
             <div class="flex flex-col items-center gap-3">
               <div class="w-10 h-10 border-4 border-blue-200 border-t-brand rounded-full animate-spin"></div>
@@ -1172,7 +1570,7 @@ const IngestionView = {
           </div>
         </div>
 
-        <div class="overflow-auto flex-1 relative px-2 hidden" id="ingestion-stash-container"></div>
+        <div class="hidden min-h-0 flex-1 flex-col overflow-hidden relative px-2" id="ingestion-stash-container"></div>
         
         <!-- 分页 -->
         <div id="pagination-area" class="px-7 py-4 border-t border-gray-100 bg-white shrink-0 flex items-center justify-between">
@@ -1316,6 +1714,11 @@ const IngestionView = {
           status = '校验中';
           rejectReason = '系统正在解析并校验该附件';
         }
+        const isFailedMultiStoreZip = idx === 1 && i === 0;
+        if (isFailedMultiStoreZip) {
+          status = '驳回';
+          rejectReason = '压缩包损坏，无法解压';
+        }
         
         const isMultiStoreAttachment = ((idx === 1 || idx === 4) && i === 0) || isHandanMultiStoreCopy || (idx === 3 && i === 1);
         if (isHandanMultiStoreCopy) {
@@ -1326,9 +1729,12 @@ const IngestionView = {
           rejectReason = '无门店名称/门店编码';
         }
         attachments.push({
-          name: (isZip && i === 0) || isHandanMultiStoreCopy
+          name: isFailedMultiStoreZip
+            ? '多客隆会盟大街-销售明细.zip'
+            : (isZip && i === 0) || isHandanMultiStoreCopy
             ? `${storeNameCN}${isHandanMultiStoreCopy && i === 1 ? '-2' : ''}-销售明细包.zip`
             : `${storeNameCN}${i > 0 ? '-' + (i + 1) : ''}-销售明细.xlsx`,
+          zipExtractFailed: isFailedMultiStoreZip,
           sourceGroupId: isHandanMultiStoreCopy ? `handan-multistore-${i}` : undefined,
           isMultiStore: isMultiStoreAttachment,
           splitStores: idx === 1 && i === 0
@@ -1447,10 +1853,9 @@ const IngestionView = {
     this.renderUploadCheckStatus();
     
     let filteredInboxData = this.getInboxFileRows();
+    filteredInboxData = filteredInboxData.filter(item => this.matchesPeriodFilters(item.inboxItem, 'original'));
 
-    if (this.inboxStatusFilter.length > 0) {
-      filteredInboxData = filteredInboxData.filter(item => this.inboxStatusFilter.includes(item.statusText));
-    }
+    filteredInboxData = filteredInboxData.filter(item => this.inboxStatusFilter.includes(item.statusText));
 
     const keyword = String(this.filters.fileName || '').trim().toLowerCase();
     if (keyword) {
@@ -1459,7 +1864,8 @@ const IngestionView = {
           item.attachment.name,
           item.inboxItem.emailSubject,
           item.inboxItem.provider,
-          item.inboxItem.month
+          item.inboxItem.month,
+          this.getInboxAiDescription(item.inboxItem, item.attachment)
         ].filter(Boolean).join(' ').toLowerCase();
         return searchableText.includes(keyword);
       });
@@ -1479,15 +1885,17 @@ const IngestionView = {
     const cn = this.getCurrentLang() === 'cn';
 
     tableContainer.innerHTML = `
-      <table class="w-full min-w-[1120px] text-left text-sm text-[#4e5969]" id="inbox-table">
+      <table class="w-full min-w-[1320px] text-left text-sm text-[#4e5969]" id="inbox-table">
         <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
           <tr>
             <th class="h-11 min-w-[360px] px-4 align-middle">${cn ? '文件名称' : '파일명'}</th>
-            <th class="h-11 w-36 px-4 align-middle">${cn ? '所属月份' : '소속 월'}</th>
+            <th class="h-11 w-36 px-4 align-middle">${cn ? '所属时间' : '소속 시간'}</th>
             <th class="h-11 w-32 px-4 text-center align-middle">${cn ? '状态' : '상태'}</th>
+            <th class="h-11 min-w-[300px] px-4 align-middle">${cn ? '异常说明' : '이상 설명'}</th>
+            <th class="h-11 w-44 px-4 align-middle">${cn ? '批次号' : '배치 번호'}</th>
             <th class="h-11 w-40 px-4 align-middle">${cn ? '上传用户' : '업로드 사용자'}</th>
             <th class="h-11 w-48 px-4 align-middle">${cn ? '提交时间' : '제출 시간'}</th>
-            <th class="h-11 w-64 px-4 text-left align-middle">${cn ? '操作' : '조작'}</th>
+            <th class="h-11 w-20 min-w-20 max-w-20 px-4 text-center align-middle sticky right-0 z-30 bg-[#f7f8fa] shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.4)]">${cn ? '操作' : '조작'}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100" id="inbox-tbody">
@@ -1495,62 +1903,111 @@ const IngestionView = {
         </tbody>
       </table>
     `;
-    
+    this.applyInboxColumnVisibility();
     this.bindInboxEvents();
   },
 
+  applyInboxColumnVisibility() {
+    const table = document.getElementById('inbox-table');
+    if (!table) return;
+    const headers = Array.from(table.querySelectorAll(':scope > thead > tr > th'));
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('ingestion_inbox_visible_columns_v3') || 'null'); } catch (error) { saved = null; }
+    const defaultVisible = headers.map((_, index) => index).filter(index => index !== 4);
+    const visible = new Set(Array.isArray(saved) ? saved.map(Number) : defaultVisible);
+    headers.forEach((header, index) => {
+      const label = header.textContent.trim();
+      const required = label === '文件名称' || label === '操作';
+      const show = required || visible.has(index);
+      const targetHeader = table.querySelector(`thead [data-platform-column-index="${index}"]`) || header;
+      targetHeader.style.display = show ? '' : 'none';
+      table.querySelectorAll(':scope > tbody > tr').forEach(row => {
+        if (row.children.length === headers.length) (row.querySelector(`[data-platform-column-index="${index}"]`) || row.children[index]).style.display = show ? '' : 'none';
+      });
+    });
+  },
+
+  syncInboxColumnPanel() {
+    const table = document.getElementById('inbox-table');
+    const panel = document.getElementById('inbox-column-options');
+    if (!table || !panel) return;
+    const headers = Array.from(table.querySelectorAll(':scope > thead > tr > th'));
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('ingestion_inbox_visible_columns_v3') || 'null'); } catch (error) { saved = null; }
+    const defaultVisible = headers.map((_, index) => index).filter(index => index !== 4);
+    const visible = new Set(Array.isArray(saved) ? saved.map(Number) : defaultVisible);
+    panel.innerHTML = headers.map((header, index) => {
+      const label = header.textContent.trim();
+      const required = label === '文件名称' || label === '操作';
+      return `<label class="${required ? 'hidden ' : ''}flex cursor-pointer items-center gap-2 rounded-lg px-1 py-2 hover:bg-gray-50"><input type="checkbox" class="inbox-column-option rounded border-gray-300 text-brand" value="${index}" ${visible.has(index) ? 'checked' : ''}><span class="text-sm text-[#4e5969]">${this.escapeHtml(label)}</span></label>`;
+    }).join('');
+    panel.querySelectorAll('.inbox-column-option').forEach(option => option.addEventListener('change', () => {
+      const selected = Array.from(panel.querySelectorAll('.inbox-column-option:checked')).map(item => Number(item.value));
+      headers.forEach((header, index) => { if (header.textContent.trim() === '文件名称' || header.textContent.trim() === '操作') selected.push(index); });
+      localStorage.setItem('ingestion_inbox_visible_columns_v3', JSON.stringify([...new Set(selected)]));
+      this.applyInboxColumnVisibility();
+    }));
+  },
+
   renderInboxFileRow(row) {
-    const { inboxItem, attachment, attachmentIndex, statusText, isZip } = row;
-    const canResolve = statusText === '待处理' && this.isPendingDuplicateAttachment(attachment);
+    const { inboxItem, attachment, attachmentIndex, statusText, isZip, isFailedZip, isExtractedZipChild, childFile, zipIndex } = row;
+    const displayName = row.displayName || attachment.name;
+    const canResolve = statusText === '待处理' && (isExtractedZipChild || this.isPendingDuplicateAttachment(attachment));
     const isVoided = statusText === '作废';
     const showDisabledResolve = isVoided
       && attachment.previousStatus === '待处理'
       && this.isPendingDuplicateAttachment(attachment);
+    const aiDescription = this.getInboxAiDescription(inboxItem, attachment, childFile || null);
+    const zipDataAttr = isExtractedZipChild ? ` data-zip-index="${zipIndex}"` : '';
+    const canShowDocumentDetail = !isZip || isExtractedZipChild;
     const rowId = `${inboxItem.id}-${attachmentIndex}`;
     return `
-      <tr class="inbox-file-row hover:bg-slate-50 transition-colors"
+      <tr class="inbox-file-row group hover:bg-slate-50 transition-colors"
         data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">
         <td class="px-4 py-3 align-middle">
           <div class="flex min-w-0 items-center gap-2">
-            ${isZip ? `<button type="button" class="inbox-zip-expand-btn flex h-7 w-7 shrink-0 items-center justify-center rounded text-[#86909c] hover:bg-blue-50 hover:text-brand" data-row-id="${rowId}" aria-label="展开压缩包">
-              <i class="fa-solid fa-chevron-right text-xs transition-transform"></i>
-            </button>` : '<span class="inline-block h-7 w-7 shrink-0"></span>'}
+            <span class="inline-block h-7 w-7 shrink-0"></span>
             <i class="fa-solid ${isZip ? 'fa-file-zipper text-amber-500' : 'fa-file-excel text-green-600'} shrink-0"></i>
             <button type="button" class="inbox-file-content-preview-btn min-w-0 truncate text-left font-medium text-brand hover:underline"
-              data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}" title="${this.escapeHtml(attachment.name)}">
-              ${this.escapeHtml(this.getAttachmentDisplayName(attachment))}
+              data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}"${zipDataAttr} title="${this.escapeHtml(displayName)}">
+              ${this.escapeHtml(displayName)}
             </button>
+            ${isExtractedZipChild ? `<span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-amber-50 text-[10px] text-amber-600"
+              title="由“${this.escapeHtml(attachment.name)}”解压生成" aria-label="ZIP 解压文件"><i class="fa-solid fa-file-zipper"></i></span>` : ''}
           </div>
         </td>
         <td class="px-4 py-3 align-middle">${this.escapeHtml(inboxItem.month || '-')}</td>
-        <td class="px-4 py-3 text-center align-middle">
+        <td class="w-20 min-w-20 max-w-20 px-4 py-3 text-center align-middle sticky right-0 z-20 bg-white group-hover:bg-slate-50 shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.3)]">
           <span class="inline-flex h-6 min-w-[68px] items-center justify-center rounded-full border px-2 text-xs font-semibold ${this.getInboxStatusStyle(statusText)}">${this.escapeHtml(statusText)}</span>
         </td>
+        <td class="max-w-[320px] px-4 py-3 align-middle ${this.getInboxAiDescriptionClass(aiDescription)}">
+          <div class="truncate" title="${this.escapeHtml(aiDescription)}">${this.escapeHtml(aiDescription)}</div>
+        </td>
+        <td class="px-4 py-3 font-mono align-middle">${this.escapeHtml(this.getInboxBatchNumber(inboxItem))}</td>
         <td class="px-4 py-3 align-middle">${this.escapeHtml(inboxItem.provider || '-')}</td>
         <td class="px-4 py-3 align-middle">${this.escapeHtml(inboxItem.provideTime || '-')}</td>
-        <td class="px-4 py-3 align-middle">
-          <div class="flex items-center justify-start gap-1.5 whitespace-nowrap">
-            ${!isZip ? `
-              <button type="button" class="inbox-file-preview-btn rounded-md px-2.5 py-1.5 text-xs font-medium text-brand hover:bg-blue-50"
-                data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">预览</button>
-              ${canResolve ? `
-                <button type="button" class="inbox-file-resolve-btn rounded-md border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-brand hover:bg-blue-100"
-                  data-action="cover" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">覆盖</button>
-                <button type="button" class="inbox-file-resolve-btn rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-[#4e5969] hover:bg-slate-50"
-                  data-action="ignore" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">忽略</button>
-              ` : showDisabledResolve ? `
-                <button type="button" disabled class="cursor-not-allowed rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-400">覆盖</button>
-                <button type="button" disabled class="cursor-not-allowed rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-400">忽略</button>
+        <td class="px-4 py-3 text-center align-middle">
+          <div class="relative inline-flex">
+            <button type="button" class="inbox-row-actions-btn flex h-8 w-8 items-center justify-center rounded-md text-[#4e5969] hover:bg-blue-50 hover:text-brand" aria-label="打开操作菜单" aria-expanded="false">
+              <i class="fa-solid fa-ellipsis"></i>
+            </button>
+            <div class="inbox-row-actions-menu fixed z-[200] hidden w-32 rounded-lg border border-gray-200 bg-white p-1.5 text-left shadow-xl">
+              ${canShowDocumentDetail ? `<button type="button" class="inbox-file-preview-btn flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-brand hover:bg-blue-50"
+                data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}"${zipDataAttr}><i class="fa-solid fa-list-check w-4"></i>单据详情</button>` : ''}
+              ${!isVoided ? `<button type="button" class="${isExtractedZipChild ? 'inbox-zip-void-btn' : 'inbox-file-void-btn'} flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-red-500 hover:bg-red-50"
+                data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}"${zipDataAttr}><i class="fa-regular fa-circle-xmark w-4"></i>作废</button>` : ''}
+              ${canResolve && !isVoided ? `
+                <button type="button" class="inbox-file-resolve-btn flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-brand hover:bg-blue-50"
+                  data-action="cover" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}"${zipDataAttr}><i class="fa-solid fa-layer-group w-4"></i>覆盖</button>
+                <button type="button" class="inbox-file-resolve-btn flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-emerald-600 hover:bg-emerald-50"
+                  data-action="increment" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}"${zipDataAttr}><i class="fa-solid fa-plus w-4"></i>追加</button>
+                <button type="button" class="inbox-file-resolve-btn flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-[#4e5969] hover:bg-slate-50"
+                  data-action="ignore" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}"${zipDataAttr}><i class="fa-solid fa-ban w-4"></i>忽略</button>
               ` : ''}
-            ` : ''}
-            ${isVoided
-              ? '<button type="button" disabled class="cursor-not-allowed rounded-md bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-400">已作废</button>'
-              : `<button type="button" class="inbox-file-void-btn rounded-md px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50"
-                  data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">作废</button>`}
+            </div>
           </div>
         </td>
       </tr>
-      ${isZip ? this.renderInboxZipDetailRow(row, rowId) : ''}
     `;
   },
 
@@ -1559,7 +2016,7 @@ const IngestionView = {
     const files = this.getZipAttachmentFiles(inboxItem, attachment);
     return `
       <tr class="inbox-zip-detail-row hidden" data-row-id="${rowId}">
-        <td colspan="6" class="bg-[#f7faff] px-12 py-3">
+        <td colspan="8" class="bg-[#f7faff] px-12 py-3">
           <table class="w-full table-fixed overflow-hidden rounded-lg border border-blue-100 bg-white text-xs">
             <thead class="bg-[#eef3fb] text-[#4e5969]">
               <tr>
@@ -1572,6 +2029,8 @@ const IngestionView = {
             <tbody class="divide-y divide-gray-100">
               ${files.map((file, zipIndex) => {
                 const childPending = file.status === '待处理' || file.status === '重复';
+                const childVoided = file.status === '作废' || file.isVoided;
+                const childAiDescription = this.getInboxAiDescription(inboxItem, attachment, file);
                 return `
                   <tr>
                     <td class="px-4 py-2.5 align-middle">
@@ -1581,19 +2040,26 @@ const IngestionView = {
                     <td class="px-4 py-2.5 text-center align-middle">
                       <span class="inline-flex rounded-full border px-2 py-0.5 font-semibold ${this.getInboxStatusStyle(childPending ? '待处理' : file.status)}">${this.escapeHtml(childPending ? '待处理' : file.status)}</span>
                     </td>
-                    <td class="truncate px-4 py-2.5 align-middle text-[#86909c]" title="${this.escapeHtml(file.note || '-')}">${this.escapeHtml(file.note || '-')}</td>
+                    <td class="truncate px-4 py-2.5 align-middle ${this.getInboxAiDescriptionClass(childAiDescription)}" title="${this.escapeHtml(childAiDescription)}">${this.escapeHtml(childAiDescription)}</td>
                     <td class="px-4 py-2.5 align-middle">
                       <div class="flex items-center justify-start gap-1 whitespace-nowrap">
                         <button type="button" class="inbox-zip-preview-btn rounded px-2 py-1 text-brand hover:bg-blue-50"
-                          data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}" data-zip-index="${zipIndex}">预览</button>
+                          data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}" data-zip-index="${zipIndex}">单据预览</button>
+                        ${childVoided || attachment.isVoided
+                          ? ''
+                          : `<button type="button" class="inbox-zip-void-btn rounded px-2 py-1 text-red-500 hover:bg-red-50"
+                              data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}" data-zip-index="${zipIndex}">作废</button>`}
                         ${childPending ? attachment.isVoided ? `
                           <button type="button" disabled class="cursor-not-allowed rounded bg-slate-50 px-2 py-1 text-slate-400">覆盖</button>
+                          <button type="button" disabled class="cursor-not-allowed rounded bg-slate-50 px-2 py-1 text-slate-400">追加</button>
                           <button type="button" disabled class="cursor-not-allowed rounded bg-slate-50 px-2 py-1 text-slate-400">忽略</button>
                         ` : `
                           <button type="button" class="inbox-file-resolve-btn rounded px-2 py-1 text-brand hover:bg-blue-50"
-                            data-action="cover" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">覆盖</button>
+                            data-action="cover" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}" data-zip-index="${zipIndex}">覆盖</button>
+                          <button type="button" class="inbox-file-resolve-btn rounded px-2 py-1 text-emerald-600 hover:bg-emerald-50"
+                            data-action="increment" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}" data-zip-index="${zipIndex}">追加</button>
                           <button type="button" class="inbox-file-resolve-btn rounded px-2 py-1 text-[#4e5969] hover:bg-slate-50"
-                            data-action="ignore" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}">忽略</button>
+                            data-action="ignore" data-email-id="${inboxItem.id}" data-att-idx="${attachmentIndex}" data-zip-index="${zipIndex}">忽略</button>
                         ` : ''}
                       </div>
                     </td>
@@ -1728,6 +2194,7 @@ const IngestionView = {
     const isCovered = att.status === '覆盖';
     const isStashed = att.status === '暂存';
     const canResolveDuplicate = this.isPendingDuplicateAttachment(att);
+    const canShowDocumentDetail = !/\.zip$/i.test(att.name || '');
     const statusDescription = isHistorical ? (att.historicalReason || att.rejectReason) : att.rejectReason;
     const versionLabel = att.version ? ` V${att.version}` : '';
     return `
@@ -1745,7 +2212,7 @@ const IngestionView = {
         </td>
         <td class="px-4 py-2.5 w-[220px]">
           <div class="flex items-center justify-start gap-1.5 whitespace-nowrap">
-            ${this.hasIngestionPermission('文件箱', '单据详情') ? `<button type="button" class="inbox-att-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '单据详情' : '문서 상세'}">
+            ${canShowDocumentDetail && this.hasIngestionPermission('文件箱', '单据详情') ? `<button type="button" class="inbox-att-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-all" data-email-id="${emailId}" data-att-idx="${index}" title="${this.getCurrentLang() === 'cn' ? '单据详情' : '문서 상세'}">
               <i class="fa-solid fa-list-check"></i>
             </button>` : ''}
             ${isRejected ? `
@@ -1766,31 +2233,143 @@ const IngestionView = {
     `;
   },
 
-  resolveDuplicateAttachment(emailId, attachmentIndex, action) {
+  resolveDuplicateAttachment(emailId, attachmentIndex, action, zipIndex = null) {
     const inboxItem = this.getInboxData().find(item => String(item.id) === String(emailId));
     const attachment = inboxItem?.attachments?.[attachmentIndex];
     if (!inboxItem || !attachment || !this.isPendingDuplicateAttachment(attachment)) return;
 
     const cn = this.getCurrentLang() === 'cn';
-    const resolvedText = action === 'cover'
-      ? (cn ? '已覆盖重复门店' : '중복 매장을 덮어썼습니다')
-      : (cn ? '已忽略重复门店' : '중복 매장을 무시했습니다');
+    const actionConfig = {
+      cover: {
+        status: '已覆盖',
+        text: cn ? '已覆盖重复门店数据' : '중복 매장 데이터를 덮어썼습니다',
+        log: '重复 → 覆盖'
+      },
+      increment: {
+        status: '已追加',
+        text: cn ? '已追加导入重复门店数据' : '중복 매장 데이터를 추가 반영했습니다',
+        log: '重复 → 追加'
+      },
+      ignore: {
+        status: '已忽略',
+        text: cn ? '已忽略重复门店数据' : '중복 매장 데이터를 무시했습니다',
+        log: '重复 → 忽略'
+      }
+    };
+    const config = actionConfig[action] || actionConfig.ignore;
+    const now = this.formatNowDateTime(new Date());
+    const operator = Store?.getState?.()?.userName || '当前用户';
+    const targetIndexes = zipIndex === null
+      ? attachment.splitStores?.map((_, index) => index) || []
+      : [Number(zipIndex)];
 
-    attachment.splitStores = (attachment.splitStores || []).map(store => {
-      if (store.status !== '重复') return store;
+    attachment.splitStores = (attachment.splitStores || []).map((store, index) => {
+      if (!targetIndexes.includes(index) || (store.status !== '重复' && store.status !== '待处理')) return store;
       return {
         ...store,
-        status: action === 'cover' ? '已覆盖' : '已忽略',
-        reason: resolvedText
+        status: config.status,
+        reason: config.text,
+        resolvedAt: now,
+        resolvedBy: operator
       };
     });
-    attachment.status = '正常';
-    attachment.duplicateResolution = action;
-    attachment.resolvedAt = this.formatNowDateTime(new Date());
-    attachment.rejectReason = resolvedText;
+
+    const resolutionState = this.getInboxResolutionState();
+    targetIndexes.forEach((index) => {
+      const store = attachment.splitStores?.[index];
+      if (!store || store.status !== config.status) return;
+      const fileName = store.sourceFileName || store.fileName || `${store.storeName || `解压文件${index + 1}`}-销售明细.xlsx`;
+      resolutionState[this.getInboxZipFileKey(inboxItem.id, attachment, fileName)] = {
+        status: config.status,
+        reason: config.text,
+        resolvedAt: now,
+        resolvedBy: operator
+      };
+    });
+    if (!attachment.splitStores?.length) {
+      resolutionState[this.getInboxFileKey(inboxItem.id, attachment)] = {
+        status: '正常',
+        action,
+        reason: config.text,
+        resolvedAt: now,
+        resolvedBy: operator
+      };
+    }
+    this.saveInboxResolutionState(resolutionState);
+
+    const stillPending = attachment.splitStores?.some(store => store.status === '重复' || store.status === '待处理');
+    attachment.status = stillPending ? '待处理' : '正常';
+    attachment.duplicateResolution = stillPending ? null : action;
+    attachment.resolvedAt = now;
+    attachment.rejectReason = stillPending ? '当前版本存在重复门店，等待覆盖、追加或忽略' : config.text;
     this.recalcInboxItemStatus(inboxItem);
+
+    if (typeof SettingsView !== 'undefined' && Array.isArray(SettingsView.logs)) {
+      SettingsView.logs.unshift({
+        id: `log-ingestion-resolve-${Date.now()}`,
+        time: now,
+        user: operator,
+        account: Store?.getState?.()?.userAccount || '-',
+        module: '文件收取',
+        action: action === 'increment' ? '追加' : action === 'cover' ? '覆盖' : '忽略',
+        target: attachment.name,
+        detail: `${attachment.name}：${config.log}${zipIndex === null ? '' : `（解压文件 ${Number(zipIndex) + 1}）`}`,
+        before: '待处理',
+        after: config.status,
+        ip: '127.0.0.1',
+        device: 'Mac / Chrome',
+        result: '成功'
+      });
+    }
+
     this.renderInbox();
-    Dialog.toast(resolvedText, 'success');
+    Dialog.toast(config.text, 'success');
+  },
+
+  confirmIncrementAttachment(emailId, attachmentIndex, zipIndex = null) {
+    const inboxItem = this.getInboxData().find(item => String(item.id) === String(emailId));
+    const attachment = inboxItem?.attachments?.[attachmentIndex];
+    if (!inboxItem || !attachment) return;
+    const file = zipIndex === null ? null : this.getZipAttachmentFiles(inboxItem, attachment)[zipIndex];
+    const targetName = file?.name || attachment.name;
+    const targetStore = zipIndex === null ? null : attachment.splitStores?.[zipIndex];
+    const duplicateStores = (attachment.splitStores || []).filter(store => store.status === '重复' || store.status === '待处理');
+    const duplicateCount = Number(
+      targetStore?.duplicateRowCount
+      || targetStore?.duplicateCount
+      || attachment.duplicateRowCount
+      || attachment.pendingDuplicateCount
+      || (zipIndex === null ? duplicateStores.length : 1)
+      || 1
+    );
+    const previousAttachmentIndex = (inboxItem.attachments || []).findIndex((candidate, index) => (
+      index !== attachmentIndex
+      && candidate
+      && !candidate.isVoided
+      && candidate.status !== '作废'
+      && (/\.xlsx?$/i.test(candidate.name || '') || /\.zip$/i.test(candidate.name || ''))
+    ));
+    const previousAttachment = previousAttachmentIndex >= 0 ? inboxItem.attachments[previousAttachmentIndex] : attachment;
+    const previousFileName = targetStore?.duplicateSourceFileName
+      || targetStore?.previousFileName
+      || attachment.duplicateSourceFileName
+      || previousAttachment?.name
+      || this.getSingleStoreExcelName(targetStore?.storeName || targetName);
+    Dialog.show({
+      title: '追加处理',
+      content: `
+        <p class="leading-7 text-[#4e5969]">
+          相对之前上传的门店数据
+          <button type="button" class="increment-history-preview font-semibold text-brand hover:underline" title="预览 ${this.escapeHtml(previousFileName)}">“${this.escapeHtml(previousFileName)}”</button>
+          有 <strong class="text-[#1d2129]">${duplicateCount}</strong> 条重复数据，确定追加吗？
+        </p>`,
+      confirmText: '确认追加',
+      onConfirm: () => this.resolveDuplicateAttachment(emailId, attachmentIndex, 'increment', zipIndex)
+    });
+    document.getElementById('overlay-container')?.querySelector('.increment-history-preview')?.addEventListener('click', event => {
+      event.stopPropagation();
+      this.showInboxAttachmentPreview(inboxItem, previousAttachment, previousAttachment === attachment && zipIndex !== null ? zipIndex : 0);
+    });
   },
 
   confirmVoidInboxFile(inboxItem, attachment) {
@@ -1819,6 +2398,22 @@ const IngestionView = {
     attachment.voidedAt = now;
     attachment.voidedBy = operator;
     attachment.voidReason = '用户主动作废';
+    attachment.rejectReason = attachment.voidReason;
+    if (/\.zip$/i.test(attachment.name || '')) {
+      (attachment.splitStores || []).forEach(store => {
+        store.previousStatus = store.status || '正常';
+        store.status = '作废';
+        store.isVoided = true;
+        store.voidedAt = now;
+        store.voidedBy = operator;
+        store.reason = attachment.voidReason;
+      });
+      (attachment.extractedFiles || []).forEach(file => {
+        file.previousStatus = file.status || '正常';
+        file.status = '作废';
+        file.isVoided = true;
+      });
+    }
 
     const voidState = this.getInboxVoidState();
     voidState[this.getInboxFileKey(inboxItem.id, attachment)] = {
@@ -1829,6 +2424,9 @@ const IngestionView = {
     };
     this.saveInboxVoidState(voidState);
     this.recalcInboxItemStatus(inboxItem);
+    inboxItem.lastOperatorName = operator;
+    inboxItem.lastAction = '作废';
+    inboxItem.lastOperatedAt = now;
 
     if (typeof SettingsView !== 'undefined' && Array.isArray(SettingsView.logs)) {
       SettingsView.logs.unshift({
@@ -1850,6 +2448,78 @@ const IngestionView = {
 
     this.renderInbox();
     Dialog.toast('文件已作废，历史记录已保留', 'success');
+  },
+
+  confirmVoidInboxZipFile(inboxItem, attachment, zipIndex) {
+    const file = this.getZipAttachmentFiles(inboxItem, attachment)[zipIndex];
+    if (!file || file.status === '作废' || file.isVoided || attachment.isVoided) return;
+    Dialog.show({
+      title: '作废解压文件',
+      content: `
+        <div class="space-y-3">
+          <p>确认作废“${this.escapeHtml(file.name)}”吗？</p>
+          <div class="rounded-lg border border-red-100 bg-red-50 p-3 text-sm leading-6 text-red-700">
+            作废后，该文件对应的所有门店信息将被删除。
+          </div>
+        </div>`,
+      confirmText: '确认作废',
+      onConfirm: () => this.voidInboxZipFile(inboxItem, attachment, zipIndex)
+    });
+  },
+
+  voidInboxZipFile(inboxItem, attachment, zipIndex) {
+    const file = this.getZipAttachmentFiles(inboxItem, attachment)[zipIndex];
+    const store = attachment?.splitStores?.[zipIndex];
+    if (!file || !store || file.status === '作废' || attachment.isVoided) return;
+
+    const now = this.formatNowDateTime(new Date());
+    const operator = Store?.getState?.()?.userName || '当前用户';
+    const previousStatus = store.status || file.status || '正常';
+    store.previousStatus = previousStatus;
+    store.status = '作废';
+    store.isVoided = true;
+    store.voidedAt = now;
+    store.voidedBy = operator;
+    store.reason = '用户主动作废';
+
+    const voidState = this.getInboxVoidState();
+    voidState[this.getInboxZipFileKey(inboxItem.id, attachment, file.name)] = {
+      previousStatus,
+      voidedAt: now,
+      voidedBy: operator,
+      reason: store.reason
+    };
+    this.saveInboxVoidState(voidState);
+
+    const activeChildren = attachment.splitStores.filter(item => item.status !== '作废');
+    attachment.status = !activeChildren.length
+      ? '作废'
+      : activeChildren.some(item => item.status === '重复' || item.status === '待处理') ? '待处理' : '正常';
+    attachment.rejectReason = activeChildren.some(item => item.status === '重复' || item.status === '待处理')
+      ? '当前版本存在重复门店，等待覆盖或忽略'
+      : '-';
+    this.recalcInboxItemStatus(inboxItem);
+
+    if (typeof SettingsView !== 'undefined' && Array.isArray(SettingsView.logs)) {
+      SettingsView.logs.unshift({
+        id: `log-ingestion-zip-void-${Date.now()}`,
+        time: now,
+        user: operator,
+        account: Store?.getState?.()?.userAccount || '-',
+        module: '文件收取',
+        action: '作废',
+        target: file.name,
+        detail: `${attachment.name} / ${file.name}：${previousStatus} → 作废；同一 ZIP 内其他文件不受影响`,
+        before: previousStatus,
+        after: '作废',
+        ip: '127.0.0.1',
+        device: 'Mac / Chrome',
+        result: '成功'
+      });
+    }
+
+    this.renderInbox();
+    Dialog.toast('解压文件已作废，同一 ZIP 内其他文件不受影响', 'success');
   },
 
   getInboxDeletionState() {
@@ -2204,6 +2874,47 @@ const IngestionView = {
       return { emailId, attachmentIndex, inboxItem, attachment };
     };
 
+    const closeActionMenus = () => {
+      document.querySelectorAll('.inbox-row-actions-menu').forEach(menu => {
+        menu.classList.add('hidden');
+        const owner = menu.__inboxOwnerButton;
+        if (owner?.isConnected && owner.parentElement) owner.parentElement.appendChild(menu);
+        else if (!menu.closest('#inbox-tbody')) menu.remove();
+      });
+      tbody.querySelectorAll('.inbox-row-actions-btn').forEach(button => button.setAttribute('aria-expanded', 'false'));
+    };
+    tbody.querySelectorAll('.inbox-row-actions-btn').forEach(button => {
+      const ownedMenu = button.parentElement?.querySelector('.inbox-row-actions-menu');
+      if (ownedMenu) {
+        button.__inboxActionsMenu = ownedMenu;
+        ownedMenu.__inboxOwnerButton = button;
+      }
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        const menu = button.__inboxActionsMenu || button.parentElement?.querySelector('.inbox-row-actions-menu');
+        if (!menu) return;
+        const willOpen = menu.classList.contains('hidden');
+        closeActionMenus();
+        if (!willOpen) return;
+        document.body.appendChild(menu);
+        menu.classList.remove('hidden');
+        button.setAttribute('aria-expanded', 'true');
+        const rect = button.getBoundingClientRect();
+        const menuRect = menu.getBoundingClientRect();
+        const left = Math.max(8, Math.min(window.innerWidth - menuRect.width - 8, rect.right - menuRect.width));
+        const top = rect.bottom + menuRect.height + 8 <= window.innerHeight
+          ? rect.bottom + 6
+          : Math.max(8, rect.top - menuRect.height - 6);
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+        setTimeout(() => document.addEventListener('click', closeActionMenus, { once: true }), 0);
+      });
+    });
+    tbody.querySelectorAll('.inbox-row-actions-menu').forEach(menu => {
+      menu.addEventListener('click', event => event.stopPropagation());
+      menu.querySelectorAll('button').forEach(action => action.addEventListener('click', closeActionMenus));
+    });
+
     tbody.querySelectorAll('.inbox-zip-expand-btn').forEach((button) => {
       button.addEventListener('click', () => {
         const detailRow = tbody.querySelector(`.inbox-zip-detail-row[data-row-id="${button.dataset.rowId}"]`);
@@ -2220,7 +2931,8 @@ const IngestionView = {
       button.addEventListener('click', () => {
         const context = getAttachmentContext(button);
         if (!context.inboxItem || !context.attachment) return;
-        self.openInboxFileDetail(context.inboxItem, context.attachment, context.attachmentIndex);
+        const zipIndex = button.dataset.zipIndex === undefined ? null : Number(button.dataset.zipIndex);
+        self.openInboxFileDetail(context.inboxItem, context.attachment, context.attachmentIndex, zipIndex);
       });
     });
 
@@ -2228,6 +2940,10 @@ const IngestionView = {
       button.addEventListener('click', () => {
         const context = getAttachmentContext(button);
         if (!context.inboxItem || !context.attachment) return;
+        if (button.dataset.zipIndex !== undefined) {
+          self.showInboxAttachmentPreview(context.inboxItem, context.attachment, Number(button.dataset.zipIndex));
+          return;
+        }
         self.showInboxAttachmentPreview(context.inboxItem, context.attachment);
       });
     });
@@ -2236,7 +2952,7 @@ const IngestionView = {
       button.addEventListener('click', () => {
         const context = getAttachmentContext(button);
         if (!context.inboxItem || !context.attachment) return;
-        self.showInboxAttachmentPreview(context.inboxItem, context.attachment, Number(button.dataset.zipIndex || 0));
+        self.openInboxFileDetail(context.inboxItem, context.attachment, context.attachmentIndex, Number(button.dataset.zipIndex || 0));
       });
     });
 
@@ -2244,7 +2960,13 @@ const IngestionView = {
       button.addEventListener('click', () => {
         const context = getAttachmentContext(button);
         if (!context.attachment || self.getInboxFileStatus(context.inboxItem, context.attachment) !== '待处理') return;
-        self.resolveDuplicateAttachment(context.emailId, context.attachmentIndex, button.dataset.action || 'ignore');
+        const zipIndex = button.dataset.zipIndex === undefined ? null : Number(button.dataset.zipIndex);
+        const action = button.dataset.action || 'ignore';
+        if (action === 'increment') {
+          self.confirmIncrementAttachment(context.emailId, context.attachmentIndex, zipIndex);
+          return;
+        }
+        self.resolveDuplicateAttachment(context.emailId, context.attachmentIndex, action, zipIndex);
       });
     });
 
@@ -2255,26 +2977,38 @@ const IngestionView = {
         self.confirmVoidInboxFile(context.inboxItem, context.attachment);
       });
     });
+
+    tbody.querySelectorAll('.inbox-zip-void-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const context = getAttachmentContext(button);
+        if (!context.inboxItem || !context.attachment) return;
+        self.confirmVoidInboxZipFile(context.inboxItem, context.attachment, Number(button.dataset.zipIndex || 0));
+      });
+    });
   },
 
-  openInboxFileDetail(inboxItem, attachment, attachmentIndex) {
+  openInboxFileDetail(inboxItem, attachment, attachmentIndex, zipIndex = null) {
     if (!this.hasIngestionPermission('文件箱', '查看') || !this.hasIngestionPermission('文件箱', '单据详情')) {
       Dialog.toast('当前账号无单据详情权限', 'warning');
       return;
     }
+    const childFile = zipIndex === null ? null : this.getZipAttachmentFiles(inboxItem, attachment)[zipIndex];
+    const documentName = childFile?.name || attachment.name;
+    const documentStatus = childFile?.status === '重复' ? '待处理' : (childFile?.status || this.getInboxFileStatus(inboxItem, attachment));
     this.openDocumentDetail({
       moduleName: this.getCurrentLang() === 'cn' ? '文件收取 - 文件箱' : '파일 수집 - 받은 편지함',
       currentNode: this.getCurrentLang() === 'cn' ? '文件箱附件' : '받은 편지함 첨부',
-      title: attachment.name,
+      title: documentName,
       nameLabel: this.getCurrentLang() === 'cn' ? '文件名称' : '파일명',
-      statusText: this.getInboxFileStatus(inboxItem, attachment),
+      statusText: documentStatus,
       row: {
-        fileName: attachment.name,
-        storeName: attachment.name,
+        fileName: documentName,
+        storeName: documentName,
         sourceEmailId: inboxItem.id,
         sourceAttIdx: attachmentIndex,
+        sourceZipIndex: zipIndex,
         sourceMethod: attachment.sourceMethod,
-        reason: attachment.rejectReason
+        reason: childFile?.reason || attachment.rejectReason
       },
       inboxItem,
       attachment,
@@ -2282,10 +3016,11 @@ const IngestionView = {
       moduleFields: [
         { label: this.getCurrentLang() === 'cn' ? '上传用户' : '업로드 사용자', value: inboxItem.provider || '-' },
         { label: this.getCurrentLang() === 'cn' ? '所属月份' : '소속 월', value: inboxItem.month || '-' },
-        { label: this.getCurrentLang() === 'cn' ? '文件名称' : '파일명', value: attachment.name || '-' },
+        { label: this.getCurrentLang() === 'cn' ? '原始文件' : '원본 파일', value: attachment.name || '-' },
+        ...(childFile ? [{ label: this.getCurrentLang() === 'cn' ? '当前单据' : '현재 문서', value: childFile.name || '-' }] : []),
         { label: this.getCurrentLang() === 'cn' ? '文件版本' : '파일 버전', value: `V${attachment.version || 1}` },
         { label: this.getCurrentLang() === 'cn' ? '提交时间' : '제출 시간', value: attachment.uploadedAt || inboxItem.provideTime || '-' },
-        { label: this.getCurrentLang() === 'cn' ? '异常说明' : '이상 설명', value: attachment.rejectReason || '-' }
+        { label: this.getCurrentLang() === 'cn' ? '异常说明' : '이상 설명', value: childFile?.reason || attachment.rejectReason || '-' }
       ]
     });
   },
@@ -2466,12 +3201,13 @@ const IngestionView = {
             { storeName: '邯郸格耀中华店', status: '已匹配', reason: '已识别并匹配门店' }
           ];
       return stores.map((store, index) => {
-        const resolved = store.status === '已覆盖' || store.status === '已忽略';
+        const resolved = store.status === '已覆盖' || store.status === '已追加' || store.status === '已增量' || store.status === '已忽略';
         const normal = resolved || store.status === '已匹配' || store.status === '正常';
         return {
           name: store.sourceFileName || store.fileName || `${store.storeName || `解压文件${index + 1}`}-销售明细.xlsx`,
           type: 'XLSX',
-          status: normal ? '正常' : store.status,
+          status: store.isVoided || store.status === '作废' ? '作废' : (normal ? '正常' : store.status),
+          isVoided: Boolean(store.isVoided || store.status === '作废'),
           note: store.reason || (normal ? '已识别并匹配门店' : '与原始门店数据重复')
         };
       });
@@ -2484,8 +3220,8 @@ const IngestionView = {
         note: cn ? '已识别为 POS 明细数据' : 'POS 상세 데이터로 인식됨'
       },
       {
-        name: cn ? '产品销售汇总.csv' : '제품 판매 요약.csv',
-        type: 'CSV',
+        name: cn ? '产品销售汇总.xlsx' : '제품 판매 요약.xlsx',
+        type: 'XLSX',
         status: cn ? '正常' : '정상',
         note: cn ? '已识别为汇总辅助文件' : '요약 보조 파일로 인식됨'
       },
@@ -2836,10 +3572,14 @@ const IngestionView = {
           status,
           tone: status === '驳回' ? 'danger' : /未匹配|重复/.test(status) ? 'warning' : 'success',
           reason: split.reason || '',
+          businessNode: split.businessNode || split.currentNode || '',
+          currentNode: split.currentNode || '',
+          workflowStatus: split.workflowStatus || '',
+          lastAction: split.lastAction || '',
           previewKind: 'source',
           emailId: inboxItem.id,
           attachmentIndex,
-          zipIndex: 0,
+          zipIndex: index,
           sort: index
         };
       });
@@ -2852,12 +3592,18 @@ const IngestionView = {
       .slice(0, 4)
       .map((row, index) => {
         const storeName = this.getLocalizedText(row.storeName || row.rawStoreName || row.fileName || attachment.name);
+        const workflowStatus = row.workflowStatus || row.qualityStatus || row.status || '已匹配';
         return {
           fileName: this.getSingleStoreExcelName(row.rawStoreName || row.fileName || attachment.name, storeName),
           storeName,
           storeCode: row.storeCode || row.rawStoreCode || '—',
-          status: '已匹配',
-          tone: 'success',
+          status: workflowStatus,
+          tone: /驳回|失败|作废|异常/.test(workflowStatus) ? 'danger' : /未匹配|重复|待|处理中/.test(workflowStatus) ? 'warning' : 'success',
+          reason: row.reason || row.aiNote || row.lastAction || '',
+          businessNode: row.businessNode || row.currentNode || row.workflowNode || '',
+          currentNode: row.currentNode || '',
+          workflowStatus,
+          lastAction: row.lastAction || '',
           previewKind: 'matched',
           rowId: row.id,
           sort: index
@@ -2870,12 +3616,18 @@ const IngestionView = {
       .slice(0, 4)
       .map((item, index) => {
         const storeName = item.row?.storeName || attachment.name;
+        const workflowStatus = item.row?.workflowStatus || item.row?.qualityStatus || item.row?.status || '未匹配';
         return {
           fileName: this.getSingleStoreExcelName(storeName, storeName),
           storeName,
           storeCode: item.row?.storeCode || item.row?.rawStoreCode || '—',
-          status: '未匹配',
-          tone: 'warning',
+          status: workflowStatus,
+          tone: /驳回|失败|作废|异常/.test(workflowStatus) ? 'danger' : 'warning',
+          reason: item.row?.reason || item.row?.aiNote || item.row?.lastAction || '',
+          businessNode: item.row?.businessNode || item.row?.currentNode || item.row?.workflowNode || '',
+          currentNode: item.row?.currentNode || '',
+          workflowStatus,
+          lastAction: item.row?.lastAction || '',
           previewKind: 'stash',
           stashKey: item.key,
           sort: matchedRows.length + index
@@ -2887,12 +3639,18 @@ const IngestionView = {
 
     const fallbackStore = this.getLocalizedText(context.row?.storeName || attachment.name || inboxItem.emailSubject || '单门店数据');
     const isZip = /\.zip$/i.test(attachment.name || '');
+    const fallbackStatus = context.row?.workflowStatus || context.row?.qualityStatus || context.row?.status || '已匹配';
     return [{
       fileName: isZip ? this.getZipAttachmentFiles(inboxItem, attachment)[0]?.name || '门店销售明细.xlsx' : this.getSingleStoreExcelName(attachment.name, fallbackStore),
       storeName: fallbackStore,
       storeCode: context.row?.storeCode || context.row?.rawStoreCode || '—',
-      status: '已匹配',
-      tone: 'success',
+      status: fallbackStatus,
+      tone: /驳回|失败|作废|异常/.test(fallbackStatus) ? 'danger' : /未匹配|重复|待|处理中/.test(fallbackStatus) ? 'warning' : 'success',
+      reason: context.row?.reason || context.row?.aiNote || context.row?.lastAction || '',
+      businessNode: context.row?.businessNode || context.row?.currentNode || context.row?.workflowNode || '',
+      currentNode: context.row?.currentNode || '',
+      workflowStatus: fallbackStatus,
+      lastAction: context.row?.lastAction || '',
       previewKind: 'source',
       emailId: inboxItem.id,
       attachmentIndex,
@@ -2906,7 +3664,7 @@ const IngestionView = {
     return `
       <div class="mt-3 rounded-lg border border-blue-100 bg-white overflow-hidden">
         <div class="flex items-center justify-between bg-blue-50/70 px-3 py-2">
-          <span class="text-xs font-bold text-[#1d2129]">拆分结果</span>
+          <span class="text-xs font-bold text-[#1d2129]">提取结果</span>
           <span class="text-[11px] font-medium text-[#86909c]">单门店单 Excel</span>
         </div>
         <div class="divide-y divide-gray-100">
@@ -3014,6 +3772,97 @@ const IngestionView = {
     }));
   },
 
+  getDocumentBusinessFlowStatus(row = {}) {
+    const source = typeof row === 'string' ? { status: row } : (row || {});
+    const text = [
+      source.businessNode,
+      source.currentNode,
+      source.workflowStatus,
+      source.status,
+      source.reason,
+      source.lastAction
+    ].filter(Boolean).join(' ');
+    if (/已入台账|台账|已归档|质量检查通过|质检通过/.test(text)) return '质量检查通过-已入台账';
+
+    const isQualityStage = /质量检查|质检|标准POS|异常列表|提交复核|待复核/.test(text);
+    const hasAbnormal = /异常|失败|驳回|重复|未匹配|待处理|处理中|待审核|待复核|作废/.test(text);
+    const pendingState = /待审核|待复核/.test(text)
+      ? '待审核'
+      : /处理中|校验中|检验中|质检中|正在/.test(text)
+        ? '处理中'
+        : '待处理';
+
+    if (isQualityStage) {
+      return hasAbnormal ? `质量检查-异常-${pendingState}` : '质量检查-成功';
+    }
+    if (!hasAbnormal || /已匹配|匹配成功|正常|已覆盖|已追加|已忽略/.test(text)) return '门店匹配-成功';
+    return `门店匹配-异常-${pendingState}`;
+  },
+
+  getDocumentBusinessFlowStatusStyle(status = '') {
+    if (status === '质量检查通过-已入台账') return 'border-emerald-100 bg-emerald-50 text-emerald-700';
+    if (status.includes('待审核')) return 'border-purple-100 bg-purple-50 text-purple-700';
+    if (status.includes('处理中')) return 'border-blue-100 bg-blue-50 text-blue-700';
+    if (status.includes('待处理')) return 'border-amber-100 bg-amber-50 text-amber-700';
+    if (status === '质量检查-成功') return 'border-cyan-100 bg-cyan-50 text-cyan-700';
+    if (status === '门店匹配-成功') return 'border-sky-100 bg-sky-50 text-sky-700';
+    return 'border-slate-200 bg-slate-50 text-slate-600';
+  },
+
+  renderDocumentProcessingSplitSection(context = {}, groups = []) {
+    const versions = groups.map(group => {
+      const currentVersion = group.versions.find(version => version.state === '当前版本');
+      return currentVersion || group.versions[group.versions.length - 1];
+    }).filter(Boolean);
+    const rows = versions.flatMap(version => version.rows || []);
+    const isMultiStore = Boolean(context.attachment?.isMultiStore || rows.length > 1);
+    const explanation = (row, businessStatus) => {
+      if (businessStatus.includes('异常') && row.reason === '用户主动作废') return '3条异常，等待担当处理';
+      if (row.reason) return row.reason;
+      if (businessStatus === '门店匹配-成功') return '门店数据已完成匹配';
+      if (businessStatus.startsWith('门店匹配-异常')) return '门店匹配异常，等待处理';
+      if (businessStatus === '质量检查-成功') return '门店数据已通过质量检查';
+      if (businessStatus.startsWith('质量检查-异常')) return '质量检查发现异常，等待处理';
+      if (businessStatus === '质量检查通过-已入台账') return '质量检查已通过并写入台账';
+      return '-';
+    };
+
+    return `
+      <section class="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+        <div class="flex items-center gap-2 px-5 py-4 border-b border-gray-100">
+          <span class="h-7 w-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center"><i class="fa-solid fa-code-branch text-xs"></i></span>
+          <h4 class="text-sm font-extrabold text-[#1d2129]">提取结果</h4>
+        </div>
+        ${isMultiStore && rows.length ? `
+          <div class="overflow-x-auto">
+            <div class="min-w-[760px]">
+              <div class="grid grid-cols-[minmax(0,1fr)_110px_minmax(210px,1.2fr)_minmax(0,1.35fr)] gap-3 bg-slate-50 px-5 py-2.5 text-xs font-semibold text-[#86909c]">
+                <span>门店名称</span><span>门店编码</span><span>状态</span><span>说明</span>
+              </div>
+              <div class="divide-y divide-gray-100">
+                ${rows.map(row => {
+                  const businessStatus = this.getDocumentBusinessFlowStatus(row);
+                  return `<div class="grid grid-cols-[minmax(0,1fr)_110px_minmax(210px,1.2fr)_minmax(0,1.35fr)] items-center gap-3 px-5 py-3 text-xs">
+                    <button type="button" class="store-split-preview-btn min-w-0 truncate text-left font-medium text-brand hover:underline"
+                      data-preview-kind="${this.escapeHtml(row.previewKind || '')}" data-row-id="${this.escapeHtml(row.rowId || '')}"
+                      data-stash-key="${this.escapeHtml(row.stashKey || '')}" data-email-id="${this.escapeHtml(row.emailId || context.inboxItem?.id || '')}"
+                      data-att-idx="${typeof row.attachmentIndex === 'number' ? row.attachmentIndex : (context.attachmentIndex || 0)}"
+                      data-zip-index="${typeof row.zipIndex === 'number' ? row.zipIndex : 0}"
+                      title="预览 ${this.escapeHtml(row.storeName || '—')}">${this.escapeHtml(row.storeName || '—')}</button>
+                    <span class="truncate font-mono text-[#4e5969]">${this.escapeHtml(row.storeCode || '—')}</span>
+                    <span class="justify-self-start whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold ${this.getDocumentBusinessFlowStatusStyle(businessStatus)}">${this.escapeHtml(businessStatus)}</span>
+                    <span class="leading-5 text-[#4e5969]">${this.escapeHtml(explanation(row, businessStatus))}</span>
+                  </div>`;
+                }).join('')}
+              </div>
+            </div>
+          </div>` : `
+          <div class="px-5 py-7 text-center text-sm text-[#86909c]">
+            上传文件为单门店POS表，无需提取
+          </div>`}
+      </section>`;
+  },
+
   renderDocumentSplitResultSection(groups = []) {
     const cn = this.getCurrentLang() === 'cn';
     const splitGroups = groups.filter(group =>
@@ -3040,7 +3889,7 @@ const IngestionView = {
             <span class="h-7 w-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
               <i class="fa-solid fa-code-branch text-xs"></i>
             </span>
-            <h4 class="text-sm font-extrabold text-[#1d2129]">${cn ? '拆分结果' : '분할 결과'}</h4>
+            <h4 class="text-sm font-extrabold text-[#1d2129]">${cn ? '提取结果' : '추출 결과'}</h4>
           </div>
           <span class="text-xs font-medium text-[#86909c]">${cn ? '多门店 Excel 拆分' : '다중 매장 Excel 분할'}</span>
         </div>
@@ -3113,7 +3962,7 @@ const IngestionView = {
                           </div>
                         ` : `
                           <div class="bg-white px-4 py-7 text-center text-sm text-[#86909c]">
-                            ${/驳回|失败/.test(version.status || '') ? '文件校验未通过，未生成拆分结果' : '暂无拆分结果'}
+                            ${/驳回|失败/.test(version.status || '') ? '文件校验未通过，未生成提取结果' : '暂无提取结果'}
                           </div>
                         `}
                       </div>
@@ -3183,7 +4032,7 @@ const IngestionView = {
       <section class="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
         <div class="flex items-center gap-2 px-5 py-4 border-b border-gray-100"><span class="h-7 w-7 rounded-lg bg-blue-50 text-brand flex items-center justify-center"><i class="fa-solid fa-file-lines text-xs"></i></span><h4 class="text-sm font-extrabold text-[#1d2129]">原始文件</h4></div>
         <div class="overflow-x-auto"><div class="min-w-[620px]">
-          <div class="grid grid-cols-[minmax(0,1.5fr)_145px_90px_86px] gap-4 bg-slate-50 px-5 py-2.5 text-xs font-semibold text-[#86909c]"><span>原始文件名称</span><span>上传时间</span><span>上传用户</span><span>拆分结果</span></div>
+          <div class="grid grid-cols-[minmax(0,1.5fr)_145px_90px_86px] gap-4 bg-slate-50 px-5 py-2.5 text-xs font-semibold text-[#86909c]"><span>原始文件名称</span><span>上传时间</span><span>上传用户</span><span>提取结果</span></div>
           <div class="divide-y divide-gray-100">
             ${sourceRows.map((sourceRow, rowIndex) => {
               const isZip = /\.zip$/i.test(sourceRow.fileName || '');
@@ -3242,7 +4091,7 @@ const IngestionView = {
         fileName: group.fileName,
         attachmentIndex: version.attachmentIndex,
         uploadedAt: version.uploadedAt || inboxItem?.provideTime || fallbackUploadedAt,
-        uploadUser: inboxItem?.provider || '李娜',
+        uploadUser: inboxItem?.provider || row.uploadUser || row.uploader || '系统',
         version,
         rows: version.rows || []
       }))
@@ -3251,113 +4100,145 @@ const IngestionView = {
       fileName: fallbackFileName || 'POS原始数据.xlsx',
       attachmentIndex: typeof context.attachmentIndex === 'number' ? context.attachmentIndex : 0,
       uploadedAt: context.attachment?.uploadedAt || inboxItem?.provideTime || fallbackUploadedAt,
-      uploadUser: inboxItem?.provider || '李娜',
+      uploadUser: inboxItem?.provider || row.uploadUser || row.uploader || '系统',
       version: null,
       rows: []
     }];
 
-    return this.renderDocumentSourceTree({ sourceRows, inboxItem });
+    const fileCandidates = [
+      row.fileName,
+      row.currentFileName,
+      context.sourceFileName,
+      fallbackFileName,
+      context.attachment?.name,
+      ...sourceRows.flatMap(sourceRow => [
+        sourceRow.fileName,
+        ...sourceRow.rows.flatMap(splitRow => [splitRow.sourceFileName, splitRow.fileName])
+      ])
+    ].filter(Boolean);
+    const originalExcelName = fileCandidates.find(name => /\.xlsx?$/i.test(String(name)))
+      || this.getSingleStoreExcelName(fallbackFileName || row.storeName || 'POS原始数据');
+    const uploadedAt = sourceRows[0]?.uploadedAt || fallbackUploadedAt;
+    const uploadUser = sourceRows[0]?.uploadUser || inboxItem?.provider || row.uploadUser || row.uploader || '系统';
+    const explicitParentFileName = context.parentFileName
+      || row.parentFileName
+      || row.parentSourceFileName
+      || row.sourceArchiveName;
+    const attachmentName = String(context.attachment?.name || '');
+    const parentFileName = explicitParentFileName
+      || (/\.zip$/i.test(attachmentName) && attachmentName !== originalExcelName ? attachmentName : '-');
+    const batchNumber = context.batchNo
+      || context.batchNumber
+      || row.batchNo
+      || row.batchNumber
+      || row.batchId
+      || inboxItem?.batchNo
+      || inboxItem?.batchNumber
+      || this.getInboxBatchNumber({ provideTime: uploadedAt });
+    const attachmentIndex = typeof context.attachmentIndex === 'number' ? context.attachmentIndex : 0;
+    const zipIndexAttr = typeof row.sourceZipIndex === 'number' ? ` data-zip-index="${row.sourceZipIndex}"` : '';
+    const fileTrigger = inboxItem
+      ? `<button type="button" class="doc-source-attachment-trigger min-w-0 flex items-center gap-3 text-left" data-email-id="${this.escapeHtml(inboxItem.id)}" data-att-idx="${attachmentIndex}"${zipIndexAttr}>
+          <span class="h-8 w-8 shrink-0 rounded-lg bg-green-50 text-green-600 flex items-center justify-center"><i class="fa-solid fa-file-excel text-sm"></i></span>
+          <span class="min-w-0 truncate text-sm font-semibold text-brand hover:underline" title="${this.escapeHtml(originalExcelName)}">${this.escapeHtml(originalExcelName)}</span>
+        </button>`
+      : `<button type="button" class="doc-fallback-source-trigger min-w-0 flex items-center gap-3 text-left">
+          <span class="h-8 w-8 shrink-0 rounded-lg bg-green-50 text-green-600 flex items-center justify-center"><i class="fa-solid fa-file-excel text-sm"></i></span>
+          <span class="min-w-0 truncate text-sm font-semibold text-brand hover:underline" title="${this.escapeHtml(originalExcelName)}">${this.escapeHtml(originalExcelName)}</span>
+        </button>`;
+    const matchedParentAttachmentIndex = inboxItem
+      ? (inboxItem.attachments || []).findIndex(candidate => String(candidate.name || '') === String(parentFileName))
+      : -1;
+    const parentAttachmentIndex = matchedParentAttachmentIndex >= 0
+      ? matchedParentAttachmentIndex
+      : (/\.zip$/i.test(attachmentName) ? attachmentIndex : -1);
+    const parentAttachment = parentAttachmentIndex >= 0 ? inboxItem?.attachments?.[parentAttachmentIndex] : null;
+    const parentZipFiles = parentAttachment ? this.getZipAttachmentFiles(inboxItem, parentAttachment) : [];
+    const matchedCurrentZipIndex = parentZipFiles.findIndex(file => String(file.name || '') === String(originalExcelName));
+    const currentParentZipIndex = typeof row.sourceZipIndex === 'number'
+      ? row.sourceZipIndex
+      : Math.max(0, matchedCurrentZipIndex);
+    const parentFileTrigger = parentFileName !== '-'
+      && /\.zip$/i.test(parentFileName)
+      && inboxItem
+      && parentAttachment
+      ? `<button type="button" class="doc-parent-zip-trigger min-w-0 break-all text-left text-sm font-semibold text-brand hover:underline"
+          data-email-id="${this.escapeHtml(inboxItem.id)}" data-att-idx="${parentAttachmentIndex}"
+          data-current-zip-index="${currentParentZipIndex}"
+          title="查看 ${this.escapeHtml(parentFileName)} 内的文件">${this.escapeHtml(parentFileName)}</button>`
+      : `<span class="min-w-0 break-all text-sm font-medium text-[#1d2129]" title="${this.escapeHtml(parentFileName)}">${this.escapeHtml(parentFileName)}</span>`;
 
     return `
       <section class="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
         <div class="flex items-center gap-2 px-5 py-4 border-b border-gray-100">
-          <span class="h-7 w-7 rounded-lg bg-blue-50 text-brand flex items-center justify-center">
-            <i class="fa-solid fa-file-lines text-xs"></i>
-          </span>
+          <span class="h-7 w-7 rounded-lg bg-blue-50 text-brand flex items-center justify-center"><i class="fa-solid fa-file-lines text-xs"></i></span>
           <h4 class="text-sm font-extrabold text-[#1d2129]">原始文件</h4>
         </div>
-        <div class="overflow-x-auto">
-          <div class="min-w-[620px]">
-            <div class="grid grid-cols-[minmax(0,1.5fr)_145px_90px_100px] items-center gap-4 bg-slate-50 px-5 py-2.5 text-xs font-semibold text-[#86909c]">
-              <span>原始文件名称</span>
-              <span>上传时间</span>
-              <span>上传用户</span>
-              <span>拆分结果</span>
-            </div>
-            <div class="divide-y divide-gray-100">
-              ${sourceRows.map(sourceRow => {
-                const splitCount = sourceRow.rows.length;
-                const isMultiStore = splitCount > 1;
-                const extension = sourceRow.fileName.match(/\.([^.]+)$/)?.[1]?.toUpperCase() || 'FILE';
-                const sourceFileMap = sourceRow.rows.reduce((result, row) => {
-                  const sourceFileName = row.sourceFileName || String(sourceRow.fileName || '多门店销售明细.zip')
-                    .replace(/-?销售明细包\.zip$/i, '-多门店销售明细.xlsx')
-                    .replace(/\.zip$/i, '.xlsx');
-                  if (!result.has(sourceFileName)) result.set(sourceFileName, []);
-                  result.get(sourceFileName).push(row);
-                  return result;
-                }, new Map());
-                const sourceFiles = [...sourceFileMap.entries()].map(([fileName, rows], index) => ({ fileName, rows, index }));
-                return `
-                  <div class="document-source-table-group">
-                    <div class="document-source-table-row grid grid-cols-[minmax(0,1.5fr)_145px_90px_100px] items-center gap-4 px-5 py-3.5 transition-colors" data-source-key="${sourceRow.key}">
-                      ${inboxItem ? `
-                        <button type="button" class="doc-source-attachment-trigger min-w-0 flex items-center gap-3 text-left" data-email-id="${this.escapeHtml(inboxItem.id)}" data-att-idx="${sourceRow.attachmentIndex}">
-                          <span class="h-8 w-8 shrink-0 rounded-lg bg-green-50 text-green-600 flex items-center justify-center"><i class="fa-solid fa-file-excel text-sm"></i></span>
-                          <span class="min-w-0">
-                            <span class="flex min-w-0 items-center gap-2">
-                              <span class="truncate text-sm font-semibold text-brand hover:underline" title="${this.escapeHtml(sourceRow.fileName)}">${this.escapeHtml(sourceRow.fileName)}</span>
-                              ${isMultiStore ? '<span class="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600">多门店</span>' : ''}
-                            </span>
-                            <span class="mt-0.5 block text-[11px] font-medium text-[#86909c]">${this.escapeHtml(extension)}</span>
-                          </span>
-                        </button>
-                      ` : `
-                        <button type="button" class="doc-fallback-source-trigger min-w-0 flex items-center gap-3 text-left">
-                          <span class="h-8 w-8 shrink-0 rounded-lg bg-green-50 text-green-600 flex items-center justify-center"><i class="fa-solid fa-file-excel text-sm"></i></span>
-                          <span class="min-w-0"><span class="block truncate text-sm font-semibold text-brand hover:underline">${this.escapeHtml(sourceRow.fileName)}</span><span class="mt-0.5 block text-[11px] text-[#86909c]">${this.escapeHtml(extension)}</span></span>
-                        </button>
-                      `}
-                      <span class="text-xs text-[#4e5969]">${this.escapeHtml(sourceRow.uploadedAt)}</span>
-                      <span class="truncate text-xs font-medium text-[#4e5969]" title="${this.escapeHtml(sourceRow.uploadUser)}">${this.escapeHtml(sourceRow.uploadUser)}</span>
-                      ${isMultiStore ? `
-                        <button type="button" class="document-source-split-toggle inline-flex w-fit items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-blue-50" data-target="${sourceRow.key}" data-count="${splitCount}" aria-expanded="false">
-                          <span class="document-source-split-label">查看</span><i class="fa-solid fa-chevron-down text-[10px]"></i>
-                        </button>
-                      ` : '<span class="text-sm text-[#86909c]">-</span>'}
-                    </div>
-                    ${isMultiStore ? `
-                      <div class="document-source-split-panel hidden border-t border-blue-100 bg-blue-50/30 px-5 py-4" data-panel="${sourceRow.key}">
-                        ${sourceFiles.map(sourceFile => {
-                          return `
-                            <div class="document-split-source-panel ${sourceFile.index === 0 ? '' : 'hidden'}" data-group="${sourceRow.key}" data-source-index="${sourceFile.index}">
-                              <div class="max-h-[270px] overflow-auto rounded-xl border border-gray-100 bg-white">
-                                <div class="min-w-[560px]">
-                                  <div class="sticky top-0 grid grid-cols-[minmax(0,1.35fr)_minmax(0,0.9fr)_80px_minmax(0,1.1fr)] gap-3 bg-slate-50 px-4 py-2 text-[11px] font-semibold text-[#86909c]">
-                                    <span>拆分文件</span><span>识别门店</span><span>匹配状态</span><span>处理说明</span>
-                                  </div>
-                                  <div class="divide-y divide-gray-100">
-                                    ${sourceFile.rows.map(row => `
-                                      <div class="grid grid-cols-[minmax(0,1.35fr)_minmax(0,0.9fr)_80px_minmax(0,1.1fr)] items-center gap-3 px-4 py-3 text-xs">
-                                        <button type="button" class="store-split-preview-btn min-w-0 flex items-center gap-2 text-left text-brand hover:underline"
-                                          data-preview-kind="${this.escapeHtml(row.previewKind || '')}" data-row-id="${this.escapeHtml(row.rowId || '')}"
-                                          data-stash-key="${this.escapeHtml(row.stashKey || '')}" data-email-id="${this.escapeHtml(row.emailId || inboxItem?.id || '')}"
-                                          data-att-idx="${typeof row.attachmentIndex === 'number' ? row.attachmentIndex : sourceRow.attachmentIndex}"
-                                          data-zip-index="${typeof row.zipIndex === 'number' ? row.zipIndex : 0}" title="${this.escapeHtml(row.fileName)}">
-                                          <i class="fa-solid fa-file-excel shrink-0 text-green-600"></i><span class="truncate">${this.escapeHtml(row.fileName)}</span>
-                                        </button>
-                                        <span class="truncate font-medium text-[#4e5969]" title="${this.escapeHtml(row.storeName)}">${this.escapeHtml(row.storeName)}</span>
-                                        <span class="justify-self-start rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClass(row)}">${this.escapeHtml(row.status)}</span>
-                                        <span class="leading-5 text-[#4e5969]">${this.escapeHtml(reasonText(row))}</span>
-                                      </div>
-                                    `).join('')}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          `;
-                        }).join('')}
-                      </div>
-                    ` : ''}
-                  </div>
-                `;
-              }).join('')}
-            </div>
-            <div class="document-source-split-shared-container hidden"></div>
+        <div class="divide-y divide-gray-100 px-5">
+          <div class="grid grid-cols-[112px_minmax(0,1fr)] items-start gap-5 py-3.5">
+            <span class="pt-1 text-sm font-medium text-[#86909c]">文件名称</span>
+            <div class="min-w-0">${fileTrigger}</div>
+          </div>
+          <div class="grid grid-cols-[112px_minmax(0,1fr)] items-start gap-5 py-3.5">
+            <span class="text-sm font-medium text-[#86909c]">父级文件名称</span>
+            <div class="min-w-0">${parentFileTrigger}</div>
+          </div>
+          <div class="grid grid-cols-[112px_minmax(0,1fr)] items-start gap-5 py-3.5">
+            <span class="text-sm font-medium text-[#86909c]">上传时间</span>
+            <span class="text-sm text-[#1d2129]">${this.escapeHtml(uploadedAt || '-')}</span>
+          </div>
+          <div class="grid grid-cols-[112px_minmax(0,1fr)] items-start gap-5 py-3.5">
+            <span class="text-sm font-medium text-[#86909c]">上传用户</span>
+            <span class="text-sm font-medium text-[#1d2129]">${this.escapeHtml(uploadUser || '-')}</span>
+          </div>
+          <div class="grid grid-cols-[112px_minmax(0,1fr)] items-start gap-5 py-3.5">
+            <span class="text-sm font-medium text-[#86909c]">批次号</span>
+            <span class="font-mono text-sm text-[#1d2129]">${this.escapeHtml(batchNumber || '-')}</span>
           </div>
         </div>
-      </section>
-    `;
+      </section>`;
+  },
+
+  showParentZipFileDialog(inboxItem, attachment, currentZipIndex = 0) {
+    if (!inboxItem || !attachment) return;
+    document.querySelector('.parent-zip-file-dialog')?.remove();
+    const files = this.getZipAttachmentFiles(inboxItem, attachment);
+    const activeIndex = Math.min(Math.max(Number(currentZipIndex) || 0, 0), Math.max(0, files.length - 1));
+    const dialog = document.createElement('div');
+    dialog.className = 'parent-zip-file-dialog fixed inset-0 z-[9500] flex items-center justify-center bg-slate-900/40 px-6 backdrop-blur-sm';
+    dialog.innerHTML = `
+      <div class="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="parent-zip-file-title">
+        <header class="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+          <h3 id="parent-zip-file-title" class="text-base font-bold text-[#1d2129]">ZIP 文件列表</h3>
+          <button type="button" class="parent-zip-file-close flex h-8 w-8 items-center justify-center rounded-lg text-[#86909c] hover:bg-gray-100 hover:text-[#1d2129]" aria-label="关闭">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </header>
+        <div class="max-h-[440px] overflow-auto p-3">
+          ${files.length ? files.map((file, index) => `
+            <button type="button" class="parent-zip-file-item flex w-full items-center rounded-xl px-4 py-3 text-left text-sm font-medium transition-colors ${index === activeIndex ? 'bg-blue-50 text-brand ring-1 ring-inset ring-blue-100' : 'text-[#4e5969] hover:bg-gray-50'}"
+              data-zip-index="${index}" title="预览 ${this.escapeHtml(file.name)}">
+              <span class="min-w-0 truncate">${this.escapeHtml(file.name)}</span>
+            </button>
+          `).join('') : '<div class="px-4 py-8 text-center text-sm text-[#86909c]">ZIP 文件中没有可预览的文件</div>'}
+        </div>
+      </div>`;
+    document.body.appendChild(dialog);
+    const close = () => {
+      dialog.remove();
+      document.removeEventListener('keydown', onKeydown);
+    };
+    const onKeydown = event => { if (event.key === 'Escape') close(); };
+    dialog.querySelector('.parent-zip-file-close')?.addEventListener('click', close);
+    dialog.addEventListener('click', event => { if (event.target === dialog) close(); });
+    dialog.querySelectorAll('.parent-zip-file-item').forEach(button => {
+      button.addEventListener('click', () => {
+        const index = Number(button.dataset.zipIndex || 0);
+        close();
+        this.showInboxAttachmentPreview(inboxItem, attachment, index);
+      });
+    });
+    document.addEventListener('keydown', onKeydown);
   },
 
   getFileCheckLogStatus(statusText = '') {
@@ -4220,6 +5101,8 @@ const IngestionView = {
       <div class="space-y-5">
         ${this.renderDocumentSourceTable({ ...context, inboxItem, attachment: sourceAttachment, attachmentIndex: sourceAttachmentIndex }, splitGroups, context.sourceFileName || row.sourceFileName || requiredSourceFileName)}
 
+        ${this.renderDocumentProcessingSplitSection({ ...context, inboxItem, attachment: sourceAttachment, attachmentIndex: sourceAttachmentIndex }, splitGroups)}
+
         <section class="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
           <div class="mb-1"><h4 class="text-sm font-extrabold text-[#1d2129]">${cn ? '单据日志' : '문서 로그'}</h4></div>
           <div class="document-lifecycle-list mt-4">
@@ -4268,6 +5151,18 @@ const IngestionView = {
           return;
         }
         this.showInboxAttachmentPreview(item, attachment, zipIndex);
+      });
+    });
+
+    overlay.querySelectorAll('.doc-parent-zip-trigger').forEach(btn => {
+      btn.addEventListener('click', event => {
+        event.stopPropagation();
+        const emailId = btn.dataset.emailId;
+        const attachmentIndex = Number(btn.dataset.attIdx || 0);
+        const currentZipIndex = Number(btn.dataset.currentZipIndex || 0);
+        const item = this.getInboxData().find(candidate => String(candidate.id) === String(emailId));
+        const attachment = item?.attachments?.[attachmentIndex];
+        if (item && attachment) this.showParentZipFileDialog(item, attachment, currentZipIndex);
       });
     });
 
@@ -4945,35 +5840,23 @@ const IngestionView = {
     
     const sortIcon = '<i class="fa-solid fa-sort opacity-30"></i>';
     const isZipPreview = /\.zip$/i.test(att.name);
-    const zipFiles = isZipPreview ? [
-      {
-        name: cn ? '门店销售明细.xlsx' : '매장 판매 상세.xlsx',
-        type: 'xlsx',
-        status: cn ? '正常' : '정상',
-        rows: initialRows
-      },
-      {
-        name: cn ? '产品销售汇总.csv' : '제품 판매 요약.csv',
-        type: 'csv',
-        status: cn ? '正常' : '정상',
-        rows: initialRows.slice(0, 12).map((row, index) => ({
+    const zipFiles = isZipPreview ? this.getZipAttachmentFiles(inboxItem, att).map((file, fileIndex) => {
+      const splitStore = att.splitStores?.[fileIndex];
+      const isDuplicate = /重复|待处理/.test(`${file.status || ''} ${file.note || ''} ${splitStore?.reason || ''}`);
+      return {
+        ...file,
+        type: file.type || 'XLSX',
+        rows: initialRows.map((row, rowIndex) => ({
           ...row,
-          quantity: row.quantity + index,
-          amount: (Number(row.amount) + index * 3.6).toFixed(1),
-          remark: cn ? '汇总数据' : '요약 데이터'
+          storeName: splitStore?.storeName || row.storeName,
+          remark: isDuplicate
+            ? (splitStore?.reason || file.note || (cn ? '与原始门店数据列表重复' : '원본 매장 데이터 목록과 중복'))
+            : (file.note || row.remark),
+          quantity: Number(row.quantity || 0) + (fileIndex ? rowIndex % 3 : 0)
         }))
-      },
-      {
-        name: cn ? '重复门店清单.xlsx' : '중복 매장 목록.xlsx',
-        type: 'xlsx',
-        status: cn ? '待处理' : '처리 대기',
-        rows: initialRows.slice(0, 6).map((row, index) => ({
-          ...row,
-          storeName: index % 2 === 0 ? 'A门店' : 'B门店',
-          remark: cn ? '与原始门店数据列表重复' : '원본 매장 데이터 목록과 중복'
-        }))
-      }
-    ] : [];
+      };
+    }) : [];
+    const isDuplicateZipFile = file => /重复|待处理/.test(`${file?.status || ''} ${file?.note || ''}`);
     const selectedZipIndex = isZipPreview
       ? Math.min(Math.max(Number(initialZipIndex) || 0, 0), zipFiles.length - 1)
       : 0;
@@ -5024,7 +5907,7 @@ const IngestionView = {
             ` : ''}
             <div class="flex-1 overflow-auto p-0">
               ${isZipPreview ? `
-                <div id="zip-file-alert" class="${zipFiles[selectedZipIndex]?.name.includes('重复门店') ? '' : 'hidden'} sticky top-0 z-20 border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-700">
+                <div id="zip-file-alert" class="${isDuplicateZipFile(zipFiles[selectedZipIndex]) ? '' : 'hidden'} sticky top-0 z-20 border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-700">
                   ${cn ? 'A门店、B门店 与原始门店数据列表重复，请确认是否覆盖或忽略。' : 'A/B 매장이 원본 매장 데이터 목록과 중복됩니다.'}
                 </div>
               ` : ''}
@@ -5124,7 +6007,7 @@ const IngestionView = {
           overlay.querySelectorAll('.zip-file-item').forEach(item => item.classList.remove('bg-blue-50'));
           btn.classList.add('bg-blue-50');
           if (alert) {
-            alert.classList.toggle('hidden', !file.name.includes('重复门店'));
+            alert.classList.toggle('hidden', !isDuplicateZipFile(file));
           }
         });
       });
@@ -5425,6 +6308,133 @@ const IngestionView = {
     };
   },
 
+  getIngestionTradeMasterRecords() {
+    const matchedRows = Array.isArray(this.data) ? this.data : [];
+    const standardRows = (typeof QAView !== 'undefined' && Array.isArray(QAView.standardData)) ? QAView.standardData : [];
+    const records = new Map();
+    [...matchedRows, ...standardRows].forEach((row, index) => {
+      const fields = this.getStoreDeliveryFields(row, index);
+      const code = String(fields.orionTradeCode || '').trim().toUpperCase();
+      if (!code || code === '-' || records.has(code)) return;
+      records.set(code, {
+        code,
+        name: fields.orionTradeName || '-',
+        salesTeam: fields.salesTeam || '-',
+        region: fields.region || '-',
+        salesOffice: fields.salesOffice || '-',
+        acc: fields.acc || '-'
+      });
+    });
+    return Array.from(records.values());
+  },
+
+  openIngestionModificationDialog({ mode, row, index = 0, key = '' }) {
+    const isStash = mode === 'stash';
+    const deliveryFields = this.getStoreDeliveryFields(row, index, isStash ? {
+      rawStoreCode: this.getStashRawStoreCode(row, index),
+      customerStoreName: row.customerStoreName || row.storeName || '-',
+      dealer: row.customerDealer || row.dealer || '-',
+      acc: row.customerAcc || row.acc || '-'
+    } : {});
+    const tradeRecords = this.getIngestionTradeMasterRecords();
+    document.getElementById('ingestion-modification-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'ingestion-modification-overlay';
+    overlay.className = 'data-modification-overlay';
+    overlay.innerHTML = `<div class="data-modification-dialog" role="dialog" aria-modal="true" aria-labelledby="ingestion-modification-title">
+      <header class="data-modification-header"><div><h3 id="ingestion-modification-title">修改数据</h3><p>${this.escapeHtml(deliveryFields.customerStoreName || '当前单据')} · 门店级视图</p></div><button type="button" data-mod-close aria-label="关闭"><i class="fa-solid fa-xmark"></i></button></header>
+      <div class="data-modification-body">
+        <div class="data-modification-grid">
+          <div class="data-modification-group">
+            ${DataModificationSelect.renderRow([DataModificationSelect.renderReadonly('所属时间', deliveryFields.time)])}
+          </div>
+          <div class="data-modification-group">
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.renderReadonly('客户门店名称', deliveryFields.customerStoreName),
+              DataModificationSelect.renderReadonly('客户门店编码', deliveryFields.rawTradeCode),
+              DataModificationSelect.renderReadonly('好丽友交易处名称', deliveryFields.orionTradeName)
+            ])}
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.render({ id: 'ingestion-mod-trade', label: '好丽友交易处编码', value: deliveryFields.orionTradeCode === '-' ? '' : deliveryFields.orionTradeCode, options: tradeRecords })
+            ])}
+          </div>
+          <div class="data-modification-group">
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.renderText({ id: 'ingestion-mod-system', label: '系统名称', value: deliveryFields.partnerErp === '-' ? '' : deliveryFields.partnerErp, placeholder: '请输入系统名称' }),
+              DataModificationSelect.renderReadonly('客户门店号', deliveryFields.customerStoreNo),
+              DataModificationSelect.renderReadonly('ACC', deliveryFields.acc)
+            ])}
+          </div>
+          <div class="data-modification-group">
+            ${DataModificationSelect.renderRow([
+              DataModificationSelect.renderReadonly('本部Team', deliveryFields.salesTeam),
+              DataModificationSelect.renderReadonly('区域', deliveryFields.region),
+              DataModificationSelect.renderReadonly('营业所', deliveryFields.salesOffice)
+            ])}
+          </div>
+        </div>
+      </div>
+      <footer class="data-modification-footer"><button type="button" data-mod-cancel>取消</button><button type="button" class="is-primary" data-mod-save>保存修改</button></footer>
+    </div>`;
+    document.body.appendChild(overlay);
+    DataModificationSelect.bind(overlay, 'ingestion-mod-trade');
+
+    const close = () => overlay.remove();
+    overlay.querySelectorAll('[data-mod-close],[data-mod-cancel]').forEach(button => button.addEventListener('click', close));
+    overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
+    overlay.querySelector('[data-mod-save]')?.addEventListener('click', () => {
+      if (isStash) {
+        const currentItem = this.getFilteredStashRows().find(item => item.key === key);
+        if (!currentItem || !this.canEditStashRow(currentItem)) return Dialog.toast('单据状态已变化，当前不可保存', 'warning');
+      } else if (!this.canEditMatchedRow(row) || this.getMatchedQualityStatus(row) === '已质检') {
+        return Dialog.toast('该单据已完成质检或状态已变化，不可保存', 'warning');
+      }
+      const systemName = overlay.querySelector('#ingestion-mod-system')?.value.trim() || '';
+      const tradeCode = overlay.querySelector('#ingestion-mod-trade')?.value.trim().toUpperCase() || '';
+      const tradeRecord = tradeRecords.find(item => item.code === tradeCode) || this.getOrionTradeMasterRecord(tradeCode);
+      if (!systemName) return Dialog.toast('系统名称不能为空', 'warning');
+      if (!tradeRecord) return Dialog.toast('请选择有效的好丽友交易处编码', 'warning');
+      const edits = {
+        partnerErp: systemName,
+        ...this.getTradeMasterEdits(tradeRecord),
+        lastOperatorName: Store.getState().userName || '系统',
+        lastOperatorRole: Store.getState().userRole || '系统',
+        lastAction: '修改数据',
+        lastOperatedAt: this.formatNowDateTime()
+      };
+      if (isStash) {
+        this.stashEdits.set(key, { ...(this.stashEdits.get(key) || {}), ...edits });
+        this.saveStashWorkflow(key, {
+          lastOperatorName: edits.lastOperatorName,
+          lastOperatorRole: edits.lastOperatorRole,
+          lastAction: edits.lastAction,
+          lastOperatedAt: edits.lastOperatedAt
+        });
+        close();
+        this.renderStashTable();
+      } else {
+        Object.assign(row, edits);
+        this.data.forEach(item => { if (String(item.id) === String(row.id)) Object.assign(item, edits); });
+        this.filteredData.forEach(item => { if (String(item.id) === String(row.id)) Object.assign(item, edits); });
+        this.saveWorkflowState();
+        close();
+        this.renderTable();
+      }
+      Dialog.toast('数据修改成功', 'success');
+    });
+    overlay.querySelector('#ingestion-mod-system')?.focus();
+  },
+
+  openMatchedModificationDialog(row) {
+    if (!row || !this.canEditMatchedRow(row)) return Dialog.toast('当前单据尚未流转至当前账号处理', 'warning');
+    this.openIngestionModificationDialog({ mode: 'matched', row, index: Math.max(0, this.data.indexOf(row)) });
+  },
+
+  openStashModificationDialog(item) {
+    if (!item || !this.canEditStashRow(item)) return Dialog.toast(item ? this.getStashEditDisabledReason(item) : '当前单据不可编辑', 'warning');
+    this.openIngestionModificationDialog({ mode: 'stash', row: item.row, index: item.index, key: item.key });
+  },
+
   matchedHeadquartersTeams: ['华北', '华东', '华中', '东北', '西北', '全国渠道'],
 
   getMatchedHeadquartersTeam(row = {}, index = 0) {
@@ -5446,7 +6456,7 @@ const IngestionView = {
     return `
       <tr class="bg-[#f7f8fa] text-[#1d2129]">
         <th class="w-[52px] min-w-[52px] px-4 py-3"></th>
-        <th class="min-w-36 px-4 py-3">${cn ? '时间' : '시간'}</th>
+        <th class="min-w-36 px-4 py-3">${cn ? '所属时间' : '소속 시간'}</th>
         <th class="min-w-32 px-4 py-3">${cn ? '客户系统' : '고객 시스템'}</th>
         <th class="min-w-32 px-5 py-3">${cn ? '客户门店号' : '고객 매장 번호'}</th>
         <th class="min-w-40 px-5 py-3">${cn ? '客户交易处编码' : '고객 거래처 코드'}</th>
@@ -5472,26 +6482,14 @@ const IngestionView = {
     const table = document.getElementById('ingestion-table');
     table?.classList.toggle('min-w-[2900px]', !isOriginalStoreList);
     table?.classList.toggle('min-w-[900px]', isOriginalStoreList);
-    if (isOriginalStoreList) {
-      const disableManualSelection = !this.isManualQualityCheckEnabled();
-      headerRow.innerHTML = `
-        <th class="w-1/2 rounded-tl-lg px-6 py-4">
-          <div class="flex items-center gap-3">
-            <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" ${disableManualSelection ? 'disabled title="当前为自动质检模式"' : ''}>
-            <span>${cn ? '本部Team' : '본부 Team'}</span>
-          </div>
-        </th>
-        <th class="w-1/4 px-6 py-4 text-center">${cn ? '匹配门店数' : '매칭 매장 수'}</th>
-        <th class="w-1/4 rounded-tr-lg px-6 py-4 text-center">${cn ? '未匹配/提交门店' : '미매칭/제출 매장'}</th>
-      `;
-      return;
-    }
     const disableManualSelection = false;
     const commonStart = `
-      <th class="px-5 py-4 w-[60px] min-w-[60px] rounded-tl-lg sticky left-0 z-30 bg-[#f7f8fa]">
+      <th class="px-5 py-4 w-[60px] min-w-[60px] rounded-tl-lg bg-[#f7f8fa]">
         <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" ${disableManualSelection ? 'disabled title="当前为自动质检模式"' : ''}>
       </th>
-      <th class="px-4 py-4 min-w-40">${cn ? '时间' : '시간'}</th>
+      <th class="px-4 py-4 min-w-40">${cn ? '所属时间' : '소속 시간'}</th>
+      <th class="px-4 py-4 min-w-64">${cn ? '原始文件名' : '원본 파일명'}</th>
+      <th class="px-4 py-4 min-w-64">${cn ? '当前文件名' : '현재 파일명'}</th>
       <th class="px-4 py-4 min-w-36">${cn ? '客户系统' : '고객 시스템'}</th>
     `;
     headerRow.innerHTML = `
@@ -5499,17 +6497,17 @@ const IngestionView = {
         <th class="px-5 py-4 min-w-36">${cn ? '客户门店号' : '고객 매장 번호'}</th>
         <th class="px-5 py-4 min-w-40">${cn ? '客户交易处编码' : '고객 거래처 코드'}</th>
         <th class="px-5 py-4 min-w-48">${cn ? '客户交易处名称' : '고객 거래처명'}</th>
-        <th class="px-5 py-4 min-w-36">${cn ? '营业Team' : '영업 Team'}</th>
-        <th class="px-5 py-4 min-w-32">${cn ? '区域' : '지역'}</th>
-        <th class="px-5 py-4 min-w-36">${cn ? '营业所' : '영업소'}</th>
-        <th class="px-5 py-4 min-w-24">ACC</th>
         <th class="px-5 py-4 min-w-40">${cn ? '好丽友交易处编码' : '오리온 거래처 코드'}</th>
         <th class="px-5 py-4 min-w-48">${cn ? '好丽友交易处名称' : '오리온 거래처명'}</th>
         <th class="px-5 py-4 min-w-64">${cn ? '异常说明' : '이상 설명'}</th>
+        <th class="px-5 py-4 min-w-36">${cn ? '本部TEAM' : '본부 Team'}</th>
+        <th class="px-5 py-4 min-w-32">${cn ? '区域' : '지역'}</th>
+        <th class="px-5 py-4 min-w-36">${cn ? '营业所' : '영업소'}</th>
+        <th class="px-5 py-4 min-w-24">ACC</th>
         <th class="px-5 py-4 min-w-36">${cn ? '当前责任人' : '현재 책임자'}</th>
         <th class="px-5 py-4 min-w-32">${cn ? '最近操作人' : '최근 작업자'}</th>
         <th class="px-5 py-4 min-w-28">${cn ? '状态' : '상태'}</th>
-        <th class="px-5 py-4 w-24 min-w-24 rounded-tr-lg sticky right-0 z-20 bg-blue-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">
+        <th class="px-5 py-4 w-24 min-w-24 max-w-24 rounded-tr-lg sticky right-0 z-30 bg-[#f7f8fa] shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.45)]">
           <div class="flex items-center gap-1">
             ${cn ? '操作' : '조작'}
             <i class="fa-solid fa-circle-info text-xs text-[#86909c] cursor-help" title="${cn ? '操作按钮' : '조작 버튼'}"></i>
@@ -5633,30 +6631,33 @@ const IngestionView = {
       return `
         <tr class="hover:bg-slate-50 transition-colors group" data-id="${row.id}">
           <td class="px-4 py-3 w-[60px] min-w-[60px]">
-            <input type="checkbox" class="row-cb rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" value="${row.id}" ${(isActionLocked || (this.activeDataMode === 'files' && !this.isManualQualityCheckEnabled())) ? 'disabled' : ''}>
+            <input type="checkbox" class="row-cb rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" value="${row.id}" ${isActionLocked ? 'disabled' : ''}>
           </td>
           <td class="px-4 py-3 text-[#4e5969]">${this.escapeHtml(deliveryFields.time)}</td>
-          <td class="px-4 py-3"><span class="row-edit-display">${this.escapeHtml(deliveryFields.partnerErp)}</span><input type="text" class="row-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="partnerErp" value="${this.escapeHtml(deliveryFields.partnerErp === '-' ? '' : deliveryFields.partnerErp)}"></td>
+          <td class="px-4 py-3"><span class="block max-w-[240px] truncate" title="${this.escapeHtml(deliveryFields.originalFileName)}">${this.escapeHtml(deliveryFields.originalFileName)}</span></td>
+          <td class="px-4 py-3"><span class="block max-w-[240px] truncate" title="${this.escapeHtml(deliveryFields.currentFileName)}">${this.escapeHtml(deliveryFields.currentFileName)}</span></td>
+          <td class="px-4 py-3">${this.escapeHtml(deliveryFields.partnerErp)}</td>
           <td class="px-5 py-3 font-mono">${this.escapeHtml(deliveryFields.customerStoreNo)}</td>
           <td class="px-5 py-3 font-mono">${this.escapeHtml(deliveryFields.rawTradeCode)}</td>
           <td class="px-5 py-3 font-medium text-[#1d2129]">${this.escapeHtml(deliveryFields.customerStoreName)}</td>
+          <td class="px-5 py-3 font-mono text-[#1d2129]">${this.escapeHtml(deliveryFields.orionTradeCode)}</td>
+          <td class="px-5 py-3">${this.escapeHtml(deliveryFields.orionTradeName)}</td>
+          ${isOriginalStoreList ? `<td class="px-5 py-3"><span class="block max-w-[300px] truncate text-[#4e5969]" title="${this.escapeHtml(aiExceptionDescription)}">${this.escapeHtml(aiExceptionDescription)}</span></td>` : ''}
           <td class="px-5 py-3">${this.escapeHtml(deliveryFields.salesTeam)}</td>
           <td class="px-5 py-3">${this.escapeHtml(deliveryFields.region)}</td>
           <td class="px-5 py-3">${this.escapeHtml(deliveryFields.salesOffice)}</td>
           <td class="px-5 py-3 font-medium">${this.escapeHtml(deliveryFields.acc)}</td>
-          <td class="px-5 py-3 font-mono text-[#1d2129]"><span class="row-edit-display">${this.escapeHtml(deliveryFields.orionTradeCode)}</span><input type="text" class="row-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm font-mono bg-white focus:outline-none focus:border-brand" data-edit-field="orionStoreCode" value="${this.escapeHtml(deliveryFields.orionTradeCode === '-' ? '' : deliveryFields.orionTradeCode)}"></td>
-          <td class="px-5 py-3">${this.escapeHtml(deliveryFields.orionTradeName)}</td>
-          ${isOriginalStoreList ? `<td class="px-5 py-3"><span class="block max-w-[300px] truncate text-[#4e5969]" title="${this.escapeHtml(aiExceptionDescription)}">${this.escapeHtml(aiExceptionDescription)}</span></td>` : ''}
+          <td class="px-5 py-3">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
           <td class="px-5 py-3">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
           ${isOriginalStoreList ? `
-            <td class="px-5 py-3 sticky right-[96px] z-10 bg-white group-hover:bg-slate-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">
+            <td class="px-5 py-3">
               <span class="inline-flex h-6 min-w-[64px] items-center justify-center gap-1 whitespace-nowrap px-2 rounded-full border text-xs font-semibold leading-none ${this.getMatchedQualityStatus(row) === '已质检' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'}"
                 title="${this.getMatchedQualityStatus(row) === '已质检' ? '已完成质量检查' : '等待质量检查'}">
                 ${this.escapeHtml(this.getRoleDisplayStatus(row))}
               </span>
             </td>
           ` : ''}
-          <td class="px-5 py-3 sticky right-0 z-10 bg-white group-hover:bg-slate-50">
+          <td class="px-5 py-3 w-24 min-w-24 max-w-24 sticky right-0 z-20 bg-white group-hover:bg-slate-50 shadow-[-6px_0_10px_-8px_rgba(15,23,42,0.35)]">
             <div class="flex items-center gap-1">
               ${this.activeDataMode !== 'files' || this.hasIngestionPermission('单门店已匹配数据', '单据详情') ? `<button class="px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 action-btn" data-action="detail" data-id="${row.id}" title="${this.getCurrentLang() === 'cn' ? '单据详情' : '문서 상세'}">
                 <i class="fa-solid fa-list-check"></i>
@@ -5677,77 +6678,64 @@ const IngestionView = {
       `;
     });
 
-    if (isOriginalStoreList) {
-      const groupedRows = new Map(this.matchedHeadquartersTeams.map(team => [team, []]));
-      pageData.forEach((row, index) => {
-        const team = this.getMatchedHeadquartersTeam(row, index);
-        groupedRows.get(team).push({ row, index });
-      });
-
-      const unmatchedCounts = new Map(this.matchedHeadquartersTeams.map(team => [team, 0]));
-      this.getStashSourceRows().forEach((item, index) => {
-        const team = this.getMatchedHeadquartersTeam(item.row, index);
-        unmatchedCounts.set(team, (unmatchedCounts.get(team) || 0) + 1);
-      });
-
-      tbody.innerHTML = this.matchedHeadquartersTeams.map((team) => {
-        const entries = groupedRows.get(team) || [];
-        const submittedCount = entries.filter(entry => this.getMatchedQualityStatus(entry.row) === '已质检').length;
-        const unmatchedOrSubmittedCount = (unmatchedCounts.get(team) || 0) + submittedCount;
-        const expanded = this.expandedMatchedTeams.has(team);
-        const teamKey = encodeURIComponent(team);
-        return `
-          <tr class="matched-team-row cursor-pointer border-b border-slate-100 bg-white transition-colors hover:bg-blue-50/60" data-team="${teamKey}">
-            <td class="px-6 py-4">
-              <button type="button" class="matched-team-expand-btn flex items-center gap-3 text-left font-semibold text-[#1d2129]" data-team="${teamKey}" aria-expanded="${expanded}">
-                <span class="flex h-7 w-7 items-center justify-center rounded-md text-[#86909c] transition-colors hover:bg-blue-100 hover:text-brand">
-                  <i class="fa-solid fa-chevron-right text-xs transition-transform ${expanded ? 'rotate-90' : ''}"></i>
-                </span>
-                <span>${this.escapeHtml(team === '全国渠道' ? team : `${team} Team`)}</span>
-              </button>
-            </td>
-            <td class="px-6 py-4 text-center">
-              <span class="inline-flex min-w-12 items-center justify-center rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-brand">${entries.length}</span>
-            </td>
-            <td class="px-6 py-4 text-center">
-              <span class="inline-flex min-w-12 items-center justify-center rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-700">${unmatchedOrSubmittedCount}</span>
-            </td>
-          </tr>
-          <tr class="matched-team-detail-row ${expanded ? '' : 'hidden'}" data-team="${teamKey}">
-            <td colspan="3" class="bg-[#f7faff] p-0">
-              <div class="overflow-x-auto border-y border-blue-100">
-                ${entries.length ? `
-                  <table class="w-full min-w-[1900px] table-fixed text-left text-xs text-[#4e5969]">
-                    <thead>${this.renderMatchedChildHeader()}</thead>
-                    <tbody class="divide-y divide-gray-100 bg-white">
-                      ${entries.map(entry => renderedRows[entry.index]).join('')}
-                    </tbody>
-                  </table>
-                ` : '<div class="px-6 py-8 text-center text-sm text-[#86909c]">该本部暂无匹配门店</div>'}
+    if (isOriginalStoreList && this.loadMatchedGroupingFields().length) {
+      const fields = this.loadMatchedGroupingFields();
+      const labels = Object.fromEntries(this.getMatchedGroupingOptions().map(item => [item.value, item.label]));
+      const entries = pageData.map((row, index) => ({ row, index, html: renderedRows[index] }));
+      const renderGroups = (items, level = 0, parentKey = '') => {
+        if (level >= fields.length) return items.map(item => item.html).join('');
+        const field = fields[level];
+        const groups = new Map();
+        items.forEach(item => {
+          const value = this.getMatchedGroupValue(item.row, field, item.index);
+          if (!groups.has(value)) groups.set(value, []);
+          groups.get(value).push(item);
+        });
+        return [...groups.entries()].map(([value, groupItems]) => {
+          const key = `${parentKey}/${field}:${value}`;
+          const expanded = !this.collapsedMatchedGroups.has(key);
+          const ids = groupItems.map(item => item.row.id).join(',');
+          return `<tr class="matched-dynamic-group-row border-b border-blue-100 bg-[#f7faff]" data-group-key="${this.escapeHtml(key)}">
+            <td colspan="19" class="px-4 py-3">
+              <div class="flex items-center gap-3" style="padding-left:${level * 22}px">
+                <button type="button" class="matched-dynamic-expand-btn flex h-7 w-7 items-center justify-center rounded-md text-[#86909c] hover:bg-blue-100 hover:text-brand" data-group-key="${this.escapeHtml(key)}"><i class="fa-solid fa-chevron-right text-xs transition-transform ${expanded ? 'rotate-90' : ''}"></i></button>
+                <input type="checkbox" class="matched-group-select rounded border-gray-300 text-brand" data-row-ids="${this.escapeHtml(ids)}">
+                <span class="text-xs text-[#86909c]">${labels[field]}</span><strong class="text-sm text-[#1d2129]">${this.escapeHtml(value)}</strong>
+                <span class="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-brand">${groupItems.length} 条</span>
               </div>
             </td>
-          </tr>`;
-      }).join('');
+          </tr>${expanded ? renderGroups(groupItems, level + 1, key) : ''}`;
+        }).join('');
+      };
+      tbody.innerHTML = renderGroups(entries);
     } else {
       tbody.innerHTML = renderedRows.join('');
     }
-
-    tbody.querySelectorAll('.matched-team-row, .matched-team-expand-btn').forEach(element => {
-      element.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const teamKey = element.dataset.team;
-        const team = decodeURIComponent(teamKey || '');
-        if (!team) return;
-        if (this.expandedMatchedTeams.has(team)) this.expandedMatchedTeams.delete(team);
-        else this.expandedMatchedTeams.add(team);
-        const detailRow = tbody.querySelector(`.matched-team-detail-row[data-team="${teamKey}"]`);
-        const button = tbody.querySelector(`.matched-team-expand-btn[data-team="${teamKey}"]`);
-        const expanded = this.expandedMatchedTeams.has(team);
-        detailRow?.classList.toggle('hidden', !expanded);
-        button?.setAttribute('aria-expanded', String(expanded));
-        button?.querySelector('i')?.classList.toggle('rotate-90', expanded);
+    const expectedColumnCount = document.getElementById('ingestion-table-head-row')?.children.length || 0;
+    Array.from(tbody.querySelectorAll(':scope > tr:not(.matched-dynamic-group-row)')).forEach((rowElement, rowIndex) => {
+      if (expectedColumnCount && rowElement.children.length !== expectedColumnCount) {
+        console.warn(`[文件收取] 第 ${rowIndex + 1} 行列数 ${rowElement.children.length} 与表头列数 ${expectedColumnCount} 不一致`);
+      }
+    });
+    tbody.querySelectorAll('.matched-dynamic-expand-btn').forEach(button => {
+      button.addEventListener('click', () => {
+        const key = button.dataset.groupKey;
+        if (this.collapsedMatchedGroups.has(key)) this.collapsedMatchedGroups.delete(key);
+        else this.collapsedMatchedGroups.add(key);
+        this.renderTable();
       });
     });
+
+    tbody.querySelectorAll('.matched-group-select').forEach(groupCheckbox => {
+      const ids = new Set(String(groupCheckbox.dataset.rowIds || '').split(',').filter(Boolean));
+      const rows = Array.from(tbody.querySelectorAll('.row-cb')).filter(cb => ids.has(cb.value) && !cb.disabled);
+      groupCheckbox.disabled = rows.length === 0;
+      groupCheckbox.addEventListener('change', () => {
+        rows.forEach(cb => { cb.checked = groupCheckbox.checked; });
+        rows[0]?.dispatchEvent(new Event('change'));
+      });
+    });
+    this.applyMatchedColumnVisibility();
     
     this.renderPagination();
     this.bindTableEvents();
@@ -5776,9 +6764,31 @@ const IngestionView = {
         index: `stash-${inboxItem.id}-${attachmentIndex}-${index}`
       };
     });
+    const reviewDemoRow = {
+      row: {
+        id: 'STASH-REVIEW-001',
+        month: '2026年05月',
+        partnerErp: '多客隆',
+        customerStoreNo: 'S0316608',
+        rawStoreCode: 'S1089276',
+        customerStoreName: '多客隆金明店',
+        storeName: '多客隆金明店-销售明细.xlsx',
+        storeCode: 'C9001015',
+        orionStoreCode: 'C9001015',
+        orionStoreName: '多客隆金明店',
+        aiNote: '门店映射信息已补充，等待POS担当复核',
+        salesTeam: '华中 Team',
+        region: '中部区域',
+        salesOffice: '武汉营业所',
+        acc: '南阳万德隆',
+        handler: 'POS担当'
+      },
+      index: 'review-demo-001'
+    };
     return [
       ...stashedAttachmentRows,
-      ...rows.map((row, index) => ({ row, index })).slice(0, 5)
+      ...rows.map((row, index) => ({ row, index })).slice(0, 5),
+      reviewDemoRow
     ].map((item) => {
       const key = this.getStashRowKey(item.row, item.index);
       const failed = this.failedStashKeys.has(key);
@@ -5811,7 +6821,8 @@ const IngestionView = {
   getStashWorkflow(key) {
     try {
       const state = JSON.parse(localStorage.getItem('pos_demo_stash_workflow') || '{}');
-      const workflow = state[key] || { workflowStatus: '待处理' };
+      const defaultStatus = key === 'standard-STASH-REVIEW-001' ? 'POS担当待处理' : '待处理';
+      const workflow = state[key] || { workflowStatus: defaultStatus };
       if (!workflow.currentOwnerType) {
         workflow.currentOwnerType = workflow.workflowStatus === '营业担当处理中' ? 'sales' : 'pos';
       }
@@ -5835,14 +6846,25 @@ const IngestionView = {
     return ({ 待处理: '待处理', 营业担当处理中: '处理中', POS担当待处理: '待复核' })[status] || status;
   },
 
+  getStashStatusStyle(key) {
+    const status = this.getStashWorkflow(key).workflowStatus;
+    return ({
+      待处理: 'border-amber-200 bg-amber-50 text-amber-700',
+      营业担当处理中: 'border-blue-200 bg-blue-50 text-blue-700',
+      POS担当待处理: 'border-violet-200 bg-violet-50 text-violet-700',
+      已通过: 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    })[status] || 'border-slate-200 bg-slate-50 text-slate-600';
+  },
+
   getStashResponsibility(row = {}, key = '') {
     const workflow = this.getStashWorkflow(key);
     const status = workflow.workflowStatus || '待处理';
     let currentOwnerName = workflow.currentOwnerName;
-    if (!currentOwnerName) {
-      if (workflow.currentOwnerType === 'sales') currentOwnerName = this.getStashOwnerTeam(row, workflow) || '-';
+    const hasOwner = value => Boolean(String(value || '').trim()) && String(value).trim() !== '-';
+    if (!hasOwner(currentOwnerName)) {
+      if (workflow.currentOwnerType === 'sales') currentOwnerName = this.getStashOwnerTeam(row, workflow) || '营业担当';
       else if (workflow.currentOwnerType === 'system') currentOwnerName = '系统';
-      else currentOwnerName = status === '已完成' ? '-' : 'POS担当';
+      else currentOwnerName = status === '已完成' ? '系统' : 'POS担当';
     }
     return {
       currentOwnerName,
@@ -5895,6 +6917,7 @@ const IngestionView = {
   getFilteredStashRows() {
     const keyword = this.filters.fileName.trim().toLowerCase();
     return this.getStashSourceRows().filter(({ row, index }) => {
+      if (!this.matchesPeriodFilters(row, 'stash')) return false;
       const key = this.getStashRowKey(row, index);
       const workflow = this.getStashWorkflow(key);
       const statusMap = { pending: '待处理', processing: '处理中', review: '待复核' };
@@ -5935,7 +6958,9 @@ const IngestionView = {
       const salesOffice = row.customerSalesOffice || '-';
       const isRejected = this.rejectedStashKeys.has(key);
       const stashStatus = stashWorkflow.workflowStatus || '待处理';
+      const isProcessing = stashStatus === '营业担当处理中';
       const canPosReject = this.isPosActor() && this.hasFullDataScope() && this.hasIngestionPermission('单门店未匹配数据', '驳回') && ['待处理', 'POS担当待处理'].includes(stashStatus);
+      const canPosApprove = this.isPosActor() && ['待处理', 'POS担当待处理'].includes(stashStatus);
       const item = { row, index, key };
       const responsibility = this.getStashResponsibility(row, key);
       const deliveryFields = this.getStoreDeliveryFields(row, index, {
@@ -5952,7 +6977,6 @@ const IngestionView = {
       <tr class="group bg-white hover:bg-slate-50 transition-colors ${isRejected ? 'bg-red-50/30' : ''}" data-stash-key="${this.escapeHtml(key)}">
         <td class="px-4 py-3 w-[60px]"><input type="checkbox" class="row-cb-ingestion-stash rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed disabled:opacity-40" data-stash-key="${this.escapeHtml(key)}" title="${this.escapeHtml(canSelect ? '可选择处理' : editReason)}" ${canSelect ? '' : 'disabled'}></td>
         <td class="px-4 py-3 text-[#4e5969]">${this.escapeHtml(deliveryFields.time || displayMonth)}</td>
-        <td class="px-4 py-3"><span class="stash-edit-display">${this.escapeHtml(deliveryFields.partnerErp)}</span><input type="text" class="stash-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:border-brand" data-edit-field="partnerErp" value="${this.escapeHtml(deliveryFields.partnerErp === '-' ? '' : deliveryFields.partnerErp)}"></td>
         <td class="px-4 py-3">
           <span class="font-medium text-[#4e5969] flex items-center gap-2" title="${this.escapeHtml(deliveryFields.originalFileName)}">
             <i class="fa-solid fa-file-excel text-green-600"></i>
@@ -5960,27 +6984,29 @@ const IngestionView = {
           </span>
         </td>
         <td class="px-4 py-3"><button type="button" class="ingestion-stash-preview-trigger truncate block max-w-[240px] text-brand hover:text-blue-700 hover:underline text-left transition-colors" data-index="${index}" data-email-id="${row.sourceEmailId || ''}" data-att-idx="${typeof row.sourceAttIdx === 'number' ? row.sourceAttIdx : ''}" title="预览 ${this.escapeHtml(deliveryFields.currentFileName)}">${this.escapeHtml(deliveryFields.currentFileName)}</button></td>
+        <td class="px-4 py-3">${this.escapeHtml(deliveryFields.partnerErp)}</td>
         <td class="px-5 py-3 font-mono">${this.escapeHtml(deliveryFields.customerStoreNo)}</td>
         <td class="px-5 py-3 font-mono">${this.escapeHtml(deliveryFields.rawTradeCode)}</td>
         <td class="px-5 py-3"><span>${this.escapeHtml(deliveryFields.customerStoreName)}</span></td>
+        <td class="px-5 py-3 font-mono text-brand">${this.escapeHtml(deliveryFields.orionTradeCode)}</td>
+        <td class="px-5 py-3">${this.escapeHtml(deliveryFields.orionTradeName)}</td>
+        <td class="px-5 py-3 text-amber-700">${this.renderStashAbnormalCell(row, index)}</td>
         <td class="px-5 py-3">${this.escapeHtml(deliveryFields.salesTeam)}</td>
         <td class="px-5 py-3">${this.escapeHtml(deliveryFields.region)}</td>
         <td class="px-5 py-3">${this.escapeHtml(deliveryFields.salesOffice)}</td>
         <td class="px-5 py-3">${this.escapeHtml(deliveryFields.acc)}</td>
-        <td class="px-5 py-3 font-mono text-brand"><span class="stash-edit-display">${this.escapeHtml(deliveryFields.orionTradeCode)}</span><input type="text" class="stash-edit-input hidden w-36 px-2 py-1 border border-gray-200 rounded text-sm font-mono bg-white focus:outline-none focus:border-brand" data-edit-field="orionStoreCode" value="${this.escapeHtml(deliveryFields.orionTradeCode === '-' ? '' : deliveryFields.orionTradeCode)}"></td>
-        <td class="px-5 py-3">${this.escapeHtml(deliveryFields.orionTradeName)}</td>
-        <td class="px-5 py-3 text-amber-700">${this.renderStashAbnormalCell(row, index)}</td>
         <td class="px-5 py-3 font-medium text-[#1d2129]">${this.escapeHtml(responsibility.currentOwnerName || '-')}</td>
         <td class="px-5 py-3 text-[#4e5969]">${this.escapeHtml(responsibility.lastOperatorName || '-')}</td>
-        <td class="px-5 py-3"><span class="inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${stashStatus === '营业担当处理中' ? 'border-blue-100 bg-blue-50 text-brand' : 'border-amber-100 bg-amber-50 text-amber-700'}">${this.escapeHtml(this.getStashDisplayStatus(key))}</span></td>
+        <td class="px-5 py-3"><span class="inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${this.getStashStatusStyle(key)}">${this.escapeHtml(this.getStashDisplayStatus(key))}</span></td>
         <td class="px-5 py-3 sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">
           <div class="flex items-center gap-1">
             ${this.hasIngestionPermission('单门店未匹配数据', '单据详情') ? `<button type="button" class="ingestion-stash-detail-btn px-2 py-1 text-xs rounded text-brand hover:bg-blue-50 transition-colors" data-stash-key="${this.escapeHtml(key)}" title="单据详情">
               <i class="fa-solid fa-list-check"></i>
             </button>` : ''}
-            ${canPosReject ? `<button type="button" class="ingestion-stash-reject-btn px-2 py-1 text-xs rounded text-red-500 hover:bg-red-50" data-stash-key="${this.escapeHtml(key)}" title="${stashStatus === 'POS担当待处理' ? '再次驳回' : '驳回'}"><i class="fa-solid fa-reply"></i></button>` : ''}
+            ${canPosApprove || isProcessing ? `<button type="button" class="ingestion-stash-approve-btn px-2 py-1 text-xs rounded ${canPosApprove ? 'text-emerald-600 hover:bg-emerald-50' : 'text-gray-300 cursor-not-allowed'}" data-stash-key="${this.escapeHtml(key)}" data-menu-label="通过" title="${canPosApprove ? '通过' : '处理中状态不可操作'}" ${canPosApprove ? '' : 'disabled aria-disabled="true"'}><i class="fa-solid fa-check"></i></button>` : ''}
+            ${canPosReject || isProcessing ? `<button type="button" class="ingestion-stash-reject-btn px-2 py-1 text-xs rounded ${canPosReject ? 'text-red-500 hover:bg-red-50' : 'text-gray-300 cursor-not-allowed'}" data-stash-key="${this.escapeHtml(key)}" data-menu-label="驳回" title="${canPosReject ? (stashStatus === 'POS担当待处理' ? '再次驳回' : '驳回') : '处理中状态不可操作'}" ${canPosReject ? '' : 'disabled aria-disabled="true"'}><i class="fa-solid fa-reply"></i></button>` : ''}
             ${canSalesSubmit ? `<button type="button" class="ingestion-stash-sales-submit-btn px-2 py-1 text-xs rounded text-green-600 hover:bg-green-50" data-stash-key="${this.escapeHtml(key)}" title="提交处理结果"><i class="fa-solid fa-check"></i></button>` : ''}
-            <button type="button" class="ingestion-stash-edit-btn px-2 py-1 text-xs rounded ${canEdit ? 'text-amber-500 hover:bg-amber-50' : 'text-gray-300 cursor-not-allowed'} transition-colors" data-stash-key="${this.escapeHtml(key)}" title="${this.escapeHtml(editReason)}" ${canEdit ? '' : 'disabled'}>
+            <button type="button" class="ingestion-stash-edit-btn px-2 py-1 text-xs rounded ${canEdit ? 'text-amber-500 hover:bg-amber-50' : 'text-gray-300 cursor-not-allowed'} transition-colors" data-stash-key="${this.escapeHtml(key)}" data-menu-label="修改数据" title="${this.escapeHtml(canEdit ? '修改数据' : editReason)}" ${canEdit ? '' : 'disabled'}>
               <i class="fa-solid fa-pen-to-square stash-edit-icon"></i>
             </button>
           </div>
@@ -5990,29 +7016,42 @@ const IngestionView = {
     }).join('');
 
     container.innerHTML = `
-      <div class="ingestion-stash-table-shell animate-[fadeIn_0.22s_ease-out] min-h-full bg-white">
-        <table class="ingestion-stash-wide-table w-full table-fixed min-w-[2940px] text-left text-sm text-[#4e5969]">
+      <div class="platform-section-gap"></div>
+      <div class="flex shrink-0 items-center justify-end border-b border-gray-100 bg-white px-6 py-3">
+        <div class="ml-auto flex items-center gap-2">
+          <div class="relative">
+            <button type="button" id="stash-column-button" class="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-[#4e5969] hover:bg-blue-50 hover:text-brand"><i class="fa-solid fa-table-columns"></i><span>字段配置</span></button>
+            <div id="stash-column-panel" class="hidden absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-xl">
+              <div class="mb-2 flex items-center justify-between"><strong class="text-sm text-[#1d2129]">字段配置</strong><button type="button" id="stash-column-reset" class="text-xs text-brand hover:underline">恢复默认</button></div>
+              <div id="stash-column-options" class="grid max-h-72 grid-cols-1 gap-0.5 overflow-auto"></div>
+            </div>
+          </div>
+          <button type="button" id="stash-toolbar-approve" disabled class="rounded-lg bg-[#86909c] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i>门店名称/编码校验</button>
+        </div>
+      </div>
+      <div class="ingestion-stash-table-shell animate-[fadeIn_0.22s_ease-out] min-h-0 flex-1 overflow-auto bg-white">
+        <table class="ingestion-stash-wide-table w-full table-fixed text-left text-sm text-[#4e5969]">
           <thead class="bg-[#f7f8fa] text-[#1d2129] font-medium sticky top-0 z-10">
             <tr>
               <th class="px-4 py-4 w-[60px] rounded-tl-lg sticky left-0 z-30 bg-[#f7f8fa]"><input type="checkbox" id="ingestion-stash-select-all" class="rounded border-gray-300 text-brand focus:ring-brand"></th>
-              <th class="px-4 py-4 w-40">时间</th>
-              <th class="px-4 py-4 w-36">客户系统</th>
+              <th class="px-4 py-4 w-32">所属时间</th>
               <th class="px-4 py-4 w-64">原始文件名</th>
               <th class="px-4 py-4 w-64">当前文件名</th>
-              <th class="px-5 py-4 w-36">客户门店号</th>
-              <th class="px-5 py-4 w-40">客户交易处编码</th>
-              <th class="px-5 py-4 w-48">客户交易处名称</th>
-              <th class="px-5 py-4 w-36">营业Team</th>
+              <th class="px-4 py-4 w-36">客户系统</th>
+              <th class="px-5 py-4 w-28">客户门店号</th>
+              <th class="px-5 py-4 w-32">客户交易处编码</th>
+              <th class="px-5 py-4 w-40">客户交易处名称</th>
+              <th class="px-5 py-4 w-40">好丽友交易处编码</th>
+              <th class="px-5 py-4 w-48">好丽友交易处名称</th>
+              <th class="px-5 py-4 w-52">异常说明</th>
+              <th class="px-5 py-4 w-36">本部TEAM</th>
               <th class="px-5 py-4 w-32">区域</th>
               <th class="px-5 py-4 w-36">营业所</th>
               <th class="px-5 py-4 w-24">ACC</th>
-              <th class="px-5 py-4 w-40">好丽友交易处编码</th>
-              <th class="px-5 py-4 w-48">好丽友交易处名称</th>
-              <th class="px-5 py-4 w-64">异常说明</th>
-              <th class="px-5 py-4 w-32">当前责任人</th>
-              <th class="px-5 py-4 w-32">最近操作人</th>
-              <th class="px-5 py-4 w-32">状态</th>
-              <th class="px-5 py-4 w-28 rounded-tr-lg sticky right-0 z-30 bg-[#f7f8fa] shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">操作</th>
+              <th class="px-5 py-4 w-28">当前责任人</th>
+              <th class="px-5 py-4 w-28">最近操作人</th>
+              <th class="px-5 py-4 w-24">状态</th>
+              <th class="px-5 py-4 w-24 rounded-tr-lg sticky right-0 z-30 bg-[#f7f8fa] shadow-[-6px_0_10px_-10px_rgba(15,23,42,0.45)]">操作</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
@@ -6031,6 +7070,64 @@ const IngestionView = {
 
     this.renderPagination();
     this.bindStashEvents();
+    this.bindStashToolbarEvents();
+  },
+
+  applyStashColumnVisibility() {
+    const table = document.querySelector('#ingestion-stash-container table');
+    if (!table) return;
+    const headers = Array.from(table.querySelectorAll(':scope > thead > tr > th'));
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('ingestion_stash_visible_columns_v2') || 'null'); } catch (error) { saved = null; }
+    const defaultVisible = [0, 1, 5, 6, 7, 10, 15, 16, 17, 18];
+    const visible = new Set(Array.isArray(saved) ? saved.map(Number) : defaultVisible);
+    headers.forEach((header, index) => {
+      const label = header.textContent.trim();
+      const required = index === 0 || label === '状态' || label === '操作';
+      const show = required || visible.has(index);
+      const targetHeader = table.querySelector(`thead [data-platform-column-index="${index}"]`) || header;
+      targetHeader.style.display = show ? '' : 'none';
+      table.querySelectorAll(':scope > tbody > tr').forEach(row => {
+        if (row.children.length === headers.length) (row.querySelector(`[data-platform-column-index="${index}"]`) || row.children[index]).style.display = show ? '' : 'none';
+      });
+    });
+    const columnWidths = [60, 128, 224, 224, 128, 112, 128, 160, 160, 192, 208, 144, 128, 144, 96, 112, 112, 96, 72];
+    const visibleWidth = headers.reduce((total, header, index) => {
+      return total + (getComputedStyle(header).display === 'none' ? 0 : columnWidths[index]);
+    }, 0);
+    table.style.width = `max(100%, ${visibleWidth}px)`;
+    table.style.minWidth = `${visibleWidth}px`;
+  },
+
+  bindStashToolbarEvents() {
+    const table = document.querySelector('#ingestion-stash-container table');
+    const button = document.getElementById('stash-column-button');
+    const panel = document.getElementById('stash-column-panel');
+    const options = document.getElementById('stash-column-options');
+    const sync = () => {
+      if (!table || !options) return;
+      const headers = Array.from(table.querySelectorAll(':scope > thead > tr > th'));
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem('ingestion_stash_visible_columns_v2') || 'null'); } catch (error) { saved = null; }
+      const defaultVisible = [0, 1, 5, 6, 7, 10, 15, 16, 17, 18];
+      const visible = new Set(Array.isArray(saved) ? saved.map(Number) : defaultVisible);
+      options.innerHTML = headers.map((header, index) => {
+        const label = header.textContent.trim() || '选择';
+        const required = index === 0 || label === '状态' || label === '操作';
+        return `<label class="${required ? 'hidden ' : ''}flex cursor-pointer items-center gap-2 rounded-lg px-1 py-2 hover:bg-gray-50"><input type="checkbox" class="stash-column-option rounded border-gray-300 text-brand" value="${index}" ${visible.has(index) ? 'checked' : ''}><span class="text-sm text-[#4e5969]">${this.escapeHtml(label)}</span></label>`;
+      }).join('');
+      options.querySelectorAll('.stash-column-option').forEach(option => option.addEventListener('change', () => {
+        const selected = Array.from(options.querySelectorAll('.stash-column-option:checked')).map(item => Number(item.value));
+        [0, headers.length - 2, headers.length - 1].forEach(index => selected.push(index));
+        localStorage.setItem('ingestion_stash_visible_columns_v2', JSON.stringify([...new Set(selected)]));
+        this.applyStashColumnVisibility();
+      }));
+    };
+    button?.addEventListener('click', event => { event.stopPropagation(); sync(); panel?.classList.toggle('hidden'); });
+    panel?.addEventListener('click', event => event.stopPropagation());
+    document.getElementById('stash-column-reset')?.addEventListener('click', () => { localStorage.removeItem('ingestion_stash_visible_columns_v2'); sync(); this.applyStashColumnVisibility(); });
+    document.getElementById('stash-toolbar-approve')?.addEventListener('click', () => document.getElementById('btn-batch-approve')?.click());
+    this.applyStashColumnVisibility();
   },
 
   updateStashBatchButton() {
@@ -6039,6 +7136,7 @@ const IngestionView = {
     const actionableCheckboxes = rowCheckboxes.filter((checkbox) => !checkbox.disabled);
     const selected = actionableCheckboxes.filter((checkbox) => checkbox.checked).length;
     const approveBtn = document.getElementById('btn-batch-approve');
+    const toolbarApproveBtn = document.getElementById('stash-toolbar-approve');
     const checkingHint = document.getElementById('stash-checking-hint');
     const checkingCount = document.getElementById('stash-checking-count');
     const selectAll = container?.querySelector('#ingestion-stash-select-all');
@@ -6065,6 +7163,15 @@ const IngestionView = {
           ? '<i class="fa-solid fa-wand-magic-sparkles mr-1"></i>门店名称/编码校验'
           : '<i class="fa-solid fa-check mr-1"></i>批量提交处理结果';
       }
+    }
+    if (toolbarApproveBtn) {
+      toolbarApproveBtn.disabled = this.stashCheckState.active || selected === 0;
+      toolbarApproveBtn.className = selected > 0 && !this.stashCheckState.active
+        ? 'rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700'
+        : 'rounded-lg bg-[#86909c] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50';
+      toolbarApproveBtn.innerHTML = this.isPosActor()
+        ? `<i class="fa-solid fa-wand-magic-sparkles mr-1"></i>门店名称/编码校验${selected ? `（${selected}）` : ''}`
+        : `<i class="fa-solid fa-check mr-1"></i>批量提交处理结果${selected ? `（${selected}）` : ''}`;
     }
 
     if (selectAll) {
@@ -6161,6 +7268,14 @@ const IngestionView = {
       });
     });
 
+    container?.querySelectorAll('.ingestion-stash-approve-btn').forEach((trigger) => {
+      trigger.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const item = this.getFilteredStashRows().find(row => row.key === trigger.dataset.stashKey);
+        this.approveStashRow(item);
+      });
+    });
+
     container?.querySelectorAll('.ingestion-stash-reject-btn').forEach((trigger) => {
       trigger.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -6201,80 +7316,51 @@ const IngestionView = {
     container?.querySelectorAll('.ingestion-stash-edit-btn').forEach(trigger => {
       trigger.addEventListener('click', event => {
         event.stopPropagation();
-        const rowElement = trigger.closest('tr');
         const key = trigger.dataset.stashKey;
-        if (!rowElement || !key) return;
+        if (!key) return;
         const item = this.getFilteredStashRows().find((stashItem) => stashItem.key === key);
-        if (!item || !this.canEditStashRow(item)) {
-          Dialog.toast(item ? this.getStashEditDisabledReason(item) : '当前单据不可编辑', 'warning');
-          return;
-        }
-
-        const icon = trigger.querySelector('.stash-edit-icon');
-        const isEditing = icon?.classList.contains('fa-check');
-        const displays = rowElement.querySelectorAll('.stash-edit-display');
-        const inputs = rowElement.querySelectorAll('.stash-edit-input');
-
-        if (!isEditing) {
-          icon.className = 'fa-solid fa-check stash-edit-icon';
-          trigger.title = '保存';
-          trigger.classList.add('bg-amber-100');
-          displays.forEach(item => item.classList.add('hidden'));
-          inputs.forEach(input => input.classList.remove('hidden'));
-          rowElement.querySelector('.stash-edit-input')?.focus();
-          return;
-        }
-
-        if (!this.canEditStashRow(item)) {
-          Dialog.toast('单据状态已变化，当前不可保存', 'warning');
-          this.renderStashTable();
-          return;
-        }
-
-        const partnerErpInput = rowElement.querySelector('[data-edit-field="partnerErp"]');
-        const tradeCodeInput = rowElement.querySelector('[data-edit-field="orionStoreCode"]');
-        if (!partnerErpInput?.value.trim()) {
-          partnerErpInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
-          partnerErpInput?.focus();
-          Dialog.toast('请输入客户系统', 'warning');
-          return;
-        }
-        const tradeCode = tradeCodeInput?.value.trim().toUpperCase() || '';
-        if (!tradeCode) {
-          tradeCodeInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
-          tradeCodeInput?.focus();
-          Dialog.toast('请输入好丽友交易处编码', 'warning');
-          return;
-        }
-        const tradeRecord = this.getOrionTradeMasterRecord(tradeCode);
-        if (!tradeRecord) {
-          tradeCodeInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
-          tradeCodeInput?.focus();
-          Dialog.toast('未匹配到对应交易处，请检查编码', 'warning');
-          return;
-        }
-        const edits = {};
-        inputs.forEach(input => {
-          if (input.dataset.editField && input.dataset.editField !== 'handler') edits[input.dataset.editField] = input.value.trim();
-        });
-        edits.partnerErp = partnerErpInput.value.trim();
-        edits.orionStoreCode = tradeCode;
-        if (tradeCode !== String(deliveryFields.orionTradeCode || '').trim().toUpperCase()) {
-          Object.assign(edits, this.getTradeMasterEdits(tradeRecord));
-        }
-        this.stashEdits.set(key, edits);
-        this.saveStashWorkflow(key, {
-          lastOperatorName: Store.getState().userName || '系统',
-          lastOperatorRole: Store.getState().userRole || '系统',
-          lastAction: '编辑单据',
-          lastOperatedAt: this.formatNowDateTime()
-        });
-        this.renderStashTable();
-        Dialog.toast('已保存', 'success');
+        this.openStashModificationDialog(item);
       });
     });
 
     this.updateStashBatchButton();
+  },
+
+  approveStashRow(item) {
+    const workflow = item?.key ? this.getStashWorkflow(item.key) : null;
+    if (!item || !this.isPosActor() || !['待处理', 'POS担当待处理'].includes(workflow?.workflowStatus || '')) {
+      Dialog.toast('当前单据状态不可通过', 'warning');
+      return;
+    }
+    Dialog.show({
+      title: '确认通过',
+      content: `<div class="space-y-3 text-left"><p>确认通过“${this.escapeHtml(item.row?.customerStoreName || item.row?.storeName || '当前单据')}”吗？</p><div class="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">通过后将流转至“单门店已匹配数据”。</div></div>`,
+      confirmText: '确认通过',
+      cancelText: '取消',
+      onConfirm: () => {
+        const latestWorkflow = this.getStashWorkflow(item.key);
+        if (!['待处理', 'POS担当待处理'].includes(latestWorkflow.workflowStatus || '')) {
+          Dialog.toast('单据状态已变化，当前不可通过', 'warning');
+          return;
+        }
+        const actor = Store.getState();
+        this.saveStashWorkflow(item.key, {
+          workflowStatus: '已通过',
+          currentOwnerType: 'system',
+          currentOwnerName: '系统',
+          approvedBy: actor.userName || 'POS担当',
+          approvedAt: this.formatNowDateTime(),
+          lastOperatorName: actor.userName || 'POS担当',
+          lastOperatorRole: actor.userRole || 'POS担当',
+          lastAction: '通过',
+          lastOperatedAt: this.formatNowDateTime()
+        });
+        this.promoteStashRows([item]);
+        this.updateStats();
+        this.renderStashTable();
+        Dialog.toast('单据已通过并流转至单门店已匹配数据', 'success');
+      }
+    });
   },
 
   openStashRejectConfirm(item) {
@@ -6737,6 +7823,8 @@ const IngestionView = {
   
   updateBatchButtons() {
     const selected = document.querySelectorAll('.row-cb:checked:not(:disabled)').length;
+    const selectedCount = document.getElementById('matched-quality-selected-count');
+    if (selectedCount) selectedCount.textContent = selected ? `（${selected}）` : '';
     const buttons = {
       'btn-batch-archive': { active: 'border-gray-200 text-[#4e5969] bg-white', inactive: 'border-gray-200 text-[#86909c] bg-gray-50' },
       'btn-batch-approve': { active: 'bg-brand text-white shadow-brand/20', inactive: 'bg-[#86909c] text-white' },
@@ -6748,6 +7836,7 @@ const IngestionView = {
       if (btn) {
         const isDisabled = selected === 0;
         btn.disabled = isDisabled;
+        if (id === 'btn-batch-approve') btn.title = isDisabled ? '请先勾选至少一条数据' : `质检已选择的 ${selected} 条单据`;
         
         if (isDisabled) {
           btn.className = `px-4 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${buttons[id].inactive}`;
@@ -6774,23 +7863,40 @@ const IngestionView = {
   bindTableEvents() {
     // 全选
     const selectAll = document.getElementById('selectAll');
+    const rowCheckboxes = Array.from(document.querySelectorAll('.row-cb'));
+    const selectableCheckboxes = rowCheckboxes.filter(cb => !cb.disabled);
+    const syncSelectAllState = () => {
+      if (!selectAll) return;
+      const checkedCount = selectableCheckboxes.filter(cb => cb.checked).length;
+      selectAll.disabled = selectableCheckboxes.length === 0;
+      selectAll.checked = selectableCheckboxes.length > 0 && checkedCount === selectableCheckboxes.length;
+      selectAll.indeterminate = checkedCount > 0 && checkedCount < selectableCheckboxes.length;
+      document.querySelectorAll('.matched-group-select').forEach(groupCheckbox => {
+        const ids = new Set(String(groupCheckbox.dataset.rowIds || '').split(',').filter(Boolean));
+        const groupRows = selectableCheckboxes.filter(cb => ids.has(cb.value));
+        const groupChecked = groupRows.filter(cb => cb.checked).length;
+        groupCheckbox.disabled = groupRows.length === 0;
+        groupCheckbox.checked = groupRows.length > 0 && groupChecked === groupRows.length;
+        groupCheckbox.indeterminate = groupChecked > 0 && groupChecked < groupRows.length;
+      });
+    };
+
     if (selectAll) {
       selectAll.addEventListener('change', (e) => {
-        document.querySelectorAll('.row-cb:not(:disabled)').forEach(cb => cb.checked = e.target.checked);
+        selectableCheckboxes.forEach(cb => { cb.checked = e.target.checked; });
+        selectAll.indeterminate = false;
         this.updateBatchButtons();
       });
     }
     
     // 行选择
-    document.querySelectorAll('.row-cb').forEach(cb => {
+    rowCheckboxes.forEach(cb => {
       cb.addEventListener('change', () => {
-        const allCbs = document.querySelectorAll('.row-cb');
-        const checkedCbs = document.querySelectorAll('.row-cb:checked');
-        selectAll.checked = allCbs.length === checkedCbs.length;
-        selectAll.indeterminate = checkedCbs.length > 0 && checkedCbs.length < allCbs.length;
+        syncSelectAllState();
         this.updateBatchButtons();
       });
     });
+    syncSelectAllState();
 
     document.querySelectorAll('.row-headquarters-select').forEach(select => {
       select.addEventListener('change', () => {
@@ -6859,103 +7965,7 @@ const IngestionView = {
           // 居中弹窗预览
           this.showStoreDataPreviewModal(rowData);
         } else if (action === 'edit') {
-          if (!rowData || !this.canEditMatchedRow(rowData)) {
-            Dialog.toast('当前单据尚未流转至当前账号处理', 'warning');
-            return;
-          }
-          // 行内编辑：切换编辑态/只读态
-          const btn = e.currentTarget;
-          const row = btn.closest('tr');
-          if (!row) return;
-          
-          const icon = btn.querySelector('.row-edit-icon');
-          const isEditing = icon.classList.contains('fa-check');
-          
-          const editableDisplays = row.querySelectorAll('.row-edit-display');
-          const editableInputs = row.querySelectorAll('.row-edit-input');
-          
-          if (!isEditing) {
-            // 进入编辑态
-            icon.className = 'fa-solid fa-check row-edit-icon';
-            btn.title = this.getCurrentLang() === 'cn' ? '保存' : '저장';
-            btn.classList.add('bg-amber-100');
-            
-            editableDisplays.forEach(item => item.classList.add('hidden'));
-            editableInputs.forEach(input => input.classList.remove('hidden'));
-            const firstInput = row.querySelector('.row-edit-input');
-            firstInput?.focus();
-            firstInput?.select();
-          } else {
-            if (!rowData || this.getMatchedQualityStatus(rowData) === '已质检' || !this.canEditMatchedRow(rowData)) {
-              Dialog.toast('该单据已完成质检或状态已变化，不可保存', 'warning');
-              this.renderTable();
-              return;
-            }
-            const partnerErpInput = row.querySelector('[data-edit-field="partnerErp"]');
-            const tradeCodeInput = row.querySelector('[data-edit-field="orionStoreCode"]');
-            if (!partnerErpInput?.value.trim()) {
-              partnerErpInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
-              partnerErpInput?.focus();
-              Dialog.toast('请输入客户系统', 'warning');
-              return;
-            }
-            const tradeCode = tradeCodeInput?.value.trim().toUpperCase() || '';
-            if (!tradeCode) {
-              tradeCodeInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
-              tradeCodeInput?.focus();
-              Dialog.toast('请输入好丽友交易处编码', 'warning');
-              return;
-            }
-            const tradeRecord = this.getOrionTradeMasterRecord(tradeCode);
-            if (!tradeRecord) {
-              tradeCodeInput?.classList.add('border-red-300', 'ring-2', 'ring-red-100');
-              tradeCodeInput?.focus();
-              Dialog.toast('未匹配到对应交易处，请检查编码', 'warning');
-              return;
-            }
-            const edits = {};
-            editableInputs.forEach(input => {
-              const field = input.dataset.editField;
-              const value = input.value.trim();
-              if (field && value) edits[field] = value;
-            });
-            edits.partnerErp = partnerErpInput.value.trim();
-            edits.orionStoreCode = tradeCode;
-            if (tradeCode !== String(this.getStoreDeliveryFields(rowData).orionTradeCode || '').trim().toUpperCase()) {
-              Object.assign(edits, this.getTradeMasterEdits(tradeRecord));
-            }
-            Object.assign(edits, {
-              lastOperatorName: Store.getState().userName || '系统',
-              lastOperatorRole: Store.getState().userRole || '系统',
-              lastAction: '编辑单据',
-              lastOperatedAt: this.formatNowDateTime()
-            });
-            if (edits.rawStoreCode) edits.storeCode = edits.rawStoreCode;
-            
-            // 更新数据
-            this.data = this.data.map(r => {
-              if (r.id === id) {
-                Object.assign(r, edits);
-                if (edits.rawStoreName) r.fileName = edits.rawStoreName;
-              }
-              return r;
-            });
-            this.filteredData = this.filteredData.map(r => {
-              if (r.id === id) {
-                Object.assign(r, edits);
-                if (edits.rawStoreName) r.fileName = edits.rawStoreName;
-              }
-              return r;
-            });
-            this.saveWorkflowState();
-            
-            // 保存并回到只读态
-            icon.className = 'fa-solid fa-pen-to-square row-edit-icon';
-            btn.title = this.getCurrentLang() === 'cn' ? '编辑' : '편집';
-            btn.classList.remove('bg-amber-100');
-            this.renderTable();
-            Dialog.toast(this.getCurrentLang() === 'cn' ? '已保存' : '저장되었습니다');
-          }
+          this.openMatchedModificationDialog(rowData);
         } else if (action === 'reject') {
           this.openOriginalFileRejectConfirm(id);
         } else if (action === 'submit-sales-result') {
@@ -7090,7 +8100,61 @@ const IngestionView = {
   bindFilterEvents() {
     // 文件名称搜索
     const filenameInput = document.getElementById('filter-filename');
+    const inboxColumnButton = document.getElementById('inbox-column-button');
+    const inboxColumnPanel = document.getElementById('inbox-column-panel');
+    const groupingButton = document.getElementById('btn-matched-grouping');
+    const groupingPanel = document.getElementById('matched-grouping-panel');
+    const columnButton = document.getElementById('btn-matched-columns');
+    const columnPanel = document.getElementById('matched-column-panel');
+    inboxColumnButton?.addEventListener('click', event => { event.stopPropagation(); this.syncInboxColumnPanel(); inboxColumnPanel?.classList.toggle('hidden'); });
+    inboxColumnPanel?.addEventListener('click', event => event.stopPropagation());
+    document.getElementById('inbox-column-reset')?.addEventListener('click', () => { localStorage.removeItem('ingestion_inbox_visible_columns_v3'); this.syncInboxColumnPanel(); this.applyInboxColumnVisibility(); });
+    const syncGroupingPanel = () => {
+      const fields = this.loadMatchedGroupingFields();
+      document.querySelectorAll('.matched-grouping-option').forEach(option => { option.checked = fields.length ? fields.includes(option.value) : option.value === 'none'; });
+      const count = document.getElementById('matched-grouping-count');
+      if (count) count.textContent = fields.length ? `(${fields.length})` : '';
+    };
+    syncGroupingPanel();
+    groupingButton?.addEventListener('click', event => {
+      event.stopPropagation();
+      syncGroupingPanel();
+      groupingPanel?.classList.toggle('hidden');
+    });
+    groupingPanel?.addEventListener('click', event => event.stopPropagation());
+    const syncColumnPanel = () => {
+      const visible = new Set(this.loadMatchedVisibleColumns());
+      columnPanel?.querySelectorAll('.matched-column-option').forEach(option => { option.checked = visible.has(Number(option.value)); });
+    };
+    columnButton?.addEventListener('click', event => {
+      event.stopPropagation();
+      syncColumnPanel();
+      columnPanel?.classList.toggle('hidden');
+    });
+    columnPanel?.addEventListener('click', event => event.stopPropagation());
+    columnPanel?.querySelectorAll('.matched-column-option').forEach(option => option.addEventListener('change', () => {
+      const selected = Array.from(columnPanel.querySelectorAll('.matched-column-option:checked')).map(item => Number(item.value));
+      localStorage.setItem('ingestion_matched_visible_columns_v3', JSON.stringify(selected));
+      this.applyMatchedColumnVisibility();
+    }));
+    document.getElementById('matched-column-reset')?.addEventListener('click', () => {
+      localStorage.removeItem('ingestion_matched_visible_columns_v3');
+      syncColumnPanel();
+      this.applyMatchedColumnVisibility();
+    });
+    groupingPanel?.querySelectorAll('.matched-grouping-option').forEach(option => {
+      option.addEventListener('change', () => {
+        const selected = option.value || 'none';
+        this.matchedGroupingFields = selected === 'none' ? [] : [selected];
+        this.collapsedMatchedGroups.clear();
+        this.saveMatchedGroupingFields();
+        syncGroupingPanel();
+        groupingPanel.classList.add('hidden');
+        this.applyFilters();
+      });
+    });
     const runSearch = () => {
+      if (!this.readPeriodFilterUI()) return;
       this.filters.fileName = filenameInput?.value || '';
       if (!document.getElementById('original-attachment')?.classList.contains('hidden')) {
         this.saveFiltersToCache();
@@ -7105,6 +8169,65 @@ const IngestionView = {
       if (event.key !== 'Enter') return;
       event.preventDefault();
       runSearch();
+    });
+
+    ['submit', 'month'].forEach((kind) => {
+      const button = document.getElementById(`ingestion-${kind}-range-button`);
+      const picker = document.getElementById(`ingestion-${kind}-month-picker`);
+      if (!button || !picker) return;
+      let viewYear = Number((this.ensurePeriodFilters()[this.activeIngestionTab][`${kind}Start`] || this.getCurrentYearMonth()).slice(0, 4));
+      let selectingEnd = false;
+
+      const renderPicker = () => { picker.innerHTML = this.renderIngestionMonthPicker(kind, viewYear); };
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const willOpen = picker.classList.contains('hidden');
+        document.querySelectorAll('.ingestion-period-range .analytics-month-picker').forEach(el => {
+          if (el !== picker) el.classList.add('hidden');
+        });
+        if (willOpen) {
+          viewYear = Number((this.ensurePeriodFilters()[this.activeIngestionTab][`${kind}Start`] || this.getCurrentYearMonth()).slice(0, 4));
+          selectingEnd = false;
+          renderPicker();
+        }
+        picker.classList.toggle('hidden', !willOpen);
+        button.setAttribute('aria-expanded', String(willOpen));
+      });
+
+      picker.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const nav = event.target.closest('[data-ingestion-period-nav]');
+        if (nav) {
+          viewYear += Number(nav.dataset.ingestionPeriodNav || 0);
+          renderPicker();
+          return;
+        }
+        const option = event.target.closest('[data-ingestion-period-month]');
+        if (!option) return;
+        const value = option.dataset.ingestionPeriodMonth;
+        const period = this.ensurePeriodFilters()[this.activeIngestionTab];
+        if (!selectingEnd) {
+          period[`${kind}Start`] = value;
+          period[`${kind}End`] = value;
+          selectingEnd = true;
+          this.updatePeriodRangeButton(kind);
+          renderPicker();
+          return;
+        }
+        if (value < period[`${kind}Start`]) {
+          period[`${kind}Start`] = value;
+          period[`${kind}End`] = value;
+          this.updatePeriodRangeButton(kind);
+          renderPicker();
+          return;
+        }
+        period[`${kind}End`] = value;
+        selectingEnd = false;
+        this.updatePeriodRangeButton(kind);
+        this.saveFiltersToCache();
+        picker.classList.add('hidden');
+        button.setAttribute('aria-expanded', 'false');
+      });
     });
 
     const searchFieldBtn = document.getElementById('search-field-btn');
@@ -7217,11 +8340,19 @@ const IngestionView = {
       const updateInboxStatusLabel = () => {
         const checked = Array.from(document.querySelectorAll('.inbox-status-checkbox:checked')).map(cb => cb.value);
         this.inboxStatusFilter = checked;
+        const activeStatuses = ['校验中', '正常', '待处理', '驳回'];
+        const allActiveChecked = activeStatuses.every(status => checked.includes(status));
+        if (inboxStatusSelectAll) {
+          inboxStatusSelectAll.checked = allActiveChecked;
+          inboxStatusSelectAll.indeterminate = checked.some(status => activeStatuses.includes(status)) && !allActiveChecked;
+        }
         
         const label = document.getElementById('inbox-status-label');
         if (label) {
-          if (checked.length === 0) {
+          if (allActiveChecked && !checked.includes('作废')) {
             label.textContent = this.getCurrentLang() === 'cn' ? '全部状态' : '전체 상태';
+          } else if (checked.length === 0) {
+            label.textContent = this.getCurrentLang() === 'cn' ? '未选择状态' : '상태 미선택';
           } else if (checked.length === 1) {
             label.textContent = checked[0];
           } else {
@@ -7233,13 +8364,17 @@ const IngestionView = {
       };
       
       inboxStatusSelectAll?.addEventListener('change', (e) => {
-        inboxStatusCheckboxes.forEach(cb => cb.checked = e.target.checked);
+        const activeStatuses = new Set(['校验中', '正常', '待处理', '驳回']);
+        inboxStatusCheckboxes.forEach(cb => {
+          if (activeStatuses.has(cb.value)) cb.checked = e.target.checked;
+        });
         updateInboxStatusLabel();
       });
       
       inboxStatusCheckboxes.forEach(cb => {
         cb.addEventListener('change', updateInboxStatusLabel);
       });
+      updateInboxStatusLabel();
       
       inboxStatusDropdown.addEventListener('click', (e) => e.stopPropagation());
     }
@@ -7269,6 +8404,12 @@ const IngestionView = {
     // 点击其他地方关闭下拉
     document.addEventListener('click', () => {
       document.querySelectorAll('.dropdown-open').forEach(el => el.classList.add('hidden'));
+      document.getElementById('matched-grouping-panel')?.classList.add('hidden');
+      document.getElementById('matched-column-panel')?.classList.add('hidden');
+      document.getElementById('stash-column-panel')?.classList.add('hidden');
+      document.getElementById('inbox-column-panel')?.classList.add('hidden');
+      document.querySelectorAll('.ingestion-period-range .analytics-month-picker').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.ingestion-period-range .analytics-month-range-button').forEach(el => el.setAttribute('aria-expanded', 'false'));
     });
   },
 
@@ -7325,7 +8466,7 @@ const IngestionView = {
               placeholder="${cn ? '请输入内容' : '내용을 입력하세요'}"></textarea>
           </label>
           <label class="block">
-            <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '年月' : '연월'} <span class="text-red-500">*</span></span>
+            <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '所属时间' : '소속 시간'} <span class="text-red-500">*</span></span>
             <input id="upload-material-period" type="hidden" value="${defaultPeriod}" required>
             <div class="flex items-center gap-3">
               <div class="relative w-28">
@@ -7485,7 +8626,7 @@ const IngestionView = {
         <form id="enhanced-upload-form" class="flex-1 space-y-5 overflow-y-auto px-6 py-5">
           <section id="upload-new-section" class="space-y-5">
             <div>
-              <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '年月' : '연월'} <span class="text-red-500">*</span></span>
+              <span class="mb-2 block text-sm font-medium text-[#1d2129]">${cn ? '所属时间' : '소속 시간'} <span class="text-red-500">*</span></span>
               <input id="enhanced-upload-period" type="hidden" value="${defaultPeriod}">
               <div class="flex gap-3">
                 <select id="enhanced-upload-year" class="w-32 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-brand">${yearOptions}</select>
@@ -7871,11 +9012,22 @@ const IngestionView = {
     this.renderInbox();
 
     setTimeout(() => {
-      const attachments = files.map(file => ({
-        name: file.name,
-        ...this.getUploadAttachmentCheckResult(file),
-        sourceMethod: '本地上传'
-      }));
+      const attachments = files.map(file => {
+        const checkResult = this.getUploadAttachmentCheckResult(file);
+        const attachment = { name: file.name, ...checkResult, sourceMethod: '本地上传' };
+        if (!/\.zip$/i.test(file.name) || checkResult.status === '驳回') return attachment;
+        const baseName = file.name.replace(/\.zip$/i, '');
+        attachment.status = '正常';
+        attachment.rejectReason = '-';
+        attachment.repeatMultiStoreFlow = true;
+        attachment.splitStores = [1, 2, 3].map(index => ({
+          storeName: `${baseName}-${index}`,
+          sourceFileName: `${baseName}-${index}-销售明细.xlsx`,
+          status: '正常',
+          reason: '-'
+        }));
+        return attachment;
+      });
       const targetItem = this.getInboxData().find(item => item.id === uploadedId) || uploadedItem;
       targetItem.attachments = attachments;
       targetItem.attachmentCount = attachments.length;
@@ -8113,8 +9265,8 @@ const IngestionView = {
   
   bindBatchEvents() {
     const handleBatchAction = (action) => {
-      if (this.activeDataMode === 'files' && action === 'approve' && (!this.isManualQualityCheckEnabled() || !this.hasIngestionPermission('单门店已匹配数据', '质检'))) {
-        Dialog.toast(this.isManualQualityCheckEnabled() ? '当前账号无质检权限' : '当前为自动质检模式，无需人工提交', 'warning');
+      if (this.activeDataMode === 'files' && action === 'approve' && !this.hasIngestionPermission('单门店已匹配数据', '质检')) {
+        Dialog.toast('当前账号无质检权限', 'warning');
         return;
       }
       if (this.activeDataMode === 'stash') {
@@ -8301,6 +9453,7 @@ const IngestionView = {
     const inactiveClass = 'px-4 py-2 text-sm text-[#86909c] hover:text-[#1d2129] hover:bg-gray-50 rounded-lg transition-all border border-transparent';
     
     const setActiveTab = (activeTab) => {
+      this.activeIngestionTab = activeTab;
       if (tabOriginal) tabOriginal.className = activeTab === 'original' ? activeClass : inactiveClass;
       if (tabFiles) tabFiles.className = activeTab === 'files' ? activeClass : inactiveClass;
       if (tabStash) tabStash.className = activeTab === 'stash' ? activeClass : inactiveClass;
@@ -8308,17 +9461,26 @@ const IngestionView = {
       const showOriginal = activeTab === 'original';
       const showStash = activeTab === 'stash';
       const showTable = !showOriginal && !showStash;
+      this.syncPeriodFilterUI();
       document.getElementById('original-attachment')?.classList.toggle('hidden', !showOriginal);
+      document.getElementById('inbox-table-separator')?.classList.toggle('hidden', !showOriginal);
+      document.getElementById('inbox-table-toolbar')?.classList.toggle('hidden', !showOriginal);
+      document.getElementById('inbox-table-toolbar')?.classList.toggle('flex', showOriginal);
       document.getElementById('table-container')?.classList.toggle('hidden', !showTable);
       document.getElementById('ingestion-stash-container')?.classList.toggle('hidden', !showStash);
+      document.getElementById('ingestion-stash-container')?.classList.toggle('flex', showStash);
       document.getElementById('pagination-area')?.classList.toggle('hidden', showOriginal);
       document.getElementById('btn-upload-file')?.classList.toggle('hidden', !showOriginal || !this.hasIngestionPermission('文件箱', '上传'));
       document.getElementById('btn-batch-archive')?.classList.toggle('hidden', showOriginal || showStash || activeTab === 'archive' || activeTab === 'files');
-      document.getElementById('btn-batch-approve')?.classList.toggle('hidden', showOriginal || activeTab === 'archive' || (activeTab === 'files' && !this.isManualQualityCheckEnabled()));
+      document.getElementById('btn-batch-approve')?.classList.toggle('hidden', showOriginal || activeTab === 'archive');
       document.getElementById('btn-batch-reject')?.classList.toggle('hidden', showOriginal || showStash || activeTab === 'files');
       document.getElementById('team-select-wrapper')?.classList.toggle('hidden', showOriginal || showStash);
       document.getElementById('approval-status-wrapper')?.classList.toggle('hidden', showOriginal || activeTab === 'archive');
       document.getElementById('inbox-status-wrapper')?.classList.toggle('hidden', !showOriginal);
+      document.getElementById('matched-grouping-wrapper')?.classList.toggle('hidden', activeTab !== 'files');
+      document.getElementById('matched-table-separator')?.classList.toggle('hidden', activeTab !== 'files');
+      document.getElementById('matched-table-toolbar')?.classList.toggle('hidden', activeTab !== 'files');
+      document.getElementById('matched-table-toolbar')?.classList.toggle('flex', activeTab === 'files');
       document.getElementById('quality-checking-hint')?.classList.toggle('hidden', showOriginal || showStash);
       document.getElementById('upload-checking-hint')?.classList.toggle('hidden', !showOriginal || !this.uploadCheckState.active);
       document.getElementById('stash-checking-hint')?.classList.toggle('hidden', !showStash || !this.stashCheckState.active);

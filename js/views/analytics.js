@@ -707,7 +707,7 @@ const AnalyticsView = {
             <i class="fa-solid fa-arrow-rotate-left"></i>
             <span>重置筛选</span>
           </button>
-          <button id="field-list-export-button" class="analytics-export-button" type="button">
+          <button id="field-list-export-button" class="analytics-export-button table-export-button" type="button">
             <i class="fa-solid fa-download"></i>
             <span>导出</span>
           </button>
@@ -818,7 +818,7 @@ const AnalyticsView = {
             <i class="fa-solid fa-arrow-rotate-left"></i>
             <span>重置筛选</span>
           </button>
-          <button id="mapping-export-button" class="analytics-export-button" type="button">
+          <button id="mapping-export-button" class="analytics-export-button table-export-button" type="button">
             <i class="fa-solid fa-download"></i>
             <span>导出</span>
           </button>
@@ -944,7 +944,7 @@ const AnalyticsView = {
             <i class="fa-solid fa-arrow-rotate-left"></i>
             <span>重置筛选</span>
           </button>
-          <button id="analytics-export-button" class="analytics-export-button" type="button">
+          <button id="analytics-export-button" class="analytics-export-button table-export-button" type="button">
               <i class="fa-solid fa-download"></i>
               <span>导出</span>
           </button>
@@ -993,6 +993,79 @@ const AnalyticsView = {
     if (!content) return;
     content.innerHTML = this.renderActiveTab();
     this.bindActiveTabEvents();
+  },
+
+  getAnalyticsColumnConfigKey() { return `analytics_columns_${this.activeTab}`; },
+
+  applyAnalyticsColumnConfig(table, config = null) {
+    if (!table) return;
+    const headerRow = table.querySelector(':scope > thead > tr:first-child');
+    if (!headerRow) return;
+    const headers = Array.from(headerRow.children);
+    headers.forEach((header, index) => { if (!header.dataset.columnKey) header.dataset.columnKey = `column-${index}`; });
+    table.querySelectorAll(':scope > tbody > tr').forEach(row => {
+      if (row.children.length === headers.length) Array.from(row.children).forEach((cell, index) => { if (!cell.dataset.columnKey) cell.dataset.columnKey = headers[index].dataset.columnKey; });
+    });
+    if (!config) { try { config = JSON.parse(localStorage.getItem(this.getAnalyticsColumnConfigKey()) || 'null'); } catch (error) { config = null; } }
+    if (!config) return;
+    const order = Array.isArray(config.order) ? config.order : headers.map(header => header.dataset.columnKey);
+    const hidden = new Set(Array.isArray(config.hidden) ? config.hidden : []);
+    [headerRow, ...table.querySelectorAll(':scope > tbody > tr')].forEach(row => {
+      if (row.children.length !== headers.length) return;
+      const cells = new Map(Array.from(row.children).map(cell => [cell.dataset.columnKey, cell]));
+      order.forEach(key => { if (cells.has(key)) row.appendChild(cells.get(key)); });
+      Array.from(row.children).forEach(cell => { cell.style.display = hidden.has(cell.dataset.columnKey) ? 'none' : ''; });
+    });
+  },
+
+  enhanceAnalyticsTableWorkspace() {
+    const monitor = document.querySelector('#analytics-tab-content .analytics-monitor');
+    const filter = monitor?.querySelector('.analytics-filter-toolbar');
+    const scroll = monitor?.querySelector('.analytics-table-scroll');
+    const table = scroll?.querySelector('table');
+    if (!monitor || !filter || !scroll || !table || monitor.querySelector('.analytics-list-toolbar')) return;
+    const exportButton = filter.querySelector('.analytics-export-button');
+    const separator = document.createElement('div');
+    separator.className = 'platform-section-gap';
+    const toolbar = document.createElement('div');
+    toolbar.className = 'analytics-list-toolbar flex items-center justify-end border-b border-gray-100 bg-white px-6 py-3';
+    toolbar.innerHTML = `<div class="ml-auto flex items-center gap-2"><div class="relative"><button type="button" class="analytics-column-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-[#4e5969] hover:bg-blue-50 hover:text-brand"><i class="fa-solid fa-table-columns"></i><span>字段配置</span></button><div class="analytics-column-panel hidden absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-xl"><div class="mb-2 flex items-center justify-between"><strong class="text-sm text-[#1d2129]">字段配置</strong><button type="button" class="analytics-column-reset text-xs text-brand hover:underline">恢复默认</button></div><div class="analytics-column-options max-h-72 overflow-auto"></div><div class="mt-3 flex justify-end gap-2 border-t border-gray-100 pt-3"><button type="button" class="analytics-column-cancel rounded-lg px-3 py-2 text-sm text-[#86909c] hover:bg-gray-50">取消</button><button type="button" class="analytics-column-apply rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white">应用</button></div></div></div><div class="analytics-list-actions flex items-center gap-2"></div></div>`;
+    monitor.insertBefore(separator, scroll);
+    monitor.insertBefore(toolbar, scroll);
+    if (exportButton) toolbar.querySelector('.analytics-list-actions').appendChild(exportButton);
+    this.applyAnalyticsColumnConfig(table);
+    const panel = toolbar.querySelector('.analytics-column-panel');
+    const options = toolbar.querySelector('.analytics-column-options');
+    const buildOptions = () => {
+      const headers = Array.from(table.querySelectorAll(':scope > thead > tr:first-child > th'));
+      let config = null;
+      try { config = JSON.parse(localStorage.getItem(this.getAnalyticsColumnConfigKey()) || 'null'); } catch (error) { config = null; }
+      const hidden = new Set(config?.hidden || []);
+      options.innerHTML = headers.map((header, index) => {
+        const required = (index === 0 && Boolean(header.querySelector('input'))) || header.textContent.trim().startsWith('操作');
+        return `<label draggable="${required ? 'false' : 'true'}" data-column-key="${header.dataset.columnKey}" class="${required ? 'hidden ' : ''}analytics-column-option flex cursor-grab items-center gap-2 rounded-lg px-1 py-2 hover:bg-gray-50"><i class="fa-solid fa-grip-vertical text-xs text-[#c9cdd4]"></i><input type="checkbox" class="rounded border-gray-300 text-brand" ${hidden.has(header.dataset.columnKey) ? '' : 'checked'}><span class="min-w-0 flex-1 truncate text-sm text-[#4e5969]">${this.escapeHtml(header.textContent.trim() || '选择')}</span></label>`;
+      }).join('');
+      let dragged = null;
+      options.querySelectorAll('.analytics-column-option').forEach(label => {
+        label.addEventListener('dragstart', () => { dragged = label; label.classList.add('opacity-50'); });
+        label.addEventListener('dragend', () => { label.classList.remove('opacity-50'); dragged = null; });
+        label.addEventListener('dragover', event => { event.preventDefault(); if (dragged && dragged !== label) options.insertBefore(dragged, label); });
+      });
+    };
+    toolbar.querySelector('.analytics-column-button').addEventListener('click', event => { event.stopPropagation(); buildOptions(); panel.classList.toggle('hidden'); });
+    panel.addEventListener('click', event => event.stopPropagation());
+    toolbar.querySelector('.analytics-column-cancel').addEventListener('click', () => panel.classList.add('hidden'));
+    toolbar.querySelector('.analytics-column-reset').addEventListener('click', () => { localStorage.removeItem(this.getAnalyticsColumnConfigKey()); this.refreshContent(); });
+    toolbar.querySelector('.analytics-column-apply').addEventListener('click', () => {
+      const headerKeys = Array.from(table.querySelectorAll(':scope > thead > tr:first-child > th')).map(header => header.dataset.columnKey);
+      const optionRows = Array.from(options.querySelectorAll('.analytics-column-option'));
+      const movable = optionRows.filter(row => !row.classList.contains('hidden')).map(row => row.dataset.columnKey);
+      const required = headerKeys.filter(key => !movable.includes(key));
+      const config = { order: [...movable, ...required], hidden: optionRows.filter(row => !row.classList.contains('hidden') && !row.querySelector('input').checked).map(row => row.dataset.columnKey) };
+      localStorage.setItem(this.getAnalyticsColumnConfigKey(), JSON.stringify(config));
+      this.applyAnalyticsColumnConfig(table, config);
+      panel.classList.add('hidden');
+    });
   },
 
   bindEvents() {
@@ -1167,6 +1240,7 @@ const AnalyticsView = {
   },
 
   bindActiveTabEvents() {
+    this.enhanceAnalyticsTableWorkspace();
     if (this.isMappingTab()) {
       this.bindStoreMappingEvents();
       return;
